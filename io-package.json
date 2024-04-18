@@ -55,7 +55,6 @@
         "zh-cn": "适配器完全重写。包括许多错误修正"
       }
     },
-    "title": "Homeconnect",
     "titleLang": {
       "en": "Homeconnect",
       "de": "Homeconnect",
@@ -90,14 +89,17 @@
       "siemens",
       "neff"
     ],
-    "license": "MIT",
+    "licenseInformation": {
+      "license": "MIT",
+      "type": "free"
+    },
     "platform": "Javascript/Node.js",
-    "main": "main.js",
     "icon": "homeconnect.png",
     "enabled": true,
     "extIcon": "https://raw.githubusercontent.com/iobroker-community-adapters/ioBroker.homeconnect/master/admin/homeconnect.png",
     "readme": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect/blob/master/README.md",
     "loglevel": "info",
+    "tier": 2,
     "mode": "daemon",
     "type": "household",
     "compact": true,
@@ -111,12 +113,12 @@
     },
     "dependencies": [
       {
-        "js-controller": ">=3.2.0"
+        "js-controller": ">=5.0.19"
       }
     ],
     "globalDependencies": [
       {
-        "admin": ">=4.0.9"
+        "admin": ">=6.13.16"
       }
     ]
   },
