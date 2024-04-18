@@ -1,11 +1,24 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "news": {
+      "1.4.0": {
+        "en": "Adapter requires node.js >= 18 and js-controller >= 5 now\nDependencies have been updated",
+        "de": "Adapter benötigt node.js >= 18 und js-controller >= 5 jetzt\nAbhängigkeiten wurden aktualisiert",
+        "ru": "Адаптер требует node.js >= 18 и js-контроллер >= 5 сейчас\nЗависимость обновлена",
+        "pt": "Adapter requer node.js >= 18 e js-controller >= 5 agora\nAs dependências foram atualizadas",
+        "nl": "Voor adaptor zijn node.js < 18 en js-controller > Nu 5\nAfhankelijkheden zijn bijgewerkt",
+        "fr": "L'adaptateur nécessite node.js >= 18 et js-controller >= 5 maintenant\nLes dépendances ont été actualisées",
+        "it": "Adattatore richiede node.js >= 18 e js-controller >= 5 ora\nLe dipendenze sono state aggiornate",
+        "es": "Adaptador requiere node.js √≥= 18 y js-controller 5 ahora\nSe han actualizado las dependencias",
+        "pl": "Adapter wymaga node.js > = 18 i kontroler js- > = 5 teraz\nZaktualizowano zależności",
+        "uk": "Адаптер вимагає node.js >= 18 і js-controller >= 5 тепер\nЗалежність було оновлено",
+        "zh-cn": "适配器需要节点.js QQ18和js控制器 QQ 现在5号\n依赖关系已更新"
+      },
       "1.3.0": {
-        "en": "fix login",
-        "de": "zurück zur übersicht",
+        "en": "login fixed",
+        "de": "Login gefixt",
         "ru": "исправить логин",
         "pt": "corrigir login",
         "nl": "vertaling:",
@@ -17,7 +30,7 @@
         "zh-cn": "fix 伐木"
       },
       "1.2.2": {
-        "en": "fix login",
+        "en": "login fixed",
         "de": "Login gefixt",
         "ru": "bump версия",
         "pt": "versão de choque",
@@ -41,18 +54,6 @@
       },
       "1.0.2": {
         "en": "Bugfixes"
-      },
-      "1.0.1": {
-        "en": "Adapter complete rewriten. Includes a lot of Bugfixes",
-        "de": "Adapter komplett neu geschrieben. Enthält viele Bugfixes",
-        "ru": "Адаптер полностью переписан. Включает множество исправлений",
-        "pt": "Adaptador completamente reescrito. Inclui muitas correções de bugs",
-        "nl": "Adapter compleet herschreven. Bevat veel bugfixes",
-        "fr": "Adaptateur entièrement réécrit. Inclut de nombreuses corrections de bugs",
-        "it": "Adattatore completo riscritto. Include molte correzioni di bug",
-        "es": "Adaptador completo reescrito. Incluye muchas correcciones de errores.",
-        "pl": "Adapter całkowicie przepisany. Zawiera wiele poprawek",
-        "zh-cn": "适配器完全重写。包括许多错误修正"
       }
     },
     "titleLang": {
