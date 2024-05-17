@@ -44,16 +44,55 @@
       },
       "1.2.1": {
         "de": "Fix auto login für SingleKey Benutzer",
-        "en": "Fix auto login for SingleKey User"
+        "en": "Fix auto login for SingleKey User",
+        "ru": "Исправлен автоматический вход для пользователя SingleKey.",
+        "pt": "Corrigir login automático para usuário SingleKey",
+        "nl": "Automatische login voor SingleKey-gebruiker repareren",
+        "fr": "Correction de la connexion automatique pour l'utilisateur SingleKey",
+        "it": "Correzione dell'accesso automatico per l'utente SingleKey",
+        "es": "Arreglar el inicio de sesión automático para usuarios de SingleKey",
+        "pl": "Napraw automatyczne logowanie dla użytkownika SingleKey",
+        "uk": "Виправити автоматичний вхід для користувача SingleKey",
+        "zh-cn": "修复 SingleKey 用户的自动登录"
       },
       "1.1.0": {
-        "en": "Add auto login for SingleKey User"
+        "en": "Add auto login for SingleKey User",
+        "de": "Automatische Anmeldung für SingleKey-Benutzer hinzufügen",
+        "ru": "Добавить автоматический вход для пользователя SingleKey",
+        "pt": "Adicionar login automático para usuário SingleKey",
+        "nl": "Voeg automatisch inloggen toe voor SingleKey User",
+        "fr": "Ajouter une connexion automatique pour l'utilisateur SingleKey",
+        "it": "Aggiungi l'accesso automatico per l'utente SingleKey",
+        "es": "Agregar inicio de sesión automático para usuarios de SingleKey",
+        "pl": "Dodaj automatyczne logowanie dla użytkownika SingleKey",
+        "uk": "Додайте автоматичний вхід для користувача SingleKey",
+        "zh-cn": "添加单键用户自动登录"
       },
       "1.0.3": {
-        "en": "Add manually login for SingleKey User"
+        "en": "Add manually login for SingleKey User",
+        "de": "Manuelle Anmeldung für SingleKey-Benutzer hinzufügen",
+        "ru": "Добавить ручной вход для пользователя SingleKey",
+        "pt": "Adicionar login manualmente para usuário SingleKey",
+        "nl": "Voeg handmatig inloggen toe voor SingleKey User",
+        "fr": "Ajouter manuellement une connexion pour l'utilisateur SingleKey",
+        "it": "Aggiungi l'accesso manuale per l'utente SingleKey",
+        "es": "Agregar inicio de sesión manual para usuario SingleKey",
+        "pl": "Dodaj ręczne logowanie dla użytkownika SingleKey",
+        "uk": "Додайте ручний вхід для користувача SingleKey",
+        "zh-cn": "添加单键用户手动登录"
       },
       "1.0.2": {
-        "en": "Bugfixes"
+        "en": "Bugfixes",
+        "de": "Fehlerbehebung",
+        "ru": "Исправление ошибок",
+        "pt": "Correções de bugs",
+        "nl": "Bugfixes",
+        "fr": "Corrections de bugs",
+        "it": "Correzioni di bug",
+        "es": "Corrección de errores",
+        "pl": "Poprawki błędów",
+        "uk": "Виправлення помилок",
+        "zh-cn": "Bug修复"
       }
     },
     "titleLang": {
@@ -66,7 +105,8 @@
       "it": "Connessione domestica",
       "es": "Conectar a casa",
       "pl": "Homeconnect",
-      "zh-cn": "家庭连接"
+      "zh-cn": "家庭连接",
+      "uk": "Homeconnect"
     },
     "desc": {
       "en": "Adapter for Homeconnect devices",
@@ -78,7 +118,8 @@
       "it": "Adattatore per dispositivi Homeconnect",
       "es": "Adaptador para dispositivos Homeconnect",
       "pl": "Adapter do urządzeń Homeconnect",
-      "zh-cn": "Homeconnect 设备的适配器"
+      "zh-cn": "Homeconnect 设备的适配器",
+      "uk": "Адаптер для пристроїв Homeconnect"
     },
     "authors": [
       "TA2k <tombox2020@gmail.com>"
