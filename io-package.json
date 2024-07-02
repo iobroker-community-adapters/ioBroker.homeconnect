@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "news": {
+      "1.4.1": {
+        "en": "fixed invalid min/max values",
+        "de": "ungültige min/max-werte",
+        "ru": "недействительными",
+        "pt": "valores fixos inválidos min/max",
+        "nl": "vaste ongeldige min/max waarden",
+        "fr": "valeurs fixes min/max non valides",
+        "it": "valori fissi non validi min/max",
+        "es": "valores fijos inválidos min/max",
+        "pl": "stałe nieprawidłowe wartości min / max",
+        "uk": "фіксовані недійсні значення min/max",
+        "zh-cn": "固定无效的分钟/最大值"
+      },
       "1.4.0": {
         "en": "Adapter requires node.js >= 18 and js-controller >= 5 now\nDependencies have been updated",
         "de": "Adapter benötigt node.js >= 18 und js-controller >= 5 jetzt\nAbhängigkeiten wurden aktualisiert",
@@ -80,19 +93,6 @@
         "pl": "Dodaj ręczne logowanie dla użytkownika SingleKey",
         "uk": "Додайте ручний вхід для користувача SingleKey",
         "zh-cn": "添加单键用户手动登录"
-      },
-      "1.0.2": {
-        "en": "Bugfixes",
-        "de": "Fehlerbehebung",
-        "ru": "Исправление ошибок",
-        "pt": "Correções de bugs",
-        "nl": "Bugfixes",
-        "fr": "Corrections de bugs",
-        "it": "Correzioni di bug",
-        "es": "Corrección de errores",
-        "pl": "Poprawki błędów",
-        "uk": "Виправлення помилок",
-        "zh-cn": "Bug修复"
       }
     },
     "titleLang": {

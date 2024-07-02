@@ -1,6 +1,6 @@
 {
   "name": "iobroker.homeconnect",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Adapter for Homeconnect devices",
   "author": {
     "name": "TA2k",
