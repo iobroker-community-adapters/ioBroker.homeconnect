@@ -499,10 +499,10 @@ class Homeconnect extends utils.Adapter {
               write: true,
               read: true,
             };
-            if (option.constraints && option.constraints.min && option.constraints.min != null) {
+            if (option.constraints && option.constraints.min && typeof option.constraints.min === 'number') {
               common.min = option.constraints.min;
             }
-            if (option.constraints && option.constraints.max && option.constraints.max != null) {
+            if (option.constraints && option.constraints.max && typeof option.constraints.max === 'number') {
               common.max = option.constraints.max;
             }
 
@@ -648,10 +648,10 @@ class Homeconnect extends utils.Adapter {
               unit: subElement.unit || '',
             };
 
-            if (subElement.constraints && subElement.constraints.min && subElement.constraints.min != null) {
+            if (subElement.constraints && subElement.constraints.min && typeof subElement.constraints.min === 'number') {
               common.min = subElement.constraints.min;
             }
-            if (subElement.constraints && subElement.constraints.max && subElement.constraints.max != null) {
+            if (subElement.constraints && subElement.constraints.max && typeof subElement.constraints.max === 'number') {
               common.max = subElement.constraints.max;
             }
             this.extendObjectAsync(haId + folder + '.' + subElement.key.replace(/\./g, '_'), {
