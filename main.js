@@ -665,7 +665,7 @@ class Homeconnect extends utils.Adapter {
             ) {
               common.max = subElement.constraints.max;
             }
-            this.extendObjectAsync(haId + folder + '.' + subElement.key.replace(/\./g, '_'), {
+            this.extendObject(haId + folder + '.' + subElement.key.replace(/\./g, '_'), {
               type: 'state',
               common: common,
               native: {},
@@ -673,13 +673,13 @@ class Homeconnect extends utils.Adapter {
               .then(() => {
                 if (subElement.value !== undefined) {
                   this.log.debug('Set api value');
-                  this.setStateAsync(
+                  this.setState(
                     haId + folder + '.' + subElement.key.replace(/\./g, '_'),
-                    subElement.value,
+                    JSON.stringify(subElement.value),
                     true,
                   ).catch((error) => {
                     this.log.error('failed set state ' + haId + folder + '.' + subElement.key.replace(/\./g, '_'));
-                    this.log.error("Value: '" + subElement.value + "'");
+                    this.log.error("Value: '" + JSON.stringify(subElement.value) + "'");
                     this.log.error(error);
                   });
                 }
