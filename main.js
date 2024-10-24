@@ -120,10 +120,13 @@ class Homeconnect extends utils.Adapter {
       // this.reconnectInterval = setInterval(async () => {
       //     this.startEventStream();
       // }, 60 * 60 * 1000); //every 60 minutes
-      this.refreshTokenInterval = setInterval(async () => {
-        await this.refreshToken();
-        this.startEventStream();
-      }, (this.session.expires_in - 200) * 1000);
+      this.refreshTokenInterval = setInterval(
+        async () => {
+          await this.refreshToken();
+          this.startEventStream();
+        },
+        (this.session.expires_in - 200) * 1000,
+      );
     }
   }
   async login() {
@@ -648,10 +651,18 @@ class Homeconnect extends utils.Adapter {
               unit: subElement.unit || '',
             };
 
-            if (subElement.constraints && subElement.constraints.min && typeof subElement.constraints.min === 'number') {
+            if (
+              subElement.constraints &&
+              subElement.constraints.min &&
+              typeof subElement.constraints.min === 'number'
+            ) {
               common.min = subElement.constraints.min;
             }
-            if (subElement.constraints && subElement.constraints.max && typeof subElement.constraints.max === 'number') {
+            if (
+              subElement.constraints &&
+              subElement.constraints.max &&
+              typeof subElement.constraints.max === 'number'
+            ) {
               common.max = subElement.constraints.max;
             }
             this.extendObjectAsync(haId + folder + '.' + subElement.key.replace(/\./g, '_'), {
@@ -872,6 +883,7 @@ class Homeconnect extends utils.Adapter {
       'KEEP-ALIVE',
       (e) => {
         this.resetReconnectTimeout();
+        this.log.debug(e);
       },
       false,
     );
@@ -890,6 +902,7 @@ class Homeconnect extends utils.Adapter {
     try {
       this.log.debug('event: ' + JSON.stringify(msg));
       const stream = msg;
+      //eslint-disable-next-line no-useless-escape
       const lastEventId = stream.lastEventId.replace(/\.?\-001*$/, '');
       if (!stream) {
         this.log.debug('No Return: ' + stream);
@@ -917,6 +930,7 @@ class Homeconnect extends utils.Adapter {
       const parseMessage = JSON.parse(parseMsg);
       parseMessage.items.forEach(async (element) => {
         let haId = parseMessage.haId;
+        //eslint-disable-next-line no-useless-escape
         haId = haId.replace(/\.?\-001*$/, '');
         let folder;
         let key;
@@ -988,9 +1002,12 @@ class Homeconnect extends utils.Adapter {
         this.log.error('Restart adapter in 20min');
         this.reconnectTimeout && clearInterval(this.reconnectTimeout);
         this.reLoginTimeout && clearTimeout(this.reLoginTimeout);
-        this.reLoginTimeout = setTimeout(async () => {
-          this.restart();
-        }, 1000 * 60 * 20);
+        this.reLoginTimeout = setTimeout(
+          async () => {
+            this.restart();
+          },
+          1000 * 60 * 20,
+        );
       });
   }
   extractHidden(body) {
@@ -1039,11 +1056,12 @@ class Homeconnect extends utils.Adapter {
         this.eventSourceState.removeEventListener('EVENT', (e) => this.processEvent(e), false);
         this.eventSourceState.removeEventListener('CONNECTED', (e) => this.processEvent(e), false);
         this.eventSourceState.removeEventListener('DISCONNECTED', (e) => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('KEEP-ALIVE', (e) => this.resetReconnectTimeout(), false);
+        this.eventSourceState.removeEventListener('KEEP-ALIVE', () => this.resetReconnectTimeout(), false);
       }
 
       callback();
     } catch (e) {
+      this.log.error('Error onUnload: ' + e);
       callback();
     }
   }
@@ -1149,6 +1167,7 @@ class Homeconnect extends utils.Adapter {
                       commandOption === 'BSH.Common.Option.FinishInRelative') &&
                     command === 'BSH.Common.Root.SelectedProgram'
                   ) {
+                    this.log.debug('Relative time cannot be changed here. Please use the specific program options.');
                   } else {
                     options.push({
                       key: commandOption,
@@ -1212,6 +1231,7 @@ class Homeconnect extends utils.Adapter {
         const idArray = id.split('.');
         const command = idArray.pop().replace(/_/g, '.');
         const haId = idArray[2];
+        this.log.debug('State changed: ' + id + ' ' + JSON.stringify(state) + ' ' + command);
         if (id.indexOf('BSH_Common_Root_') !== -1) {
           if (id.indexOf('Active') !== -1) {
             this.updateOptions(haId, '/programs/active');
