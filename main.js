@@ -662,7 +662,15 @@ class Homeconnect extends utils.Adapter {
               .then(() => {
                 if (subElement.value !== undefined) {
                   this.log.debug('Set api value');
-                  this.setState(haId + folder + '.' + subElement.key.replace(/\./g, '_'), subElement.value, true);
+                  this.setStateAsync(
+                    haId + folder + '.' + subElement.key.replace(/\./g, '_'),
+                    subElement.value,
+                    true,
+                  ).catch((error) => {
+                    this.log.error('failed set state ' + haId + folder + '.' + subElement.key.replace(/\./g, '_'));
+                    this.log.error("Value: '" + subElement.value + "'");
+                    this.log.error(error);
+                  });
                 }
               })
               .catch(() => {
