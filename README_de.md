@@ -26,69 +26,72 @@ For more details and for information how to disable the error reporting see [Sen
 
 ## Homeconnect Adapter for ioBroker
 
-## Requirements before installation
+## Voraussetzungen vor der Installation
 
-At least Node.js version 18 must be installed!
+Es muß mindestens Node.js Version 18 installiert sein!!
 
-A ClientID is required for the adapter. Use the settings for each step to register.
+Für den Adapter wird eine ClientID benötigt. Nutze die Einstellungen um jeden Schritt der Registrierung zu erreichen.
 
 <https://developer.home-connect.com>
 
 ![Screenshot](img/registrierung1.JPG)
 
-For **Default Home Connect User Account for Testing**, specify the e-mail address with which the Home Connect app is to be sent.
-was registered, this is also required later in the authorization process.
+Bei **Default Home Connect User Account for Testing** die E-Mail-Adresse angeben, mit der die Home-Connect-App
+registriert wurde, diese wird später auch beim Authorization-Prozess benötigt.
 
 ![Screenshot](img/registrierung2.JPG)
 
-For **Account Type** select Individual. Add the remaining data if available (no idea if this will be checked).
+Bei **Account Type** Individual auswählen. Die restlichen Daten sofern vorhanden ergänzen (keine Ahnung, ob das geprüft wird).
 
 ![Screenshot](img/application1.JPG)
 
-Then go to **Applications** and then to **Register Application**.
+Dann auf **Applications** und anschließend auf **Register Application** gehen.
 
 ![Screenshot](img/application2.JPG)
 
-For **Application ID** enter a name for the application, e.g. ioBroker. With **OAuth Flow** Device Flow select.
-**Home Connect User Account for Testing** can remain empty. For **Success Redirect** enter a URI, e.g. https://example.com.
-Then save and you have the required ClientID.
+Bei **Application ID** einen Namen für die Application eintragen, z.B. ioBroker. Bei **OAuth Flow** Device Flow selektieren.
+**Home Connect User Account for Testing** kann leer bleiben. Bei **Success Redirect** eine URI eintragen, z.B. https://example.com.
+Dann Speichern und dann hat man die benötigte ClientID.
 
-## Configuration
+## Konfiguration
 
-Please add Homeconnect App username, password and generated cleintId into adapter config.
+In der Adapter-Config muss der Homeconnect App Benutzername und Passwort und die erstellte ClientID eingetragen werden.
 
-## Usage
+## Benutzung
 
-With the states in commands you can stop, pause and resume a program.
-With the states in settings you can turn off or turn on the device
-Change the value of programs.active.BSH_Common_Root_ActiveProgram leads to starting a program
-Update iQ300: You need to set the program name in this variable. If programs.selected.BSH_Common_Root_SelectedProgram is copied, the machine user can predefine the wanted program at the machine and it will be started via ioBroker
-Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to selecting a program or options
+Mit den states in commands kannst du das Programm stoppen, pausieren oder fortführen.
+
+Mit den states in settings kannst du das Gerät ein oder ausschalten.
+
+Ändern des States programs.active.BSH_Common_Root_ActiveProgram führt zum starten eines Programms
+Update iQ300: Es muss das gewüschnte Programm eingetragen werden. Wenn man programs.selected.BSH_Common_Root_SelectedProgram ausliest und einträgt, hat der User die Möglichkeit am Gerät des gewünschte Programm auszuwählen, welches dann per ioBroker gestartet wird.
+
+Ändern des States programs.selected.BSH_Common_Root_SelectedProgram führt zum auswählen des Programms oder Optionen
+
+Wenn man checken möchte, ob ein Programm fertig ist muss
+
+status.BSH_Common_Status_OperationState
+
+auf den kompletten Status Name übrprüft werden:
+
+BSH.Common.EnumType.OperationState.Finished
+
+Weitere Zustände sind noch:
+
+"BSH.Common.EnumType.OperationState.Inactive": "Inactive",
+"BSH.Common.EnumType.OperationState.Ready": "Ready",
+"BSH.Common.EnumType.OperationState.Run": "Run",
+"BSH.Common.EnumType.OperationState.ActionRequired": "ActionRequired",
+"BSH.Common.EnumType.OperationState.Finished": "Finished"
+
+Oder ob ein Gerät geöffnet ist
+
+"BSH.Common.EnumType.DoorState.Open": "Open",
+"BSH.Common.EnumType.DoorState.Closed": "Closed"
 
 ## Changelog
 
-<!--
-    Placeholder for the next version (at the beginning of the line):
-    ### **WORK IN PROGRESS**
--->
-### 1.4.1 (2024-07-02)
-* (foxriver76) fixed invalid min/max values
-
-### 1.4.0 (2024-04-18)
-- (mcm1957) Adapter requires node.js >= 18 and js-controller >= 5 now
-- (mcm1957) Dependencies have been updated
-
-### 1.3.0 (2023-12-15)
-
-- fix login
-
-### 1.2.2 (2023-12-02)
-
-- bump version
-
-### 1.2.1 (2023-12-02)
-
-- bump version
+Der Changelog findet sich in der englischen README.md Datei.
 
 ## License
 
