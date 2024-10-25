@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.4.1",
+    "version": "1.4.2",
     "news": {
+      "1.4.2": {
+        "en": "fix for devices with object values",
+        "de": "Fix für Geräte mit Objektwerten",
+        "ru": "для устройств с значениями объектов",
+        "pt": "correção para dispositivos com valores de objeto",
+        "nl": "fix voor apparaten met objectwaarden",
+        "fr": "correction pour les appareils avec valeurs objet",
+        "it": "fix per dispositivi con valori oggetti",
+        "es": "fijado para dispositivos con valores de objeto",
+        "pl": "dla urządzeń o wartościach obiektowych",
+        "uk": "виправлення для пристроїв з значеннями об'єкта",
+        "zh-cn": "用于具有对象值的设备的固定"
+      },
       "1.4.1": {
         "en": "fixed invalid min/max values",
         "de": "ungültige min/max-werte",
@@ -80,19 +93,6 @@
         "pl": "Dodaj automatyczne logowanie dla użytkownika SingleKey",
         "uk": "Додайте автоматичний вхід для користувача SingleKey",
         "zh-cn": "添加单键用户自动登录"
-      },
-      "1.0.3": {
-        "en": "Add manually login for SingleKey User",
-        "de": "Manuelle Anmeldung für SingleKey-Benutzer hinzufügen",
-        "ru": "Добавить ручной вход для пользователя SingleKey",
-        "pt": "Adicionar login manualmente para usuário SingleKey",
-        "nl": "Voeg handmatig inloggen toe voor SingleKey User",
-        "fr": "Ajouter manuellement une connexion pour l'utilisateur SingleKey",
-        "it": "Aggiungi l'accesso manuale per l'utente SingleKey",
-        "es": "Agregar inicio de sesión manual para usuario SingleKey",
-        "pl": "Dodaj ręczne logowanie dla użytkownika SingleKey",
-        "uk": "Додайте ручний вхід для користувача SingleKey",
-        "zh-cn": "添加单键用户手动登录"
       }
     },
     "titleLang": {
@@ -121,16 +121,8 @@
       "zh-cn": "Homeconnect 设备的适配器",
       "uk": "Адаптер для пристроїв Homeconnect"
     },
-    "authors": [
-      "TA2k <tombox2020@gmail.com>"
-    ],
-    "keywords": [
-      "homeconnect",
-      "BSH",
-      "bosch",
-      "siemens",
-      "neff"
-    ],
+    "authors": ["TA2k <tombox2020@gmail.com>"],
+    "keywords": ["homeconnect", "BSH", "bosch", "siemens", "neff"],
     "licenseInformation": {
       "license": "MIT",
       "type": "free"
@@ -164,12 +156,8 @@
       }
     ]
   },
-  "encryptedNative": [
-    "password"
-  ],
-  "protectedNative": [
-    "password"
-  ],
+  "encryptedNative": ["password"],
+  "protectedNative": ["password"],
   "native": {
     "clientID": "",
     "username": "",
