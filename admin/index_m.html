@@ -21,6 +21,35 @@
         .m span {
             font-size: 0.9em;
         }
+
+        .m .page {
+            height: calc(100% - 50px);
+        }
+
+        /* Only for Firefox */
+        @supports (-moz-appearance: none) {
+            .m .page {
+                height: calc(100vh - 50px);
+            }
+        }
+
+        /* Style for small Screens */
+        @media screen and (max-width: 600px) {
+            .m .page {
+                height: calc(100% - 10px);
+            }
+
+            .breaks {
+                overflow-wrap: break-word;
+            }
+
+            /* Only for Firefox */
+            @supports (-moz-appearance: none) {
+                .m .page {
+                    height: calc(100vh - 20px);
+                }
+            }
+        }
     </style>
     <!-- you have to define 2 functions in the global scope: -->
     <script type="text/javascript">
@@ -106,7 +135,8 @@
                     <div class="col s12">Schritt #2: Registrieren der ioBroker App. <br>Application ID = ioBroker.
                         <br>OAuth
                         Flow = Device Flow. <br>Default Home Connect User Account for Testing = Deine E-Mail in der
-                        HomeConnect App.</div>
+                        HomeConnect App.
+                    </div>
                 </div>
 
                 <div class="row">
@@ -118,12 +148,13 @@
                 </div>
 
                 <div class="row">
-                    <div class="col s12">Schritt #3: App aktiviern<br>Hier Client ID einfügen. <br>Homeconnect App Email und Password eingeben <br>Speichern und
+                    <div class="col s12">Schritt #3: App aktiviern<br>Hier Client ID einfügen. <br>Homeconnect App Email
+                        und Password eingeben <br>Speichern und
                         schließen drücken</div>
                 </div>
                 <div class="row">
                     <div class="col s12">
-                        <input class="value" id="username"type="text"  />
+                        <input class="value" id="username" type="text" />
                         <label for="username" class="translate">App Email</label>
                     </div>
                 </div>
@@ -146,37 +177,38 @@
                         <label class="translate" for="resetAccess">Zugang/Token zurücksetzen </label>
 
                     </div>
-            
+
                 </div>
                 <div class="row">
                     <div class="col s6">
                         <input class="value" id="disableFetchConnect" type="checkbox" />
-                        <label class="translate" for="disableFetchConnect">Deaktiviere Programme holen bei bei Verbindungsaufbau (reduziert rate limit)</label>
+                        <label class="translate" for="disableFetchConnect">Deaktiviere Programme holen bei bei
+                            Verbindungsaufbau (reduziert rate limit)</label>
 
                     </div>
-                    </div>
+                </div>
                 <div class="row">
-                    <div class="col s12">
+                    <div class="col s12 breaks">
                         <p>
-                            <h5>Benutzung:</h5>
-                            <br> Mit den states in commands kannst du das Programm stoppen, pausiren oder fortführen.
-                            <br> Mit den states in settings kannst du das Gerät ein oder ausschalten.
-                            <br> Ändern des States programs.active.BSH_Common_Root_ActiveProgram führt zum starten eines
-                            Programms
-                            <br> Ändern des States programs.selected.BSH_Common_Root_SelectedProgram führt zum auswählen
-                            des
-                            Programms oder Optionen
+                        <h5>Benutzung:</h5>
+                        <br> Mit den states in commands kannst du das Programm stoppen, pausiren oder fortführen.
+                        <br> Mit den states in settings kannst du das Gerät ein oder ausschalten.
+                        <br> Ändern des States programs.active.BSH_Common_Root_ActiveProgram führt zum starten eines
+                        Programms
+                        <br> Ändern des States programs.selected.BSH_Common_Root_SelectedProgram führt zum auswählen
+                        des
+                        Programms oder Optionen
                         </p>
                         <p>
-                            <h5>Usage:</h5>
-                            <br> With the states in commands you can stop, pause and resume a program.
-                            <br> With the states in settings you can turn off or turn on the device
-                            <br> Change the value of programs.active.BSH_Common_Root_ActiveProgram leads to starting a
-                            program
+                        <h5>Usage:</h5>
+                        <br> With the states in commands you can stop, pause and resume a program.
+                        <br> With the states in settings you can turn off or turn on the device
+                        <br> Change the value of programs.active.BSH_Common_Root_ActiveProgram leads to starting a
+                        program
 
-                            <br> Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to
-                            selecting a
-                            program or options
+                        <br> Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to
+                        selecting a
+                        program or options
                         </p>
 
 
