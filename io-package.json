@@ -68,19 +68,6 @@
         "uk": "версія bump",
         "zh-cn": "b 倾销版本"
       },
-      "1.2.1": {
-        "de": "Fix auto login für SingleKey Benutzer",
-        "en": "Fix auto login for SingleKey User",
-        "ru": "Исправлен автоматический вход для пользователя SingleKey.",
-        "pt": "Corrigir login automático para usuário SingleKey",
-        "nl": "Automatische login voor SingleKey-gebruiker repareren",
-        "fr": "Correction de la connexion automatique pour l'utilisateur SingleKey",
-        "it": "Correzione dell'accesso automatico per l'utente SingleKey",
-        "es": "Arreglar el inicio de sesión automático para usuarios de SingleKey",
-        "pl": "Napraw automatyczne logowanie dla użytkownika SingleKey",
-        "uk": "Виправити автоматичний вхід для користувача SingleKey",
-        "zh-cn": "修复 SingleKey 用户的自动登录"
-      },
       "1.1.0": {
         "en": "Add auto login for SingleKey User",
         "de": "Automatische Anmeldung für SingleKey-Benutzer hinzufügen",
