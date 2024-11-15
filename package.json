@@ -17,6 +17,7 @@
   "homepage": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect",
   "license": "MIT",
   "keywords": [
+    "ioBroker",
     "homeconnect",
     "BSH",
     "bosch",
