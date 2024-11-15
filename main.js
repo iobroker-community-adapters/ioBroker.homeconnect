@@ -337,11 +337,12 @@ class Homeconnect extends utils.Adapter {
         this.log.debug(JSON.stringify(res.data));
         this.log.info(`Found ${res.data.data.homeappliances.length} devices`);
         for (const device of res.data.data.homeappliances) {
-          const haID = device.haId;
+          let haID = device.haId;
           if (!haID) {
             this.log.info('Invalid device ' + JSON.stringify(device));
             continue;
           }
+          haID = haID.replace(/\.?-001*$/, '');
           this.deviceArray.push(haID);
           const name = device.name;
 
