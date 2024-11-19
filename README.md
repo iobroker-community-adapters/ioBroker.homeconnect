@@ -74,12 +74,12 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 -->
 ### 1.4.3 (2024-11-19)
 
-- fix for -001 devices
+- (TA2k) fix for -001 devices
 - (simatec) Adapter has been adapted to meet Responsive Design rules.
 
 ### 1.4.2 (2024-10-25)
 
-- (ta2k) fix for devices with object values
+- (TA2k) fix for devices with object values
 
 ### 1.4.1 (2024-07-02)
 
