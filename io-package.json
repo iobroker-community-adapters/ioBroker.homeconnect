@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.4.2",
+    "version": "1.4.3",
     "news": {
+      "1.4.3": {
+        "en": "fix for -001 devices\nAdapter has been adapted to meet Responsive Design rules.",
+        "de": "fix für -001 Geräte\nAdapter wurde angepasst, um Responsive Design Regeln zu erfüllen.",
+        "ru": "для устройств -001\nАдаптер был адаптирован для соблюдения правил Responsive Design.",
+        "pt": "corrigir para -001 dispositivos\nAdapter foi adaptado para atender às regras de Design Responsável.",
+        "nl": "fix voor -001 apparaten\nAdapter is aangepast aan Responsive Design regels.",
+        "fr": "fixer pour les dispositifs -001\nAdaptateur a été adapté pour répondre aux règles de Design Responsive.",
+        "it": "fix per -001 dispositivi\nL'adattatore è stato adattato per soddisfare le regole di Responsive Design.",
+        "es": "fijado para -001 dispositivos\nAdaptador ha sido adaptado para cumplir con las reglas de diseño responsable.",
+        "pl": "fix dla -001 urządzeń\nAdapter został dostosowany do zasad Responsive Design.",
+        "uk": "кріплення для пристроїв -001\nПерехідник адаптований до дотримання норм відповідального дизайну.",
+        "zh-cn": "-001设备的固定装置\n适应器已经适应了反应设计规则."
+      },
       "1.4.2": {
         "en": "fix for devices with object values",
         "de": "Fix für Geräte mit Objektwerten",

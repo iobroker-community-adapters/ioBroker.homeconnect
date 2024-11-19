@@ -72,9 +72,11 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-### **WORK IN PROGRESS**
+### 1.4.3 (2024-11-19)
+
+- fix for -001 devices
 - (simatec) Adapter has been adapted to meet Responsive Design rules.
-  
+
 ### 1.4.2 (2024-10-25)
 
 - (ta2k) fix for devices with object values
@@ -91,10 +93,6 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 ### 1.3.0 (2023-12-15)
 
 - fix login
-
-### 1.2.2 (2023-12-02)
-
-- bump version
 
 ## License
 
