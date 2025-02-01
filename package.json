@@ -38,7 +38,7 @@
     "eventsource": "^2.0.2",
     "http-cookie-agent": "^6.0.8",
     "qs": "^6.13.1",
-    "tough-cookie": "^5.0.0"
+    "tough-cookie": "^5.1.0"
   },
   "devDependencies": {
     "@alcalzone/release-script": "^3.8.0",
