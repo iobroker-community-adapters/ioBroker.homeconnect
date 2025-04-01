@@ -52,7 +52,7 @@
     "@types/node": "^22.13.8",
     "eslint": "^9.21.0",
     "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.2.3",
+    "eslint-plugin-prettier": "^5.2.5",
     "globals": "^15.14.0",
     "prettier": "^3.5.2",
     "typescript": "~5.8.2"
