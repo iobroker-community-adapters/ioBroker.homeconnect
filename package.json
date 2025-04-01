@@ -54,7 +54,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.5",
     "globals": "^15.14.0",
-    "prettier": "^3.5.2",
+    "prettier": "^3.5.3",
     "typescript": "~5.8.2"
   },
   "main": "main.js",
