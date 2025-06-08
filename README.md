@@ -72,6 +72,10 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### **WORK IN PROGRESS**
+
+- (mcm1957) Adapter requires node.js >= 20 now
+
 ### 1.4.3 (2024-11-19)
 
 - (TA2k) fix for -001 devices
