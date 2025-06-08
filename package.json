@@ -36,7 +36,7 @@
     "axios": "^1.7.9",
     "axios-rate-limit": "^1.4.0",
     "eventsource": "^2.0.2",
-    "http-cookie-agent": "^6.0.8",
+    "http-cookie-agent": "^7.0.1",
     "qs": "^6.13.1",
     "tough-cookie": "^5.0.0"
   },
