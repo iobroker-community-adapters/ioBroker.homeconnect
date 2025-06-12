@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "Paramètres d'adaptateur pour homeconnect",
-    "option1": "Option 1",
-    "option2": "Option 2"
+    "homeconnect adapter settings": "Paramètres de l'adaptateur pour HomeConnect",
+    "step1": "Étape n ° 1: Inscrivez-vous pour l'ID client. <br> Compte d'utilisateur à domicile par défaut pour les tests = votre adresse e-mail dans l'application HomeConnect. <br> Type de compte = individu",
+    "step2": "Étape # 2: Enregistrez l'application iObroker. <br> ID d'application = iObroker. <br> Flow oAuth = flux de dispositif. <br> Compte d'utilisateur à domicile par défaut pour les tests = votre adresse e-mail dans l'application HomeConnect.",
+    "step3": "Étape # 3: Activez l'application <br> Entrez votre ID client ici. <br> Entrez votre e-mail et mot de passe de votre application HomeConnect. <br> Appuyez sur Enregistrer et fermer.",
+    "App Email": "E-mail de l'application",
+    "App Password": "Mot de passe de l'application",
+    "Client ID": "ID client",
+    "Language": "Langue",
+    "ResetAccess": "Réinitialiser l'accès / jeton",
+    "DisableFetchConnect": "Désactiver les programmes de récupération lors de la connexion (réduit la limite de taux)"
 }

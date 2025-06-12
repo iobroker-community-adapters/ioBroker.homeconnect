@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "Adapterinstellingen voor homeconnect",
-    "option1": "Optie 1",
-    "option2": "Optie 2"
+    "homeconnect adapter settings": "Adapterinstellingen voor Homeconnect",
+    "step1": "Stap #1: Meld u aan voor Client ID. <br> Standaard Home Connect Gebruikersaccount voor testen = Uw e -mailadres in de Homeconnect -app. <br> Accounttype = individu",
+    "step2": "Stap #2: Registreer de iobroker -app. <br> Application ID = IOBROKER. <br> oAuth flow = apparaatstroom. <br> Standaard Home Connect gebruikersaccount voor testen = Uw e -mailadres in de Homeconnect -app.",
+    "step3": "Stap #3: Activeer de app <br> Voer hier uw client -ID in. <br> Voer uw e -mail en wachtwoord van uw Homeconnect -app in. <br> Druk op Opslaan en sluiten.",
+    "App Email": "App -e -mail",
+    "App Password": "App -wachtwoord",
+    "Client ID": "Client -ID",
+    "Language": "Taal",
+    "ResetAccess": "Reset toegang/token",
+    "DisableFetchConnect": "Het ophalen van programma's uitschakelen bij het verbinden (verlaagt de snelheidslimiet)"
 }

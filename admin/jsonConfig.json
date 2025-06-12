@@ -1,0 +1,179 @@
+{
+    "i18n": true,
+    "type": "panel",
+    "items": {
+        "_headerAdapter": {
+            "type": "header",
+            "text": "Adapter settings for homeconnect",
+            "size": 2
+        },
+        "staticTextLogin": {
+            "type": "staticText",
+            "text": "step1",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 6,
+            "xl": 6
+        },
+        "staticLinkLogin": {
+            "type": "staticLink",
+            "href": "https://developer.home-connect.com/user/register",
+            "button": true,
+            "icon": "web",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4,
+            "style": {
+                "backgroundColor": "green"
+            }
+        },
+        "staticTextOAuth": {
+            "type": "staticText",
+            "text": "step2",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 6,
+            "xl": 6
+        },
+        "staticLinkOAuth": {
+            "type": "staticLink",
+            "href": "https://developer.home-connect.com/applications",
+            "button": true,
+            "icon": "auth",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4,
+            "style": {
+                "backgroundColor": "green"
+            }
+        },
+        "staticTextData": {
+            "type": "staticText",
+            "text": "step3",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 12,
+            "lg": 6,
+            "xl": 6
+        },
+        "username": {
+            "type": "text",
+            "label": "App Email",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "password": {
+            "type": "password",
+            "label": "App Password",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "clientID": {
+            "type": "text",
+            "label": "Client ID",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "language": {
+            "type": "select",
+            "label": "Language",
+            "newLine": true,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4,
+            "options": [
+                { "value": "cs-CZ", "label": "cs-CZ - Čeština (Česko)" },
+                { "value": "da-DK", "label": "da-DK - Dansk (Danmark)" },
+                { "value": "de-DE", "label": "de-DE - Deutsch (Deutschland)" },
+                { "value": "de-AT", "label": "de-AT - Deutsch (Österreich)" },
+                { "value": "de-CH", "label": "de-CH - Deutsch (Schweiz)" },
+                { "value": "de-LU", "label": "de-LU - Deutsch (Luxenburg)" },
+                { "value": "el-GR", "label": "el-GR - Ελληνικά (Ελλάδα)" },
+                { "value": "en-US", "label": "en-US - English (United States)" },
+                { "value": "en-GB", "label": "en-GB - English (United Kingdom)" },
+                { "value": "en-IN", "label": "en-IN - English (India)" },
+                { "value": "en-AU", "label": "en-AU - English (Australia)" },
+                { "value": "en-CA", "label": "en-CA - English (Canada)" },
+                { "value": "en-SG", "label": "en-SG - English (Singapore)" },
+                { "value": "en-ZA", "label": "en-ZA - English (South Africa)" },
+                { "value": "es-ES", "label": "es-ES - Español (Espana)" },
+                { "value": "es-CL", "label": "es-CL - Español (Chile)" },
+                { "value": "es-PE", "label": "es-PE - Español (Perú)" },
+                { "value": "fi-FI", "label": "fi-FI - Suomi (Suomi)" },
+                { "value": "fr-FR", "label": "fr-FR - Français (France)" },
+                { "value": "fr-CA", "label": "fr-CA - Français (Canada)" },
+                { "value": "fr-CH", "label": "fr-CH - Français (Suisse)" },
+                { "value": "fr-BE", "label": "fr-BE - Français (Belgique)" },
+                { "value": "fr-LU", "label": "fr-LU - Français (Luxembourg)" },
+                { "value": "hu-HU", "label": "hu-HU - Magyar (Magyarország)" },
+                { "value": "hr-HR", "label": "hr-HR - hrvatski (Hrvatska)" },
+                { "value": "it-IT", "label": "it-IT - Italiano (Italia)" },
+                { "value": "it-CH", "label": "it-CH - Italiano (Svizzera)" },
+                { "value": "nl-NL", "label": "nl-NL - Nederlands (Nederland)" },
+                { "value": "nl-BE", "label": "nl-BE - Nederlands (België)" },
+                { "value": "nb-NO", "label": "nb-NO - Norsk (Norge)" },
+                { "value": "pl-PL", "label": "pl-PL - Polski (Polska)" },
+                { "value": "pt-PT", "label": "pt-PT - Português (Portugal)" },
+                { "value": "ru-RU", "label": "ru-RU - Pусский (Россия)" },
+                { "value": "ro-RO", "label": "ro-RO - Română (România)" },
+                { "value": "sk-SK", "label": "sk-SK - Slovenčina (Slovensko)" },
+                { "value": "sl-SI", "label": "sl-SI - slovenščina (Slovenija)" },
+                { "value": "sv-SE", "label": "sv-SE - Svenska (Sverige)" },
+                { "value": "sr-SR", "label": "sr-SR - Србија Srbija (српски језик)" },
+                { "value": "tr-TR", "label": "tr-TR - Türkçe (Türkiye)" },
+                { "value": "uk-UA", "label": "uk-UA - українська (Україна)" },
+                { "value": "zh-CN", "label": "zh-CN - 中文 (简体)" },
+                { "value": "zh-HK", "label": "zh-HK - 中文（香港" },
+                { "value": "zh-TW", "label": "zh-TW - 中文 (繁體)" }
+            ],
+            "default": "de-DE"
+        },
+        "resetAccess": {
+            "type": "checkbox",
+            "label": "ResetAccess",
+            "newLine": true,
+            "default": false,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        },
+        "disableFetchConnect": {
+            "type": "checkbox",
+            "label": "DisableFetchConnect",
+            "newLine": true,
+            "default": false,
+            "xs": 12,
+            "sm": 12,
+            "md": 6,
+            "lg": 4,
+            "xl": 4
+        }
+    }
+}

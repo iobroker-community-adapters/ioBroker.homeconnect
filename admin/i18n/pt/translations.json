@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "Configurações do adaptador para homeconnect",
-    "option1": "Opção 1",
-    "option2": "opção 2"
+    "homeconnect adapter settings": "Configurações do adaptador para Homeconnect",
+    "step1": "Etapa 1: Inscreva -se para o ID do cliente. <br> Tipo de conta = individual",
+    "step2": "Etapa 2: registre o aplicativo iobroker. <br> ID do aplicativo = iobroker. <br> oauth fluxo = fluxo do dispositivo. <br> Conta de usuário padrão de conexão com o teste = seu endereço de e -mail no aplicativo HomeConnect.",
+    "step3": "Etapa 3: Ative o aplicativo <br> Digite seu ID do cliente aqui. <br> Digite o email e a senha do aplicativo HomeConnect. <br> Pressione Salvar e fechar.",
+    "App Email": "Email de aplicativo",
+    "App Password": "Senha do aplicativo",
+    "Client ID": "ID do cliente",
+    "Language": "Linguagem",
+    "ResetAccess": "Redefinir acesso/token",
+    "DisableFetchConnect": "Desativar programas de busca ao conectar (reduz o limite da taxa)"
 }

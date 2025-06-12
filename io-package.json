@@ -121,8 +121,16 @@
       "zh-cn": "Homeconnect 设备的适配器",
       "uk": "Адаптер для пристроїв Homeconnect"
     },
-    "authors": ["TA2k <tombox2020@gmail.com>"],
-    "keywords": ["homeconnect", "BSH", "bosch", "siemens", "neff"],
+    "authors": [
+      "TA2k <tombox2020@gmail.com>"
+    ],
+    "keywords": [
+      "homeconnect",
+      "BSH",
+      "bosch",
+      "siemens",
+      "neff"
+    ],
     "licenseInformation": {
       "license": "MIT",
       "type": "free"
@@ -139,7 +147,9 @@
     "compact": true,
     "connectionType": "cloud",
     "dataSource": "push",
-    "materialize": true,
+    "adminUI": {
+      "config": "json"
+    },
     "plugins": {
       "sentry": {
         "dsn": "https://0d0cad2f2cc44d5e889a2bd7ee0fcc42@sentry.iobroker.net/65"
@@ -156,8 +166,12 @@
       }
     ]
   },
-  "encryptedNative": ["password"],
-  "protectedNative": ["password"],
+  "encryptedNative": [
+    "password"
+  ],
+  "protectedNative": [
+    "password"
+  ],
   "native": {
     "clientID": "",
     "username": "",

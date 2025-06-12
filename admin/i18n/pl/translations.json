@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "Ustawienia adaptera dla homeconnect",
-    "option1": "opcja 1",
-    "option2": "Opcja 2"
+    "homeconnect adapter settings": "Ustawienia adaptera dla HomeConnect",
+    "step1": "Krok #1: Zarejestruj się, aby uzyskać identyfikator klienta. <br> Domyślne konto użytkownika Home Connect do testowania = Twój adres e -mail w aplikacji HomeConnect. <br> typ konta = indywidualny",
+    "step2": "Krok 2: Zarejestruj aplikację IOBRoker. <br> ID aplikacji = IOBRoker. <br> OAuth Flow = przepływ urządzenia. <br> Domyślne konto użytkownika Home Connect dla testowania = Twój adres e -mail w aplikacji HomeConnect.",
+    "step3": "Krok #3: Aktywuj aplikację <br> Wprowadź identyfikator klienta tutaj. <br> Wprowadź e -mail i hasło aplikacji HomeConnect. <br> Naciśnij Zapisz i zamknij.",
+    "App Email": "E -mail z aplikacją",
+    "App Password": "Hasło aplikacji",
+    "Client ID": "Identyfikator klienta",
+    "Language": "Język",
+    "ResetAccess": "Zresetuj dostęp/token",
+    "DisableFetchConnect": "Wyłącz programy pobierania podczas łączenia (zmniejsza limit szybkości)"
 }

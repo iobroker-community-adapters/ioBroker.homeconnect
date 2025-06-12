@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "Ajustes del adaptador para homeconnect",
-    "option1": "Opción 1",
-    "option2": "opcion 2"
+    "homeconnect adapter settings": "Configuración del adaptador para Homeconnect",
+    "step1": "Paso #1: Regístrese en la ID del cliente. <BR> Cuenta de usuario de conexión inicio predeterminada para las pruebas = su dirección de correo electrónico en la aplicación HomeConnect. <br> tipo de cuenta = individual",
+    "step2": "Paso #2: Registre la aplicación Iobroker. <br> ID de aplicación = ioBroker. <br> oauth flujo = flujo del dispositivo. <BR> Cuenta de usuario predeterminada de Home Connect para pruebas = su dirección de correo electrónico en la aplicación HomeConnect.",
+    "step3": "Paso #3: Active la aplicación <br> Ingrese su ID de cliente aquí. <br> Ingrese el correo electrónico y la contraseña de su aplicación Homeconnect. <br> Presione Guardar y cerrar.",
+    "App Email": "Correo electrónico de la aplicación",
+    "App Password": "Contraseña de la aplicación",
+    "Client ID": "ID de cliente",
+    "Language": "Idioma",
+    "ResetAccess": "Restablecer acceso/token",
+    "DisableFetchConnect": "Deshabilitar programas de obtención al conectarse (reduce el límite de velocidad)"
 }

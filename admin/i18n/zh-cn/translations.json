@@ -1,5 +1,12 @@
 {
-    "homeconnect adapter settings": "homeconnect的适配器设置",
-    "option1": "选项1",
-    "option2": "选项2"
+    "homeconnect adapter settings": "HomeConnect的适配器设置",
+    "step1": "步骤＃1：注册客户端ID。<br>默认的HOME连接用户帐户用于testing =您的HomeConnect应用中的电子邮件地址。 <br>帐户类型=个人",
+    "step2": "步骤＃2：注册IOBROKER应用程序。 <br>应用程序ID = IOBROKR。 <br> oauth flow =设备流。 <br>默认的HOME连接用户帐户用于testing =您的HomeConnect应用中的电子邮件地址。",
+    "step3": "步骤＃3：激活应用程序<br>在此处输入您的客户端ID。 <br>输入您的HomeConnect应用电子邮件和密码。 <br>按保存并关闭。",
+    "App Email": "应用电子邮件",
+    "App Password": "应用程序密码",
+    "Client ID": "客户ID",
+    "Language": "语言",
+    "ResetAccess": "重置访问/令牌",
+    "DisableFetchConnect": "连接时禁用提取程序（降低速率限制）"
 }
