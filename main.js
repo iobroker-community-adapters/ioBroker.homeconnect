@@ -366,11 +366,11 @@ class Homeconnect extends utils.Adapter {
     //this.getAPIValues(haId, '/images');
     this.getAPIValues(haId, '/status');
     this.getAPIValues(haId, '/settings');
-    if (this.isPrograms(haId)) {
+    if (!this.isPrograms(haId)) {
       this.getAPIValues(haId, '/programs/active');
       this.getAPIValues(haId, '/programs/selected');
     }
-    if (!this.fetchedDevice[haId] && this.isPrograms(haId)) {
+    if (!this.fetchedDevice[haId] && !this.isPrograms(haId)) {
       this.fetchedDevice[haId] = true;
       this.getAPIValues(haId, '/programs');
       this.updateOptions(haId, '/programs/active');
@@ -428,7 +428,7 @@ class Homeconnect extends utils.Adapter {
           role: role,
           write: true,
           read: true,
-          default: defaults,
+          def: defaults,
         };
         if (returnValue.data.constraints && returnValue.data.constraints.allowedvalues) {
           const states = {};
@@ -471,14 +471,14 @@ class Homeconnect extends utils.Adapter {
               role: role,
               write: true,
               read: true,
-              default: defaults,
+              def: defaults,
             };
             if (option.unit && option.unit != '') {
               common.unit = option.unit;
             }
             if (option.constraints && option.constraints.min != null && typeof option.constraints.min === 'number') {
               common.min = option.constraints.min;
-              common.default = option.constraints.min;
+              common.def = option.constraints.min;
             }
             if (option.constraints && option.constraints.max != null && typeof option.constraints.max === 'number') {
               common.max = option.constraints.max;
@@ -615,7 +615,7 @@ class Homeconnect extends utils.Adapter {
               role: role,
               write: true,
               read: true,
-              default: defaults,
+              def: defaults,
             };
             if (subElement.unit && subElement.unit != '') {
               common.unit = subElement.unit;
@@ -626,7 +626,7 @@ class Homeconnect extends utils.Adapter {
               typeof subElement.constraints.min === 'number'
             ) {
               common.min = subElement.constraints.min;
-              common.default = subElement.constraints.min;
+              common.def = subElement.constraints.min;
             }
             if (
               subElement.constraints &&
@@ -881,8 +881,8 @@ class Homeconnect extends utils.Adapter {
 
   async processEvent(msg) {
     try {
-      // data -> constructor
       this.log.debug(`event: ${JSON.stringify(msg.data)}`);
+      this.log.debug(`eventType: ${JSON.stringify(msg.type)}`);
       this.log.debug(`lastEventId: ${msg.lastEventId}`);
       const stream = msg;
       //eslint-disable-next-line no-useless-escape
