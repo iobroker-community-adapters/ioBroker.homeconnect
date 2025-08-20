@@ -37,20 +37,20 @@ A ClientID is required for the adapter. Use the settings for each step to regist
 
 <https://developer.home-connect.com>
 
-![Screenshot](img/registrierung1.JPG)
+![Screenshot](docs/en/img/registrierung1.JPG)
 
 For **Default Home Connect User Account for Testing**, specify the e-mail address with which the Home Connect app is to be sent.
 was registered, this is also required later in the authorization process.
 
-![Screenshot](img/registrierung2.JPG)
+![Screenshot](docs/en/img/registrierung2.JPG)
 
 For **Account Type** select Individual. Add the remaining data if available (no idea if this will be checked).
 
-![Screenshot](img/application1.JPG)
+![Screenshot](docs/en/img/application1.JPG)
 
 Then go to **Applications** and then to **Register Application**.
 
-![Screenshot](img/application2.JPG)
+![Screenshot](docs/en/img/application2.JPG)
 
 For **Application ID** enter a name for the application, e.g. ioBroker. With **OAuth Flow** Device Flow select.
 **Home Connect User Account for Testing** can remain empty. For **Success Redirect** enter a URI, e.g. https://example.com.

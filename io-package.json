@@ -178,7 +178,19 @@
       "_id": "auth",
       "type": "channel",
       "common": {
-        "name": "Auth Information"
+        "name": {
+          "en": "Auth Information",
+          "de": "Authentifizierungsinformationen",
+          "ru": "Информация об аутентификации",
+          "pt": "Informações de autorização",
+          "nl": "Autorisatie-informatie",
+          "fr": "Informations d'autorisation",
+          "it": "Informazioni di autorizzazione",
+          "es": "Información de autorización",
+          "pl": "Informacje o uwierzytelnianiu",
+          "uk": "Інформація для авторизації",
+          "zh-cn": "授权信息"
+        }
       },
       "native": {}
     },
@@ -187,7 +199,19 @@
       "type": "state",
       "common": {
         "role": "json",
-        "name": "Session state",
+        "name": {
+          "en": "Session state",
+          "de": "Sitzungsstatus",
+          "ru": "Состояние сеанса",
+          "pt": "Estado da sessão",
+          "nl": "Sessiestatus",
+          "fr": "État de la session",
+          "it": "Stato della sessione",
+          "es": "Estado de la sesión",
+          "pl": "Stan sesji",
+          "uk": "Стан сеансу",
+          "zh-cn": "会话状态"
+        },
         "type": "string",
         "read": true,
         "write": false
@@ -198,7 +222,19 @@
       "_id": "info",
       "type": "channel",
       "common": {
-        "name": "Information"
+        "name": {
+          "en": "Information",
+          "de": "Informationen",
+          "ru": "Информация",
+          "pt": "Informação",
+          "nl": "Informatie",
+          "fr": "Information",
+          "it": "Informazioni",
+          "es": "Información",
+          "pl": "Informacja",
+          "uk": "Інформація",
+          "zh-cn": "信息"
+        }
       },
       "native": {}
     },
@@ -207,7 +243,19 @@
       "type": "state",
       "common": {
         "role": "indicator.connected",
-        "name": "Device or service connected",
+        "name": {
+          "en": "Device or service connected",
+          "de": "Geräte- oder Serviceverbindung",
+          "ru": "Устройство или сервис подключены",
+          "pt": "Dispositivo ou serviço conectado",
+          "nl": "Device of dienst verbonden",
+          "fr": "Appareil ou service connecté",
+          "it": "Dispositivo o servizio collegato",
+          "es": "Dispositivo o servicio conectado",
+          "pl": "Urządzenie lub usługa połączona",
+          "uk": "Пристрої або послуги підключені",
+          "zh-cn": "证人或有关服务"
+        },
         "type": "boolean",
         "read": true,
         "write": false,

@@ -10,6 +10,8 @@ const utils = require('@iobroker/adapter-core');
 const axios = require('axios');
 const axiosRateLimit = require('axios-rate-limit');
 const helper = require('./lib/helper');
+const limiting = require('./lib/rateLimiting');
+const constants = require('./lib/constants');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
 const tough = require('tough-cookie');
@@ -30,6 +32,12 @@ class Homeconnect extends utils.Adapter {
     this.createDevices = helper.createDevices;
     this.createObjects = helper.createObjects;
     this.createFolders = helper.createFolders;
+    this.createLimit = limiting.createLimit;
+    this.getRateLimit = limiting.getRateLimit;
+    this.checkToken = limiting.checkToken;
+    this.checkBlock = limiting.checkBlock;
+    this.setLimitCounter = limiting.setLimitCounter;
+    this.checkLimitCounter = limiting.checkLimitCounter;
     this.userAgent = 'ioBroker v1.0.0';
     this.headers = {
       'user-agent': this.userAgent,
@@ -50,6 +58,22 @@ class Homeconnect extends utils.Adapter {
     this.eventSourceState;
     this.currentSelected = {};
     this.sleepTimer = null;
+    this.rateLimiting = {};
+    this.tokenRateLimiting = {};
+    this.rateLimitingInterval = null;
+    this.cookieJar = new tough.CookieJar();
+    // @ts-expect-error //Nothing
+    this.requestClient = axiosRateLimit(
+      axios.create({
+        withCredentials: true,
+        httpsAgent: new HttpsCookieAgent({
+          cookies: {
+            jar: this.cookieJar,
+          },
+        }),
+      }),
+      { maxRequests: 15, perMilliseconds: 1000 },
+    );
   }
 
   /**
@@ -72,19 +96,8 @@ class Homeconnect extends utils.Adapter {
       });
       return;
     }
-    this.cookieJar = new tough.CookieJar();
-    // @ts-expect-error //Nothing
-    this.requestClient = axiosRateLimit(
-      axios.create({
-        withCredentials: true,
-        httpsAgent: new HttpsCookieAgent({
-          cookies: {
-            jar: this.cookieJar,
-          },
-        }),
-      }),
-      { maxRequests: 45, perMilliseconds: 60000 },
-    );
+    await this.createLimit();
+    await this.getRateLimit(constants);
     this.session = {};
     this.subscribeStates('*');
     const sessionState = await this.getStateAsync('auth.session');
@@ -129,6 +142,12 @@ class Homeconnect extends utils.Adapter {
         (this.session.expires_in - 200) * 1000,
       );
     }
+    this.setLimitInterval();
+  }
+  setLimitInterval() {
+    this.rateLimitingInterval = this.setInterval(async () => {
+      await this.checkLimitCounter();
+    }, 60 * 1000);
   }
   async login() {
     let loginUrl = '';
@@ -146,9 +165,9 @@ class Homeconnect extends utils.Adapter {
         return res.data;
       })
       .catch(error => {
-        this.log.error(error);
+        this.log.error(`login: ${error}`);
         if (error.response) {
-          this.log.error(JSON.stringify(error.response.data));
+          this.log.error(`login: ${JSON.stringify(error.response.data)}`);
           if (error.response.data.error === 'unauthorized_client') {
             this.log.error('Please check your clientID or wait 15 minutes until it is active');
           }
@@ -207,9 +226,9 @@ class Homeconnect extends utils.Adapter {
               return this.extractHidden(res.data);
             })
             .catch(error => {
-              this.log.error(error);
+              this.log.error(`device login2: ${error}`);
               if (error.response) {
-                this.log.error(JSON.stringify(error.response.data));
+                this.log.error(`device login2: ${JSON.stringify(error.response.data)}`);
               }
             });
           const loginParams = qs.parse(loginUrl.split('?')[1]);
@@ -251,8 +270,8 @@ class Homeconnect extends utils.Adapter {
               return res.data;
             })
             .catch(error => {
-              this.log.error(error);
-              error.response && this.log.error(JSON.stringify(error.response.data));
+              this.log.error(`Password: ${error}`);
+              error.response && this.log.error(`Password: ${JSON.stringify(error.response.data)}`);
             });
         }
         this.log.info('Login details submitted');
@@ -282,7 +301,7 @@ class Homeconnect extends utils.Adapter {
       .catch(error => {
         this.log.error(error);
         if (error.response) {
-          this.log.error(JSON.stringify(error.response.data));
+          this.log.error(`Grand: ${JSON.stringify(error.response.data)}`);
         }
       });
 
@@ -320,6 +339,14 @@ class Homeconnect extends utils.Adapter {
           //   this.log.error(error);
           if (error.response) {
             this.log.error(JSON.stringify(error.response.data));
+            if (error.response.status === 429) {
+              this.log.info('The maximum number of requests has been reached!');
+              if (error.response.headers) {
+                if (error.response.headers['retry-after']) {
+                  this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+                }
+              }
+            }
           }
 
           this.log.info('Wait 10 seconds to retry');
@@ -357,7 +384,17 @@ class Homeconnect extends utils.Adapter {
       })
       .catch(error => {
         this.log.error(`getDeviceList: ${error}`);
-        error.response && this.log.error(JSON.stringify(error.response.data));
+        if (error.response) {
+          this.log.error(JSON.stringify(error.response.data));
+          if (error.response.status === 429) {
+            this.log.info('The maximum number of requests has been reached!');
+            if (error.response.headers) {
+              if (error.response.headers['retry-after']) {
+                this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+              }
+            }
+          }
+        }
       });
   }
 
@@ -378,6 +415,10 @@ class Homeconnect extends utils.Adapter {
     }
   }
   async getAPIValues(haId, url) {
+    if (!(await this.checkBlock())) {
+      return;
+    }
+    await this.setLimitCounter('OK', haId, 'NOK', url, 'GET');
     await this.sleep(Math.floor(Math.random() * 1500));
     const header = Object.assign({}, this.headers);
     header['Accept-Language'] = this.config.language;
@@ -392,6 +433,15 @@ class Homeconnect extends utils.Adapter {
       })
       .catch(error => {
         if (error.response) {
+          this.log.error(`Homeappliances device: ${JSON.stringify(error.response.data)}`);
+          if (error.response.status === 429) {
+            this.log.info('The maximum number of requests has been reached!');
+            if (error.response.headers) {
+              if (error.response.headers['retry-after']) {
+                this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+              }
+            }
+          }
           const description = error.response.data.error ? error.response.data.error.description : '';
           this.log.info(`${haId}${url}: ${description}.`);
           this.log.debug(`Homeappliances device: ${JSON.stringify(error.response.data)}`);
@@ -744,6 +794,18 @@ class Homeconnect extends utils.Adapter {
   }
   async putAPIValues(haId, url, data) {
     this.log.debug(`Put ${JSON.stringify(data)} to ${url} for ${haId}`);
+    if (!(await this.checkBlock())) {
+      return;
+    }
+    let start = 'NOK';
+    if (data && data.data && data.data.key) {
+      if (data.key.indexOf('StopProgram') !== -1) {
+        start = 'Stop';
+      } else if (data.key.indexOf('Root_ActiveProgram') !== -1 || data.key.indexOf('StartInRelative') !== -1) {
+        start = 'Stop';
+      }
+    }
+    await this.setLimitCounter('OK', haId, start, url, 'PUT');
     await this.requestClient({
       method: 'PUT',
       url: `https://api.home-connect.com/api/homeappliances/${haId}${url}`,
@@ -755,7 +817,8 @@ class Homeconnect extends utils.Adapter {
         return res.data;
       })
       .catch(error => {
-        this.log.error(error);
+        this.setLimitCounter('ERR', haId, start, null, null);
+        this.log.error(`Put: ${error}`);
         if (error.response) {
           if (error.response.headers && error.response.headers['rate-limit-type'] === 'start') {
             this.log.error(JSON.stringify(error.response.headers));
@@ -776,6 +839,10 @@ class Homeconnect extends utils.Adapter {
   }
 
   async deleteAPIValues(haId, url) {
+    if (!(await this.checkBlock())) {
+      return;
+    }
+    await this.setLimitCounter('OK', haId, 'Stop', url, 'DELETE');
     await this.requestClient({
       method: 'DELETE',
       url: `https://api.home-connect.com/api/homeappliances/${haId}${url}`,
@@ -786,8 +853,17 @@ class Homeconnect extends utils.Adapter {
         return res.data;
       })
       .catch(error => {
-        this.log.error(error);
+        this.setLimitCounter('ERR', haId, 'NOK', null, null);
+        this.log.error(`deleteAPIValues: ${error}`);
         if (error.response) {
+          if (error.response.status === 429) {
+            this.log.info('The maximum number of requests has been reached!');
+            if (error.response.headers) {
+              if (error.response.headers['retry-after']) {
+                this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+              }
+            }
+          }
           if (error.response.status === 403) {
             this.log.info('Homeconnect API has not the rights for this command and device');
           }
@@ -963,6 +1039,9 @@ class Homeconnect extends utils.Adapter {
       await this.login();
       return;
     }
+    if (!this.checkToken(false)) {
+      return;
+    }
     this.log.debug('Refresh Token');
     await this.requestClient({
       method: 'post',
@@ -982,9 +1061,19 @@ class Homeconnect extends utils.Adapter {
         this.setState('auth.session', { val: JSON.stringify(this.session), ack: true });
       })
       .catch(error => {
+        if (error.response) {
+          this.log.error(JSON.stringify(error.response.data));
+          if (error.response.status === 429) {
+            this.log.info('The maximum number of requests has been reached!');
+            if (error.response.headers) {
+              if (error.response.headers['retry-after']) {
+                this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+              }
+            }
+          }
+        }
         this.log.error('refresh token failed');
         this.log.error(error);
-        error.response && this.log.error(JSON.stringify(error.response.data));
         this.log.error('Restart adapter in 20min');
         this.reconnectTimeout && this.clearInterval(this.reconnectTimeout);
         this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
@@ -1037,6 +1126,7 @@ class Homeconnect extends utils.Adapter {
       this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
       //this.reconnectInterval && this.clearInterval(this.reconnectInterval);
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+      this.rateLimitingInterval && this.clearInterval(this.rateLimitingInterval);
       this.sleepTimer && this.clearTimeout(this.sleepTimer);
       if (this.eventSourceState) {
         this.eventSourceState.close();
@@ -1282,6 +1372,49 @@ class Homeconnect extends utils.Adapter {
         }
       }
     }
+  }
+  convertRetryAfter(inputSeconds) {
+    try {
+      const days = Math.floor(inputSeconds / (60 * 60 * 24));
+      const hours = Math.floor((inputSeconds % (60 * 60 * 24)) / (60 * 60));
+      const minutes = Math.floor(((inputSeconds % (60 * 60 * 24)) % (60 * 60)) / 60);
+      const seconds = Math.floor(((inputSeconds % (60 * 60 * 24)) % (60 * 60)) % 60);
+      let day = '';
+      if (days > 0) {
+        day = `${days}d - `;
+      }
+      return (
+        day +
+        [hours, minutes, seconds]
+          .map(v => (v < 10 ? `0${v}` : v))
+          .filter((v, i) => v !== '00' || i > 0)
+          .join(':')
+      );
+    } catch {
+      return 0;
+    }
+  }
+  getWeek(timestamp) {
+    const target = timestamp ? new Date(timestamp) : new Date();
+    const getDay = target.getDay();
+    const dayNr = (target.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    const jan4 = new Date(target.getFullYear(), 0, 4);
+    const dayDiff = (target.getTime() - jan4.getTime()) / 86400000;
+    if (new Date(target.getFullYear(), 0, 1).getDay() < 5) {
+      return `${1 + Math.ceil(dayDiff / 7)}-${getDay}`;
+    }
+    return `${Math.ceil(dayDiff / 7)}-${getDay}`;
+  }
+  async setTokenJson(block, reason) {
+    await this.setState(`rateTokenLimit.limitJson`, { val: JSON.stringify(this.tokenRateLimiting), ack: true });
+    await this.setState(`rateTokenLimit.isBlocked`, { val: block, ack: true });
+    await this.setState(`rateTokenLimit.reason`, { val: reason, ack: true });
+  }
+  async setLimitJson(block, reason) {
+    await this.setState(`rateLimit.limitJson`, { val: JSON.stringify(this.rateLimiting), ack: true });
+    await this.setState(`rateLimit.isBlocked`, { val: block, ack: true });
+    await this.setState(`rateLimit.reason`, { val: reason, ack: true });
   }
   /**
    * Is program for your type available
