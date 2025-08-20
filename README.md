@@ -31,7 +31,7 @@ For more details and for information how to disable the error reporting see [Sen
 
 - Node 20, 22 or 24
 - JS-Controller >= 6.0.11
-- Admin >= 7.4.10
+- Admin >= 7.6.17
 
 A ClientID is required for the adapter. Use the settings for each step to register.
 
@@ -87,11 +87,12 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 ### **WORK IN PROGRESS**
 
 - (Lucky-ESA) Clean up state roles and code
+- (Lucky-ESA) Added rate limiting
 - (Lucky-ESA) Dependencies updated
 - (Lucky-ESA) Added language selection
 - (Lucky-ESA) Migrated to ESLint 9
 - (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
-- (Lucky-ESA) Adapter requires admin >= 7.4.10 now
+- (Lucky-ESA) Adapter requires admin >= 7.6.17 now
 - (mcm1957) Adapter requires node.js >= 20 now
 
 ### 1.4.3 (2024-11-19)
