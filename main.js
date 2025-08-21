@@ -1315,6 +1315,11 @@ class Homeconnect extends utils.Adapter {
         const idArray = id.split('.');
         const commands = idArray.pop();
         const command = commands ? commands.replace(/_/g, '.') : '';
+        const stop = ['isBlocked', 'limitJson', 'reason', 'connection', 'session'];
+        if (stop.includes(command)) {
+          this.log.debug(`Catch state - ${id} - ${command}`);
+          return;
+        }
         const haId = idArray[2];
         this.log.debug(`State changed: ${id} ${JSON.stringify(state)} ${command}`);
         if (id.indexOf('BSH_Common_Root_') !== -1) {
