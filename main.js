@@ -799,9 +799,12 @@ class Homeconnect extends utils.Adapter {
     }
     let start = 'NOK';
     if (data && data.data && data.data.key) {
-      if (data.key.indexOf('StopProgram') !== -1) {
+      if (data.data.key.indexOf('StopProgram') !== -1) {
         start = 'Stop';
-      } else if (data.key.indexOf('Root_ActiveProgram') !== -1 || data.key.indexOf('StartInRelative') !== -1) {
+      } else if (
+        data.data.key.indexOf('Root_ActiveProgram') !== -1 ||
+        data.data.key.indexOf('StartInRelative') !== -1
+      ) {
         start = 'Stop';
       }
     }
@@ -1400,7 +1403,10 @@ class Homeconnect extends utils.Adapter {
     }
   }
   getWeek(timestamp) {
-    const target = timestamp ? new Date(timestamp) : new Date();
+    if (typeof timestamp === 'number' && timestamp === 0) {
+      return '0-0';
+    }
+    const target = timestamp != null ? new Date(timestamp) : new Date();
     const getDay = target.getDay();
     const dayNr = (target.getDay() + 6) % 7;
     target.setDate(target.getDate() - dayNr + 3);
