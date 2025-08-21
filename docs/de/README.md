@@ -160,13 +160,15 @@ Oder ob ein Gerät geöffnet ist
       "methode": "GET", // Methode
       "haId": "0000", // Seriennummer
       "url": "/status", // URL
-      "date": "2025-08-14T18:46:17.535Z" // Zeit
+      "date": "2025-08-14T18:46:17.535Z", // Zeit
+      "response": "OK" // OK == Kein Fehler / Error == Fehler
     },
     {
       "methode": "GET",
       "haId": "015030396331009276",
       "url": "/settings",
-      "date": "2025-08-14T18:46:17.536Z"
+      "date": "2025-08-14T18:46:17.536Z",
+      "response": "OK"
     },
   ],
 }

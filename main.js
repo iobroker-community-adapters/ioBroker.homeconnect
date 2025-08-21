@@ -418,8 +418,8 @@ class Homeconnect extends utils.Adapter {
     if (!(await this.checkBlock())) {
       return;
     }
-    await this.setLimitCounter('OK', haId, 'NOK', url, 'GET');
     await this.sleep(Math.floor(Math.random() * 1500));
+    await this.setLimitCounter('OK', haId, 'NOK', url, 'GET');
     const header = Object.assign({}, this.headers);
     header['Accept-Language'] = this.config.language;
     const returnValue = await this.requestClient({
@@ -451,6 +451,7 @@ class Homeconnect extends utils.Adapter {
         return;
       });
     if (!returnValue || returnValue.error) {
+      await this.setErrorResponse(true);
       returnValue && this.log.debug(`Error: ${returnValue.error}`);
       return;
     }
@@ -1426,6 +1427,20 @@ class Homeconnect extends utils.Adapter {
     await this.setState(`rateLimit.limitJson`, { val: JSON.stringify(this.rateLimiting), ack: true });
     await this.setState(`rateLimit.isBlocked`, { val: block, ack: true });
     await this.setState(`rateLimit.reason`, { val: reason, ack: true });
+  }
+  async setErrorResponse(update) {
+    this.log.debug(this.rateLimiting.requests.length);
+    try {
+      if (this.rateLimiting.requests.length > 0) {
+        const last = this.rateLimiting.requests.length - 1;
+        this.rateLimiting.requests[last].response = 'Error';
+      }
+    } catch (e) {
+      this.log.warn(`Cannot change response - ${e}`);
+    }
+    if (update) {
+      await this.setState(`rateLimit.limitJson`, { val: JSON.stringify(this.rateLimiting), ack: true });
+    }
   }
   /**
    * Is program for your type available
