@@ -415,10 +415,10 @@ class Homeconnect extends utils.Adapter {
     }
   }
   async getAPIValues(haId, url) {
+    await this.sleep(Math.floor(Math.random() * 1500));
     if (!(await this.checkBlock())) {
       return;
     }
-    await this.sleep(Math.floor(Math.random() * 1500));
     await this.setLimitCounter('OK', haId, 'NOK', url, 'GET');
     const header = Object.assign({}, this.headers);
     header['Accept-Language'] = this.config.language;
@@ -433,7 +433,6 @@ class Homeconnect extends utils.Adapter {
       })
       .catch(error => {
         if (error.response) {
-          this.log.error(`Homeappliances device: ${JSON.stringify(error.response.data)}`);
           if (error.response.status === 429) {
             this.log.info('The maximum number of requests has been reached!');
             if (error.response.headers) {
@@ -691,7 +690,7 @@ class Homeconnect extends utils.Adapter {
             let value = null;
             if (subElement.value !== undefined) {
               this.log.debug('Set api value');
-              let value = subElement.value;
+              value = subElement.value;
               //check if value is an object
               if (typeof value === 'object' && value !== null) {
                 value = JSON.stringify(value);
@@ -817,7 +816,7 @@ class Homeconnect extends utils.Adapter {
       data: data,
     })
       .then(res => {
-        this.log.debug(`Put: ${JSON.stringify(res.data)}`);
+        this.log.debug(`Put data: ${JSON.stringify(res.data)}`);
         return res.data;
       })
       .catch(error => {
@@ -1429,8 +1428,8 @@ class Homeconnect extends utils.Adapter {
     await this.setState(`rateLimit.reason`, { val: reason, ack: true });
   }
   async setErrorResponse(update) {
-    this.log.debug(this.rateLimiting.requests.length);
     try {
+      this.log.debug(this.rateLimiting.requests.length);
       if (this.rateLimiting.requests.length > 0) {
         const last = this.rateLimiting.requests.length - 1;
         this.rateLimiting.requests[last].response = 'Error';
