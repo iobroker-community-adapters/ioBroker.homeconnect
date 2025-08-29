@@ -50,7 +50,7 @@
     "@iobroker/testing": "^5.1.0",
     "@tsconfig/node20": "^20.1.6",
     "@types/node": "^24.3.0",
-    "typescript": "~5.8.2"
+    "typescript": "~5.9.2"
   },
   "main": "main.js",
   "files": [
