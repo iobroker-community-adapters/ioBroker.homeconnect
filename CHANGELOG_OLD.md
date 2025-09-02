@@ -1,4 +1,8 @@
 # Older changes
+## 1.3.0 (2023-12-15)
+
+- fix login
+
 ## 1.2.2 (2023-12-02)
 
 - bump version

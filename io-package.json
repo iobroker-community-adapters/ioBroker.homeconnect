@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.4.3",
+    "version": "1.5.0",
     "news": {
+      "1.5.0": {
+        "en": "Clean up state roles and code\nAdded rate limiting\nDependencies updated\nAdded language selection\nMigrated to ESLint 9\nAdapter requires js-controller >= 6.0.11 now\nAdapter requires admin >= 7.6.17 now\nAdapter requires node.js >= 20 now",
+        "de": "Aufräumen von Staatsrollen und Code\nZusätzlicher Zinssatz\nAusgaben aktualisiert\nSprachauswahl hinzufügen\nZu ESLint 9 migriert\nAdapter benötigt jetzt js-controller >= 6.0.11\nAdapter benötigt admin >= 7.6.17 jetzt\nAdapter benötigt node.js >= 20 jetzt",
+        "ru": "Очистка государственных ролей и кода\nОграничение добавленной ставки\nОбновленные зависимости\nДобавлен выбор языка\nИммиграция в ESLint 9\nАдаптер требует js-контроллер >= 6.0.11\nАдаптер требует администратора >= 7.6.17\nАдаптер требует node.js >= 20 сейчас",
+        "pt": "Limpar funções de estado e código\nLimitação da taxa adicionada\nDependências atualizadas\nSeleção de idioma adicionada\nMigrado para ESLint 9\nAdaptador requer js-controlador >= 6.0.11 agora\nAdaptador requer admin >= 7.6.17 agora\nAdaptador requer nod.js >= 20 agora",
+        "nl": "Opruimen staat rollen en code\nToegevoegde snelheidsbeperking\nAfhankelijkheden bijgewerkt\nTaalselectie toegevoegd\nVerplaatst naar ESLint 9\nAdapter vereist js-controller > 6,0.11 nu\nVoor adapter is admin < 7.6.17 nu nodig\nVoor de adapter zijn node.js < 20 now",
+        "fr": "Nettoyer les rôles et le code de l'état\nTaux limite ajouté\nDépendances actualisées\nSélection de la langue ajoutée\nMigrées à ESLint 9\nAdaptateur nécessite js-controller >= 6.0.11 maintenant\nAdaptateur nécessite admin >= 7.6.17 maintenant\nAdaptateur nécessite node.js >= 20 maintenant",
+        "it": "Pulire ruoli e codice di stato\nTasso aggiunto limite\nDipendenze aggiornate\nSelezione della lingua aggiunta\nMigrato a ESLint 9\nAdattatore richiede js-controller >= 6.0.11 ora\nAdattatore richiede admin >= 7.6.17 ora\nAdattatore richiede node.js >= 20 ora",
+        "es": "Limpiar los papeles del estado y el código\nLimitación de la tasa\nActualización de las dependencias\nSelección de idioma\nMigrated to ESLint 9\nAdaptador requiere js-controller >= 6.0.11\nAdaptador requiere administración= 7.6.17 ahora\nAdaptador requiere node.js >= 20 ahora",
+        "pl": "Czyszczenie ról i kodu państwa\nDodano ograniczenie stawki\nAktualizacja zależności\nDodano wybór języka\nMigrant to ESLint 9\nAdapter wymaga sterownika js- > = 6.0.11\nAdapter wymaga admin > = 7.6.17\nAdapter wymaga node.js > = 20",
+        "uk": "Очищення державних ролей і коду\nДоданий ліміт швидкості\nЗалежність оновлено\nДоданий вибір мови\nМіграція до ESLint 9\nАдаптер вимагає js-controller >=6.0.11 тепер\nАдаптер вимагає адмін >= 7.6.17 тепер\nАдаптер вимагає node.js >= 20 тепер",
+        "zh-cn": "清理国家角色和代码\n增加税率限制\n更新的依赖关系\n添加语言选择\n迁移到 ESLint 9\n适配器需要js控制器 现在6.0.11\n适任者需要行政主管 现在7.6.17\n适配器需要节点.js >= 20 现在"
+      },
       "1.4.3": {
         "en": "fix for -001 devices\nAdapter has been adapted to meet Responsive Design rules.",
         "de": "fix für -001 Geräte\nAdapter wurde angepasst, um Responsive Design Regeln zu erfüllen.",
@@ -80,19 +93,6 @@
         "pl": "wersja guzowa",
         "uk": "версія bump",
         "zh-cn": "b 倾销版本"
-      },
-      "1.1.0": {
-        "en": "Add auto login for SingleKey User",
-        "de": "Automatische Anmeldung für SingleKey-Benutzer hinzufügen",
-        "ru": "Добавить автоматический вход для пользователя SingleKey",
-        "pt": "Adicionar login automático para usuário SingleKey",
-        "nl": "Voeg automatisch inloggen toe voor SingleKey User",
-        "fr": "Ajouter une connexion automatique pour l'utilisateur SingleKey",
-        "it": "Aggiungi l'accesso automatico per l'utente SingleKey",
-        "es": "Agregar inicio de sesión automático para usuarios de SingleKey",
-        "pl": "Dodaj automatyczne logowanie dla użytkownika SingleKey",
-        "uk": "Додайте автоматичний вхід для користувача SingleKey",
-        "zh-cn": "添加单键用户自动登录"
       }
     },
     "titleLang": {
@@ -121,8 +121,16 @@
       "zh-cn": "Homeconnect 设备的适配器",
       "uk": "Адаптер для пристроїв Homeconnect"
     },
-    "authors": ["TA2k <tombox2020@gmail.com>"],
-    "keywords": ["homeconnect", "BSH", "bosch", "siemens", "neff"],
+    "authors": [
+      "TA2k <tombox2020@gmail.com>"
+    ],
+    "keywords": [
+      "homeconnect",
+      "BSH",
+      "bosch",
+      "siemens",
+      "neff"
+    ],
     "licenseInformation": {
       "license": "MIT",
       "type": "free"
@@ -148,8 +156,12 @@
       }
     },
     "docs": {
-      "en": ["docs/en/README.md"],
-      "de": ["docs/de/README.md"]
+      "en": [
+        "docs/en/README.md"
+      ],
+      "de": [
+        "docs/de/README.md"
+      ]
     },
     "dependencies": [
       {
@@ -162,8 +174,12 @@
       }
     ]
   },
-  "encryptedNative": ["password"],
-  "protectedNative": ["password"],
+  "encryptedNative": [
+    "password"
+  ],
+  "protectedNative": [
+    "password"
+  ],
   "native": {
     "clientID": "",
     "username": "",
