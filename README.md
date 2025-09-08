@@ -83,6 +83,11 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+
+**WORK IN PROGRESS**
+
+- (Lucky-ESA) Fixed: Name of the objects are deleted
+
 ### 1.5.0 (2025-09-02)
 
 - (Lucky-ESA) Clean up state roles and code

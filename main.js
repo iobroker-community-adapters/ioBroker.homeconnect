@@ -373,7 +373,7 @@ class Homeconnect extends utils.Adapter {
           }
           haID = haID.replace(/\.?-001*$/, '');
           this.typeJson[haID] = device.type;
-          this.createFolders(haID);
+          await this.createFolders(haID);
           this.deviceArray.push(haID);
           const name = device.name;
           await this.createDevices(haID, name, device);
@@ -636,13 +636,15 @@ class Homeconnect extends utils.Adapter {
                 read: true,
               };
                */
-              const common = {
-                name: this.currentSelected[haId].name,
-                desc: this.currentSelected[haId].name,
-              };
               this.log.debug(`FOLDER: ${JSON.stringify(this.currentSelected[haId])}`);
               //await this.createDataPoint(haId + folder, common, 'state', null, null);
-              await this.createDataPoint(haId + folder, common, 'folder', null, null);
+              if (this.currentSelected[haId].name) {
+                const common = {
+                  name: this.currentSelected[haId].name,
+                  desc: this.currentSelected[haId].name,
+                };
+                await this.createDataPoint(haId + folder, common, 'folder', null, null);
+              }
             }
             this.log.debug(`Create State: ${haId}${folder}.${subElement.key.replace(/\./g, '_')}`);
             let defaults;
