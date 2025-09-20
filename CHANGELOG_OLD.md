@@ -1,4 +1,9 @@
 # Older changes
+## 1.4.0 (2024-04-18)
+
+- (mcm1957) Adapter requires node.js >= 18 and js-controller >= 5 now
+- (mcm1957) Dependencies have been updated
+
 ## 1.3.0 (2023-12-15)
 
 - fix login

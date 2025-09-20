@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "news": {
+      "1.5.1": {
+        "en": "Fixed: Name of the objects are deleted",
+        "de": "Behoben: Name der Objekte werden gelöscht",
+        "ru": "Исправлено: Имя объектов удаляется",
+        "pt": "Corrigido: Nome dos objetos são excluídos",
+        "nl": "Opgelost: Naam van de objecten wordt verwijderd",
+        "fr": "Corrigé : Le nom des objets est supprimé",
+        "it": "Risolto: Nome degli oggetti viene cancellato",
+        "es": "Corregido: Se eliminan los nombres de los objetos",
+        "pl": "Naprawione: Usuwanie nazwy obiektów",
+        "uk": "Виправлено: Назви об'єктів видаляються",
+        "zh-cn": "修复：对象的名称被删除"
+      },
       "1.5.0": {
         "en": "Clean up state roles and code\nAdded rate limiting\nDependencies updated\nAdded language selection\nMigrated to ESLint 9\nAdapter requires js-controller >= 6.0.11 now\nAdapter requires admin >= 7.6.17 now\nAdapter requires node.js >= 20 now",
         "de": "Aufräumen von Staatsrollen und Code\nZusätzlicher Zinssatz\nAusgaben aktualisiert\nSprachauswahl hinzufügen\nZu ESLint 9 migriert\nAdapter benötigt jetzt js-controller >= 6.0.11\nAdapter benötigt admin >= 7.6.17 jetzt\nAdapter benötigt node.js >= 20 jetzt",
@@ -80,19 +93,6 @@
         "pl": "naprawić loginę",
         "uk": "увійти",
         "zh-cn": "fix 伐木"
-      },
-      "1.2.2": {
-        "en": "login fixed",
-        "de": "Login gefixt",
-        "ru": "bump версия",
-        "pt": "versão de choque",
-        "nl": "♪",
-        "fr": "boss version",
-        "it": "versione urto",
-        "es": "versión del parachoques",
-        "pl": "wersja guzowa",
-        "uk": "версія bump",
-        "zh-cn": "b 倾销版本"
       }
     },
     "titleLang": {
