@@ -364,7 +364,12 @@ class Homeconnect extends utils.Adapter {
     })
       .then(async res => {
         this.log.debug(`Homeappliances: ${JSON.stringify(res.data)}`);
-        this.log.info(`Found ${res.data.data.homeappliances.length} devices`);
+        let count = 1;
+        if (res.data.data.homeappliances.length > 2) {
+          this.log.info(`Found ${res.data.data.homeappliances.length} devices. Start slow update!`);
+        } else {
+          this.log.info(`Found ${res.data.data.homeappliances.length} devices`);
+        }
         for (const device of res.data.data.homeappliances) {
           let haID = device.haId;
           if (!haID) {
@@ -380,6 +385,11 @@ class Homeconnect extends utils.Adapter {
           if (device.connected) {
             this.fetchDeviceInformation(haID);
           }
+          if (count % 2 == 0 && count != res.data.data.homeappliances.length) {
+            this.log.info(`Wait 1 minute!`);
+            await this.sleep(61 * 1000);
+          }
+          ++count;
         }
       })
       .catch(error => {
@@ -492,7 +502,7 @@ class Homeconnect extends utils.Adapter {
         this.log.debug(`Extend Settings: ${haId}${folder}`);
         let value = null;
         value = returnValue.data.value != null ? returnValue.data.value : value;
-        await this.createDataPoint(haId + folder, common, 'state', value, null);
+        await this.createDataPoint(haId + folder, common, 'state', value, true, null);
         return;
       }
 
@@ -543,7 +553,7 @@ class Homeconnect extends utils.Adapter {
             }
             let folder = `.programs.available.options.${option.key.replace(/\./g, '_')}`;
             this.log.debug(`Extend Options: ${haId}${folder}`);
-            await this.createDataPoint(haId + folder, common, 'state', null, null);
+            await this.createDataPoint(haId + folder, common, 'state', null, true, null);
             this.log.debug('Set default value');
             if (option.constraints && option.constraints.default) {
               let value = option.constraints.default;
@@ -561,10 +571,10 @@ class Homeconnect extends utils.Adapter {
               desc: returnValue.data.desc ? returnValue.data.desc : returnValue.data.name,
             };
             if (!this.stateCheck.includes(`${this.namespace}.${haId}.programs.selected.options.${key}`)) {
-              await this.createDataPoint(`${haId}.programs.selected.options.${key}`, com, 'folder', null, null);
+              await this.createDataPoint(`${haId}.programs.selected.options.${key}`, com, 'folder', null, true, null);
             }
             folder = `.programs.selected.options.${key}.${option.key.replace(/\./g, '_')}`;
-            await this.createDataPoint(haId + folder, common, 'state', null, null);
+            await this.createDataPoint(haId + folder, common, 'state', null, true, null);
           }
         }
         return;
@@ -637,13 +647,13 @@ class Homeconnect extends utils.Adapter {
               };
                */
               this.log.debug(`FOLDER: ${JSON.stringify(this.currentSelected[haId])}`);
-              //await this.createDataPoint(haId + folder, common, 'state', null, null);
+              //await this.createDataPoint(haId + folder, common, 'state', null, true, null);
               if (this.currentSelected[haId].name) {
                 const common = {
                   name: this.currentSelected[haId].name,
                   desc: this.currentSelected[haId].name,
                 };
-                await this.createDataPoint(haId + folder, common, 'folder', null, null);
+                await this.createDataPoint(haId + folder, common, 'folder', null, true, null);
               }
             }
             this.log.debug(`Create State: ${haId}${folder}.${subElement.key.replace(/\./g, '_')}`);
@@ -688,7 +698,7 @@ class Homeconnect extends utils.Adapter {
               common.max = subElement.constraints.max;
             }
             const path = `${haId + folder}.${subElement.key.replace(/\./g, '_')}`;
-            await this.createDataPoint(path, common, 'state', null, null);
+            await this.createDataPoint(path, common, 'state', null, true, null);
             let value = null;
             if (subElement.value !== undefined) {
               this.log.debug('Set api value');
@@ -702,7 +712,7 @@ class Homeconnect extends utils.Adapter {
               this.log.debug(`failed set state - Path: ${path} - ${JSON.stringify(subElement)}`);
               this.log.debug(`Value: '${value}'`);
             }
-            await this.createDataPoint(path, common, 'state', value, null);
+            await this.createDataPoint(path, common, 'state', value, true, null);
           }
         } else {
           this.log.info(`No array: ${item}`);
@@ -742,6 +752,7 @@ class Homeconnect extends utils.Adapter {
             common,
             'state',
             null,
+            true,
             null,
           );
         }
@@ -1026,7 +1037,7 @@ class Homeconnect extends utils.Adapter {
         if (element.unit && element.unit != '') {
           common.unit = element.unit;
         }
-        await this.createDataPoint(`${haId}.${folder}.${key}`, common, 'state', value, null);
+        await this.createDataPoint(`${haId}.${folder}.${key}`, common, 'state', value, true, null);
         if (element.value !== undefined) {
           this.log.debug('Set event state ');
           await this.setState(`${haId}.${folder}.${key}`, element.value, true);
@@ -1375,7 +1386,7 @@ class Homeconnect extends utils.Adapter {
                 common.states = {};
                 common.states[state.val.toString()] = valArray[valArray.length - 1];
                 this.log.debug(`Extend common option: ${id}`);
-                await this.createDataPoint(id, common, 'state', null, null);
+                await this.createDataPoint(id, common, 'state', null, true, null);
               }
             });
           }
