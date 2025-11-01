@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@iobroker/adapter-core": "^3.3.2",
-    "axios": "^1.12.2",
+    "axios": "^1.13.1",
     "axios-rate-limit": "^1.4.0",
     "eventsource": "^4.0.0",
     "http-cookie-agent": "^7.0.2",
