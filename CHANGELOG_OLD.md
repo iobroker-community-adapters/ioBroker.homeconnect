@@ -1,4 +1,8 @@
 # Older changes
+## 1.4.1 (2024-07-02)
+
+- (foxriver76) fixed invalid min/max values
+
 ## 1.4.0 (2024-04-18)
 
 - (mcm1957) Adapter requires node.js >= 18 and js-controller >= 5 now

@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "news": {
+      "1.5.2": {
+        "en": "Rate limit of 50 requests per minute intercepted at adapter startup\nAdded custom request",
+        "de": "Rate Limit von 50 Anfragen pro Minute abgefangen bei Adapter-Start\nBenutzerdefinierte Anfrage",
+        "ru": "Ограничение скорости 50 запросов в минуту, перехваченных при запуске адаптера\nДобавлен пользовательский запрос",
+        "pt": "Limite de taxa de 50 pedidos por minuto interceptados na inicialização do adaptador\nPedido personalizado adicionado",
+        "nl": "Prijslimiet van 50 verzoeken per minuut onderschept bij het opstarten van de adapter\nAangepast verzoek toegevoegd",
+        "fr": "Limite tarifaire de 50 requêtes par minute interceptées au démarrage de l'adaptateur\nAjout d'une requête personnalisée",
+        "it": "Tasso limite di 50 richieste al minuto intercettato all'avvio dell'adattatore\nAggiunto richiesta personalizzata",
+        "es": "Límite de tarifas de 50 solicitudes por minuto interceptadas en la puesta en marcha del adaptador\nSolicitud personalizada",
+        "pl": "Oceń limit 50 żądań na minutę przechwycony przy uruchomieniu adaptera\nDodano zamówienie",
+        "uk": "Обмеження швидкості 50 запитів за хвилину, що перехоплюється при запуску адаптера\nДодати запит на замовлення",
+        "zh-cn": "适配器启动时截获每分钟50项请求的速率限制\n添加自定义请求"
+      },
       "1.5.1": {
         "en": "Fixed: Name of the objects are deleted",
         "de": "Behoben: Name der Objekte werden gelöscht",
@@ -80,19 +93,6 @@
         "pl": "Adapter wymaga node.js > = 18 i kontroler js- > = 5 teraz\nZaktualizowano zależności",
         "uk": "Адаптер вимагає node.js >= 18 і js-controller >= 5 тепер\nЗалежність було оновлено",
         "zh-cn": "适配器需要节点.js QQ18和js控制器 QQ 现在5号\n依赖关系已更新"
-      },
-      "1.3.0": {
-        "en": "login fixed",
-        "de": "Login gefixt",
-        "ru": "исправить логин",
-        "pt": "corrigir login",
-        "nl": "vertaling:",
-        "fr": "login",
-        "it": "fix login",
-        "es": "corrección de inicio",
-        "pl": "naprawić loginę",
-        "uk": "увійти",
-        "zh-cn": "fix 伐木"
       }
     },
     "titleLang": {
