@@ -56,6 +56,8 @@ For **Application ID** enter a name for the application, e.g. ioBroker. With **O
 **Home Connect User Account for Testing** can remain empty. For **Success Redirect** enter a URI, e.g. https://example.com.
 Then save and you have the required ClientID.
 
+After the adapter starts, a link will appear in the log. Copy this link into your browser and confirm the prompt.
+
 ## Configuration
 
 Please add Homeconnect App username, password and generated cleintId into adapter config.
@@ -83,6 +85,11 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+
+### **WORK IN PROGRESS**
+
+- (Lucky-ESA) Rate limit of 50 requests per minute intercepted at adapter startup
+- (Lucky-ESA) Added custom request
 
 ### 1.5.1 (2025-09-20)
 
