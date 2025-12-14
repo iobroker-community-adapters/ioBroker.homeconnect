@@ -392,7 +392,10 @@ class Homeconnect extends utils.Adapter {
           if (device.connected) {
             this.fetchDeviceInformation(haID);
           }
-          if (count % 2 == 0 && count != res.data.data.homeappliances.length) {
+          if (
+            (count % 2 == 0 && count != res.data.data.homeappliances.length) ||
+            (this.rateLimiting.requestsMinutesCount > 45 && count != res.data.data.homeappliances.length)
+          ) {
             this.log.info(`Wait 1 minute!`);
             await this.sleep(61 * 1000);
           }
