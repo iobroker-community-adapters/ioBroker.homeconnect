@@ -8,5 +8,7 @@
     "Client ID": "ID client",
     "Language": "Lingua",
     "ResetAccess": "Ripristina l'accesso/token",
-    "DisableFetchConnect": "Disabilita i programmi di recupero durante la connessione (riduce il limite di velocità)"
+    "DisableFetchConnect": "Disabilita i programmi di recupero durante la connessione (riduce il limite di velocità)",
+    "Expert": "Modalità esperto",
+    "Own Request": "Creare oggetti per le tue richieste HTTP"
 }

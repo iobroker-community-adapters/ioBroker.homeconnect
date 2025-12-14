@@ -32,6 +32,8 @@ class Homeconnect extends utils.Adapter {
     this.createDevices = helper.createDevices;
     this.createObjects = helper.createObjects;
     this.createFolders = helper.createFolders;
+    this.createFolders = helper.createFolders;
+    this.createOwnRequest = helper.createOwnRequest;
     this.createLimit = limiting.createLimit;
     this.getRateLimit = limiting.getRateLimit;
     this.checkToken = limiting.checkToken;
@@ -382,6 +384,11 @@ class Homeconnect extends utils.Adapter {
           this.deviceArray.push(haID);
           const name = device.name;
           await this.createDevices(haID, name, device);
+          if (this.config.ownRequest) {
+            await this.createOwnRequest(haID);
+          } else {
+            await this.delObjectAsync(`${haID}.own_request`, { recursive: true });
+          }
           if (device.connected) {
             this.fetchDeviceInformation(haID);
           }
@@ -1172,6 +1179,12 @@ class Homeconnect extends utils.Adapter {
       if (!state.ack) {
         const idArray = id.split('.') || [];
         const commands = idArray.pop();
+        if (commands === 'request_json') {
+          this.sendOwnRequest(idArray[2], state.val);
+          return;
+        } else if (commands === 'response') {
+          return;
+        }
         const command = commands ? commands.replace(/_/g, '.') : '';
         const haId = idArray[2];
         if (state.val != null && !Number.isNaN(state.val) && !Number.isNaN(parseFloat(state.val.toString()))) {
@@ -1331,7 +1344,7 @@ class Homeconnect extends utils.Adapter {
         const idArray = id.split('.');
         const commands = idArray.pop();
         const command = commands ? commands.replace(/_/g, '.') : '';
-        const stop = ['isBlocked', 'limitJson', 'reason', 'connection', 'session'];
+        const stop = ['isBlocked', 'limitJson', 'reason', 'connection', 'session', 'response', 'request.json'];
         if (stop.includes(command)) {
           this.log.debug(`Catch state - ${id} - ${command}`);
           return;
@@ -1392,6 +1405,77 @@ class Homeconnect extends utils.Adapter {
           }
         }
       }
+    }
+  }
+  async sendOwnRequest(haId, json) {
+    if (json && json.startsWith('{')) {
+      let val = {};
+      try {
+        val = JSON.parse(json);
+      } catch (e) {
+        this.log.error(e);
+        return;
+      }
+      if (!val && !val.methode) {
+        this.log.error(`Missing methode!`);
+        return;
+      }
+      if (!val && !val.url) {
+        this.log.error(`Missing URL!`);
+        return;
+      }
+      let data = {};
+      if (val && val.data) {
+        data = { data: val.data };
+        return;
+      }
+      if (!(await this.checkBlock())) {
+        return;
+      }
+      let start = 'NOK';
+      if (data && data.data && data.data.key) {
+        if (
+          data.data.key.indexOf('StopProgram') !== -1 ||
+          data.data.key.indexOf('Root_ActiveProgram') !== -1 ||
+          data.data.key.indexOf('StartInRelative') !== -1
+        ) {
+          start = 'Stop';
+        }
+      }
+      await this.setLimitCounter('OK', haId, start, val.url, val.methode);
+      const resp = await this.requestClient({
+        method: val.methode,
+        url: `https://api.home-connect.com/api/homeappliances/${val.url}`,
+        headers: this.headers,
+        ...data,
+      })
+        .then(res => {
+          return res.data;
+        })
+        .catch(error => {
+          this.setLimitCounter('ERR', haId, start, null, null);
+          if (error.response) {
+            if (error.response.headers && error.response.headers['rate-limit-type'] === 'start') {
+              this.log.error(JSON.stringify(error.response.headers));
+              this.log.error(`Block time ${error.response.headers['retry-after']} second(s)`);
+              return { error: error.message, data: error.response.data, header: error.response.headers };
+            }
+            if (error.response.status === 409) {
+              this.log.info(
+                'Command cannot be executed for the home appliance, the error response contains the error details',
+              );
+            } else if (error.response.status === 429) {
+              this.log.info('The number of requests for a specific endpoint exceeded the quota of the client');
+            } else if (error.response.status === 403) {
+              this.log.info('Scope has not been granted or home appliance is not assigned to HC account');
+            }
+            this.log.error(JSON.stringify(error.response.data));
+            return { error: error.message, data: error.response.data };
+          }
+          return { error: error.message };
+        });
+      await this.setState(`${haId}.own_request.response`, { val: JSON.stringify(resp), ack: true });
+      await this.setState(`${haId}.own_request.request_json`, { val: json, ack: true });
     }
   }
   convertRetryAfter(inputSeconds) {

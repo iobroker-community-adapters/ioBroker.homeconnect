@@ -8,5 +8,7 @@
     "Client ID": "ID do cliente",
     "Language": "Linguagem",
     "ResetAccess": "Redefinir acesso/token",
-    "DisableFetchConnect": "Desativar programas de busca ao conectar (reduz o limite da taxa)"
+    "DisableFetchConnect": "Desativar programas de busca ao conectar (reduz o limite da taxa)",
+    "Expert": "Modo especialista",
+    "Own Request": "Objetos para suas próprias solicitações HTTP criam"
 }

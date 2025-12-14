@@ -8,5 +8,7 @@
     "Client ID": "Client -ID",
     "Language": "Taal",
     "ResetAccess": "Reset toegang/token",
-    "DisableFetchConnect": "Het ophalen van programma's uitschakelen bij het verbinden (verlaagt de snelheidslimiet)"
+    "DisableFetchConnect": "Het ophalen van programma's uitschakelen bij het verbinden (verlaagt de snelheidslimiet)",
+    "Expert": "Expert-modus",
+    "Own Request": "Objecten voor uw eigen HTTP-verzoeken maken"
 }

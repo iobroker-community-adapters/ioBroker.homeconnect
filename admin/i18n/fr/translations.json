@@ -8,5 +8,7 @@
     "Client ID": "ID client",
     "Language": "Langue",
     "ResetAccess": "Réinitialiser l'accès / jeton",
-    "DisableFetchConnect": "Désactiver les programmes de récupération lors de la connexion (réduit la limite de taux)"
+    "DisableFetchConnect": "Désactiver les programmes de récupération lors de la connexion (réduit la limite de taux)",
+    "Expert": "Mode expert",
+    "Own Request": "Créer des objets pour vos propres requêtes HTTP"
 }

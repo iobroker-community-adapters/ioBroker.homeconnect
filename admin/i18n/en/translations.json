@@ -1,13 +1,14 @@
 {
-    "homeconnect adapter settings": "Adapter settings for homeconnect",
-    "step1": "Step #1: Sign up for Client ID.<br> Default Home Connect User Account for Testing = Your email address in the HomeConnect app. <br>Account Type = Individual",
-    "step2": "Step #2: Register the ioBroker app. <br>Application ID = ioBroker. <br>OAuth Flow = Device Flow. <br>Default Home Connect User Account for Testing = Your email address in the HomeConnect app.",
-    "step3": "Step #3: Activate the app<br>Enter your Client ID here. <br>Enter your Homeconnect app email and password. <br>Press Save and close.",
-    "App Email": "App Email",
-    "App Password": "App Password",
-    "Client ID": "Client ID",
-    "Language": "Language",
-    "ResetAccess": "Reset access/token",
-    "DisableFetchConnect": "Disable fetching programs when connecting (reduces rate limit)"
-
+  "homeconnect adapter settings": "Adapter settings for homeconnect",
+  "step1": "Step #1: Sign up for Client ID.<br> Default Home Connect User Account for Testing = Your email address in the HomeConnect app. <br>Account Type = Individual",
+  "step2": "Step #2: Register the ioBroker app. <br>Application ID = ioBroker. <br>OAuth Flow = Device Flow. <br>Default Home Connect User Account for Testing = Your email address in the HomeConnect app.",
+  "step3": "Step #3: Activate the app<br>Enter your Client ID here. <br>Enter your Homeconnect app email and password. <br>Press Save and close.",
+  "App Email": "App Email",
+  "App Password": "App Password",
+  "Client ID": "Client ID",
+  "Language": "Language",
+  "ResetAccess": "Reset access/token",
+  "DisableFetchConnect": "Disable fetching programs when connecting (reduces rate limit)",
+  "Expert": "Expert mode",
+  "Own Request": "Objects for your own HTTP requests create"
 }

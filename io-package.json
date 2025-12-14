@@ -186,7 +186,8 @@
     "password": "",
     "language": "de-DE",
     "resetAccess": false,
-    "disableFetchConnect": false
+    "disableFetchConnect": false,
+    "ownRequest": false
   },
   "objects": [],
   "instanceObjects": [

@@ -8,5 +8,7 @@
     "Client ID": "Client -ID",
     "Language": "Sprache",
     "ResetAccess": "Zugang/Token zurücksetzen",
-    "DisableFetchConnect": "Abrufprogramme beim Anschließen deaktivieren (reduziert die Ratenlimit)"
+    "DisableFetchConnect": "Abrufprogramme beim Anschließen deaktivieren (reduziert die Ratenlimit)",
+    "Expert": "Expertenmodus",
+    "Own Request": "Objekte für eigene HTTP-Anfragen erstellen"
 }

@@ -8,5 +8,7 @@
     "Client ID": "客户ID",
     "Language": "语言",
     "ResetAccess": "重置访问/令牌",
-    "DisableFetchConnect": "连接时禁用提取程序（降低速率限制）"
+    "DisableFetchConnect": "连接时禁用提取程序（降低速率限制）",
+    "Expert": "专家模式",
+    "Own Request": "为您自己的 HTTP 请求创建对象"
 }
