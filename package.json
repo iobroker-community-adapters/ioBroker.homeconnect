@@ -2,17 +2,11 @@
   "name": "iobroker.homeconnect",
   "version": "1.5.2",
   "description": "Adapter for Homeconnect devices",
-  "author": {
-    "name": "TA2k",
-    "email": "tombox2020@gmail.com"
-  },
+  "author": "TA2k <tombox2020@gmail.com>",
   "contributors": [
-    {
-      "name": "TA2k"
-    },
-    {
-      "name": "dna909"
-    }
+    "TA2k",
+    "dna909",
+    "iobroker-community-adapters <iobroker-community-adapters@gmx.de>"
   ],
   "homepage": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect",
   "license": "MIT",
