@@ -990,7 +990,7 @@ class Homeconnect extends utils.Adapter {
       //eslint-disable-next-line no-useless-escape
       const lastEventId = stream.lastEventId.replace(/\.?\-001*$/, '');
       if (!stream) {
-        this.log.debug(`No Return: ${stream}`);
+        this.log.debug(`No Return: ${stream.data}`);
         return;
       }
       this.resetReconnectTimeout();
@@ -1023,12 +1023,15 @@ class Homeconnect extends utils.Adapter {
           folder = 'events';
           key = element.key.replace(/\./g, '_');
         } else {
-          folder = element.uri.split('/').splice(4);
-          if (folder[folder.length - 1].indexOf('.') != -1) {
-            folder.pop();
+          if (element.uri && typeof element.uri === 'string') {
+            folder = element.uri.split('/').splice(4);
+            if (folder[folder.length - 1].indexOf('.') != -1) {
+              folder.pop();
+            }
+            folder = folder.join('.');
+            key = element.key.replace(/\./g, '_');
           }
-          folder = folder.join('.');
-          key = element.key.replace(/\./g, '_');
+          return;
         }
         this.log.debug(`Path: ${haId}.${folder}.${key}:${element.value}`);
         let value = null;
@@ -1055,7 +1058,6 @@ class Homeconnect extends utils.Adapter {
       }
     } catch (error) {
       this.log.error(`Parsemessage: ${error}`);
-      this.log.error(`Error Event: ${JSON.stringify(msg)}`);
     }
   }
 
