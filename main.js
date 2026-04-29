@@ -1031,14 +1031,18 @@ class Homeconnect extends utils.Adapter {
             folder = folder.join('.');
             key = element.key.replace(/\./g, '_');
           }
-          return;
+        }
+        this.log.debug(`Path folder: ${folder}`);
+        if (stream.type === 'NOTIFY') {
+          if (folder.includes('.selected.options')) {
+            folder = folder.replace('.selected.options', '.active.options');
+          }
         }
         this.log.debug(`Path: ${haId}.${folder}.${key}:${element.value}`);
         let value = null;
         if (element.value !== undefined) {
-          this.log.debug('Set event state ');
+          this.log.debug('Set value');
           value = element.value;
-          await this.setState(`${haId}.${folder}.${key}`, element.value, true);
         }
         const common = {
           name: key,
@@ -1051,10 +1055,6 @@ class Homeconnect extends utils.Adapter {
           common.unit = element.unit;
         }
         await this.createDataPoint(`${haId}.${folder}.${key}`, common, 'state', value, true, null);
-        if (element.value !== undefined) {
-          this.log.debug('Set event state ');
-          await this.setState(`${haId}.${folder}.${key}`, element.value, true);
-        }
       }
     } catch (error) {
       this.log.error(`Parsemessage: ${error}`);
