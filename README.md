@@ -87,6 +87,7 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 -->
 
 ### **WORK IN PROGRESS**
+- (copilot) Adapter requires node.js >= 22 now
 - (copilot) Adapter requires admin >= 7.7.22 now
 
 - (Lucky-ESA) Fixed adapter crash if URI is empty
