@@ -120,6 +120,8 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 
 - (TA2k) fix for devices with object values
 
+[Older changelogs can be found there](CHANGELOG_OLD.md)
+
 ## License
 
 The MIT License (MIT)
