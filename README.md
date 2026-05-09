@@ -31,7 +31,7 @@ For more details and for information how to disable the error reporting see [Sen
 
 - Node 20, 22 or 24
 - JS-Controller >= 6.0.11
-- Admin >= 7.6.17
+- Admin >= 7.7.22
 
 A ClientID is required for the adapter. Use the settings for each step to register.
 
@@ -87,9 +87,11 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 -->
 
 ### **WORK IN PROGRESS**
-- (copilot) Adapter requires admin >= 7.7.22 now
 
+- (copilot) Adapter requires admin >= 7.7.22 now
 - (Lucky-ESA) Fixed adapter crash if URI is empty
+- (Lucky-ESA) Save remaining time in active folder
+- (Lucky-ESA) Device monitoring starts only after the adapter has started (this may take up to 2 minutes)
 
 ### 1.5.2 (2025-12-14)
 

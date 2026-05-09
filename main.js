@@ -49,7 +49,6 @@ class Homeconnect extends utils.Adapter {
     this.deviceArray = [];
     this.typeJson = {};
     this.stateCheck = [];
-    this.fetchedDevice = {};
     //this.refreshStatusInterval = null;
     this.reLoginTimeout = null;
     //this.reconnectInterval = null;
@@ -57,7 +56,7 @@ class Homeconnect extends utils.Adapter {
     this.refreshTokenInterval = null;
     this.availablePrograms = {};
     this.availableProgramOptions = {};
-    this.eventSourceState;
+    this.eventSourceState = null;
     this.currentSelected = {};
     this.sleepTimer = null;
     this.rateLimiting = {};
@@ -101,7 +100,7 @@ class Homeconnect extends utils.Adapter {
     await this.createLimit();
     await this.getRateLimit(constants);
     this.session = {};
-    this.subscribeStates('*');
+    //this.subscribeStates('*');
     const sessionState = await this.getStateAsync('auth.session');
 
     if (sessionState && sessionState.val && typeof sessionState.val === 'string') {
@@ -124,6 +123,7 @@ class Homeconnect extends utils.Adapter {
     if (this.session.access_token) {
       this.headers.authorization = `Bearer ${this.session.access_token}`;
       await this.getDeviceList();
+      this.subscribeStates('*');
       await this.startEventStream();
 
       // this.refreshStatusInterval = this.setInterval(async () => {
@@ -390,7 +390,7 @@ class Homeconnect extends utils.Adapter {
             await this.delObjectAsync(`${haID}.own_request`, { recursive: true });
           }
           if (device.connected) {
-            this.fetchDeviceInformation(haID);
+            await this.fetchDeviceInformationFirst(haID);
           }
           if (
             (count % 2 == 0 && count != res.data.data.homeappliances.length) ||
@@ -418,24 +418,29 @@ class Homeconnect extends utils.Adapter {
       });
   }
 
+  async fetchDeviceInformationFirst(haId) {
+    await this.getAPIValues(haId, '/status', true);
+    await this.getAPIValues(haId, '/settings', true);
+    await this.getAPIValues(haId, '/programs/active', true);
+    await this.getAPIValues(haId, '/programs/selected', true);
+    await this.getAPIValues(haId, '/programs', true);
+    this.updateOptions(haId, '/programs/active');
+    this.updateOptions(haId, '/programs/selected');
+  }
+
   async fetchDeviceInformation(haId) {
     //this.getAPIValues(haId, '/events'); // Response empty
     //this.getAPIValues(haId, '/images');
     this.getAPIValues(haId, '/status');
     this.getAPIValues(haId, '/settings');
-    if (!this.isPrograms(haId)) {
-      this.getAPIValues(haId, '/programs/active');
-      this.getAPIValues(haId, '/programs/selected');
-    }
-    if (!this.fetchedDevice[haId] && !this.isPrograms(haId)) {
-      this.fetchedDevice[haId] = true;
-      this.getAPIValues(haId, '/programs');
-      this.updateOptions(haId, '/programs/active');
-      this.updateOptions(haId, '/programs/selected');
-    }
+    this.getAPIValues(haId, '/programs/active');
+    this.getAPIValues(haId, '/programs/selected');
   }
-  async getAPIValues(haId, url) {
-    await this.sleep(Math.floor(Math.random() * 1500));
+  async getAPIValues(haId, url, first) {
+    this.log.debug(`GET: ${haId} - ${url}`);
+    if (first == null) {
+      await this.sleep(Math.floor(Math.random() * 1500));
+    }
     if (!(await this.checkBlock())) {
       return;
     }
@@ -900,17 +905,7 @@ class Homeconnect extends utils.Adapter {
   async startEventStream() {
     this.log.debug('Start EventStream');
     const baseUrl = 'https://api.home-connect.com/api/homeappliances/events';
-    if (this.eventSourceState) {
-      this.eventSourceState.close();
-      this.eventSourceState.removeEventListener('PAIRED', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('DEPAIRED', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('STATUS', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('NOTIFY', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('EVENT', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('CONNECTED', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('DISCONNECTED', e => this.processEvent(e), false);
-      this.eventSourceState.removeEventListener('KEEP-ALIVE', () => this.resetReconnectTimeout(), false);
-    }
+    this.startRemoveEventListener();
     this.eventSourceState = new EventSource(baseUrl, {
       fetch: (input, init) =>
         fetch(input, {
@@ -1088,7 +1083,7 @@ class Homeconnect extends utils.Adapter {
         //await this.setState('auth.session', { val: this.encrypt(JSON.stringify(this.session)), ack: true });
         this.setState('auth.session', { val: JSON.stringify(this.session), ack: true });
       })
-      .catch(error => {
+      .catch(async error => {
         if (error.response) {
           this.log.error(JSON.stringify(error.response.data));
           if (error.response.status === 429) {
@@ -1099,12 +1094,31 @@ class Homeconnect extends utils.Adapter {
               }
             }
           }
+          if (
+            error.response.data.error === 'invalid_grant' &&
+            error.response.data.error_description === 'Backend service (SKID) request rejected'
+          ) {
+            //ToDo Delete Session and stop adapter with log
+            await this.setState('auth.session', '', true);
+            this.log.error(
+              `Please start adapter manually and copy the HTTP link into browser. Login and click on 'Approve'.`,
+            );
+            this.setState('info.connection', false, true);
+            this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
+            this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+            this.rateLimitingInterval && this.clearInterval(this.rateLimitingInterval);
+            this.sleepTimer && this.clearTimeout(this.sleepTimer);
+            this.startRemoveEventListener();
+            return;
+          }
         }
         this.log.error('refresh token failed');
         this.log.error(error);
         this.log.error('Restart adapter in 20min');
         this.reconnectTimeout && this.clearInterval(this.reconnectTimeout);
         this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
+        this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
+        this.startRemoveEventListener();
         this.reLoginTimeout = this.setTimeout(
           async () => {
             this.restart();
@@ -1112,6 +1126,18 @@ class Homeconnect extends utils.Adapter {
           1000 * 60 * 20,
         );
       });
+  }
+  startRemoveEventListener() {
+    if (this.eventSourceState) {
+      this.eventSourceState.close();
+      this.eventSourceState.removeEventListener('STATUS', e => this.processEvent(e), false);
+      this.eventSourceState.removeEventListener('NOTIFY', e => this.processEvent(e), false);
+      this.eventSourceState.removeEventListener('EVENT', e => this.processEvent(e), false);
+      this.eventSourceState.removeEventListener('CONNECTED', e => this.processEvent(e), false);
+      this.eventSourceState.removeEventListener('DISCONNECTED', e => this.processEvent(e), false);
+      this.eventSourceState.removeEventListener('KEEP-ALIVE', () => this.resetReconnectTimeout(), false);
+      this.eventSourceState = null;
+    }
   }
   extractHidden(body) {
     const returnObject = {};
@@ -1136,6 +1162,7 @@ class Homeconnect extends utils.Adapter {
    * @param ms milliseconds
    */
   sleep(ms) {
+    // @ts-ignore
     return new Promise(resolve => {
       this.sleepTimer = this.setTimeout(() => {
         resolve(true);
@@ -1156,15 +1183,7 @@ class Homeconnect extends utils.Adapter {
       this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
       this.rateLimitingInterval && this.clearInterval(this.rateLimitingInterval);
       this.sleepTimer && this.clearTimeout(this.sleepTimer);
-      if (this.eventSourceState) {
-        this.eventSourceState.close();
-        this.eventSourceState.removeEventListener('STATUS', e => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('NOTIFY', e => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('EVENT', e => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('CONNECTED', e => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('DISCONNECTED', e => this.processEvent(e), false);
-        this.eventSourceState.removeEventListener('KEEP-ALIVE', () => this.resetReconnectTimeout(), false);
-      }
+      this.startRemoveEventListener();
 
       callback();
     } catch (e) {
