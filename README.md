@@ -85,8 +85,7 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-
-### **WORK IN PROGRESS**
+### 1.6.0 (2026-05-11)
 
 - (copilot) Adapter requires node.js >= 22 now
 - (copilot) Adapter requires admin >= 7.7.22 now
@@ -118,12 +117,6 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 
 - (TA2k) fix for -001 devices
 - (simatec) Adapter has been adapted to meet Responsive Design rules.
-
-### 1.4.2 (2024-10-25)
-
-- (TA2k) fix for devices with object values
-
-[Older changelogs can be found there](CHANGELOG_OLD.md)
 
 ## License
 

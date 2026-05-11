@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.5.2",
+    "version": "1.6.0",
     "news": {
+      "1.6.0": {
+        "en": "Adapter requires node.js >= 22 now\nAdapter requires admin >= 7.7.22 now\nFixed adapter crash if URI is empty\nSave remaining time in active folder\nDevice monitoring starts only after the adapter has started (this may take up to 2 minutes)",
+        "de": "Adapter benötigt node.js >= 22 jetzt\nAdapter benötigt admin >= 7.7.22 jetzt\nFixed Adapter Crash, wenn URI leer ist\nRestzeit im aktiven Ordner speichern\nGeräteüberwachung beginnt erst nach dem Start des Adapters (dies kann bis zu 2 Minuten dauern)",
+        "ru": "Адаптер требует node.js >= 22 сейчас\nАдаптер требует администратора >= 7.7.22\nИсправлен сбой адаптера, если URI пуст\nЭкономьте оставшееся время в активной папке\nМониторинг устройства начинается только после запуска адаптера (это может занять до 2 минут)",
+        "pt": "Adaptador requer nod.js >= 22 agora\nAdaptador requer admin >= 7.7.22 agora\nFalha fixa do adaptador se o URI estiver vazio\nGravar o tempo restante na pasta activa\nO monitoramento do dispositivo só começa após o início do adaptador (o que pode levar até 2 minutos)",
+        "nl": "Voor de adapter zijn node.js < 22 nu nodig\nAdapter vereist admin < 7.7.22 nu\nFixed adapter crash als URI leeg is\nBespaar resterende tijd in actieve map\nApparaatbewaking begint pas nadat de adapter is gestart (dit kan tot 2 minuten duren)",
+        "fr": "Adaptateur nécessite node.js >= 22 maintenant\nAdaptateur nécessite admin >= 7.7.22 maintenant\nCrash de l'adaptateur fixe si URI est vide\nEconomisez le temps restant dans le dossier actif\nLa surveillance de l'appareil commence seulement après le démarrage de l'adaptateur (cela peut prendre jusqu'à 2 minutes)",
+        "it": "Adattatore richiede node.js >= 22 ora\nAdattatore richiede admin >= 7.7.22 ora\nAttacco fisso se URI è vuoto\nSalvare il tempo rimanente nella cartella attiva\nIl monitoraggio del dispositivo inizia solo dopo l'avvio dell'adattatore (questo può richiedere fino a 2 minuti)",
+        "es": "Adaptador requiere node.js ю= 22 ahora\nEl adaptador requiere administrador= 7.7.22 ahora\nSe bloquea el adaptador fijo si URI está vacío\nGuardar el tiempo restante en la carpeta activa\nEl monitoreo de dispositivos comienza sólo después de que el adaptador haya comenzado (esto puede tardar hasta 2 minutos)",
+        "pl": "Adapter wymaga node.js > = 22\nAdapter wymaga admin > = 7.7.22\nNaprawiono awarię adaptera, jeśli URI jest puste\nZapisz pozostały czas w aktywnym folderze\nMonitorowanie urządzenia rozpoczyna się dopiero po uruchomieniu adaptera (może to trwać do 2 minut)",
+        "uk": "Адаптер вимагає node.js >= 22 тепер\nАдаптер вимагає адмін >= 7.7.22 тепер\nВиправлено помилку адаптера, якщо URI порожній\nЗаощаджуйте час в активному папці\nПристрої моніторингу починаються тільки після запуску адаптера (це може знадобитися до 2 хвилин)",
+        "zh-cn": "适配器需要节点.js 现在22\n适任者需要管理员 \\ 7.7.22 现在\n如果 URI 是空的, 固定适配器崩溃\n在活动文件夹中保存剩余时间\n设备监测只在适配器启动后才开始(这可能需要2分钟)"
+      },
       "1.5.2": {
         "en": "Rate limit of 50 requests per minute intercepted at adapter startup\nAdded custom request",
         "de": "Rate Limit von 50 Anfragen pro Minute abgefangen bei Adapter-Start\nBenutzerdefinierte Anfrage",
@@ -80,19 +93,6 @@
         "pl": "stałe nieprawidłowe wartości min / max",
         "uk": "фіксовані недійсні значення min/max",
         "zh-cn": "固定无效的分钟/最大值"
-      },
-      "1.4.0": {
-        "en": "Adapter requires node.js >= 18 and js-controller >= 5 now\nDependencies have been updated",
-        "de": "Adapter benötigt node.js >= 18 und js-controller >= 5 jetzt\nAbhängigkeiten wurden aktualisiert",
-        "ru": "Адаптер требует node.js >= 18 и js-контроллер >= 5 сейчас\nЗависимость обновлена",
-        "pt": "Adapter requer node.js >= 18 e js-controller >= 5 agora\nAs dependências foram atualizadas",
-        "nl": "Voor adaptor zijn node.js < 18 en js-controller > Nu 5\nAfhankelijkheden zijn bijgewerkt",
-        "fr": "L'adaptateur nécessite node.js >= 18 et js-controller >= 5 maintenant\nLes dépendances ont été actualisées",
-        "it": "Adattatore richiede node.js >= 18 e js-controller >= 5 ora\nLe dipendenze sono state aggiornate",
-        "es": "Adaptador requiere node.js √≥= 18 y js-controller 5 ahora\nSe han actualizado las dependencias",
-        "pl": "Adapter wymaga node.js > = 18 i kontroler js- > = 5 teraz\nZaktualizowano zależności",
-        "uk": "Адаптер вимагає node.js >= 18 і js-controller >= 5 тепер\nЗалежність було оновлено",
-        "zh-cn": "适配器需要节点.js QQ18和js控制器 QQ 现在5号\n依赖关系已更新"
       }
     },
     "titleLang": {

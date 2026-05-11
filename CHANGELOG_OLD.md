@@ -1,4 +1,10 @@
 # Older changes
+## 1.4.2 (2024-10-25)
+
+- (TA2k) fix for devices with object values
+
+[Older changelogs can be found there](CHANGELOG_OLD.md)
+
 ## 1.4.1 (2024-07-02)
 
 - (foxriver76) fixed invalid min/max values
