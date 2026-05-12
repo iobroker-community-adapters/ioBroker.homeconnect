@@ -86,7 +86,7 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     ### **WORK IN PROGRESS**
 -->
 ### 1.6.1 (2026-05-12)
-- Login/Refresh flow improved
+- (TA2k) Login/Refresh flow improved
 
 ### 1.6.0 (2026-05-11)
 
