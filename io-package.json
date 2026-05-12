@@ -121,17 +121,8 @@
       "zh-cn": "Homeconnect 设备的适配器",
       "uk": "Адаптер для пристроїв Homeconnect"
     },
-    "authors": [
-      "TA2k <tombox2020@gmail.com>",
-      "iobroker-community-adapters <iobroker-community-adapters@gmx.de>"
-    ],
-    "keywords": [
-      "homeconnect",
-      "BSH",
-      "bosch",
-      "siemens",
-      "neff"
-    ],
+    "authors": ["TA2k <tombox2020@gmail.com>", "iobroker-community-adapters <iobroker-community-adapters@gmx.de>"],
+    "keywords": ["homeconnect", "BSH", "bosch", "siemens", "neff"],
     "licenseInformation": {
       "license": "MIT",
       "type": "free"
@@ -157,12 +148,8 @@
       }
     },
     "docs": {
-      "en": [
-        "docs/en/README.md"
-      ],
-      "de": [
-        "docs/de/README.md"
-      ]
+      "en": ["docs/en/README.md"],
+      "de": ["docs/de/README.md"]
     },
     "dependencies": [
       {
@@ -175,12 +162,8 @@
       }
     ]
   },
-  "encryptedNative": [
-    "password"
-  ],
-  "protectedNative": [
-    "password"
-  ],
+  "encryptedNative": ["password"],
+  "protectedNative": ["password"],
   "native": {
     "clientID": "",
     "username": "",
@@ -229,6 +212,30 @@
           "pl": "Stan sesji",
           "uk": "Стан сеансу",
           "zh-cn": "会话状态"
+        },
+        "type": "string",
+        "read": true,
+        "write": false
+      },
+      "native": {}
+    },
+    {
+      "_id": "auth.verificationUrl",
+      "type": "state",
+      "common": {
+        "role": "state",
+        "name": {
+          "en": "Verification Url",
+          "de": "Verifizierungs-URL",
+          "ru": "URL-адрес проверки",
+          "pt": "URL de verificação",
+          "nl": "Verificatie-URL",
+          "fr": "URL de vérification",
+          "it": "URL di verifica",
+          "es": "URL de verificación",
+          "pl": "Adres URL weryfikacji",
+          "uk": "URL-адреса підтвердження",
+          "zh-cn": "验证网址"
         },
         "type": "string",
         "read": true,

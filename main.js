@@ -60,7 +60,6 @@ class Homeconnect extends utils.Adapter {
     this.rateLimiting = {};
     this.tokenRateLimiting = {};
     this.rateLimitingInterval = null;
-    // @ts-expect-error //Nothing
     this.requestClient = axiosRateLimit(
       axios.create({
         withCredentials: true,
