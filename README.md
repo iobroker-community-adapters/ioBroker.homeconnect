@@ -85,6 +85,9 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+### 1.6.1 (2026-05-12)
+- Login/Refresh flow improved
+
 ### 1.6.0 (2026-05-11)
 
 - (copilot) Adapter requires node.js >= 22 now
@@ -112,11 +115,6 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
 - (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
 - (Lucky-ESA) Adapter requires admin >= 7.6.17 now
 - (mcm1957) Adapter requires node.js >= 20 now
-
-### 1.4.3 (2024-11-19)
-
-- (TA2k) fix for -001 devices
-- (simatec) Adapter has been adapted to meet Responsive Design rules.
 
 ## License
 

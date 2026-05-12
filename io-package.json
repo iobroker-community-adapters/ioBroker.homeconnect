@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.6.0",
+    "version": "1.6.1",
     "news": {
+      "1.6.1": {
+        "en": "Login/Refresh flow improved",
+        "de": "Login/Refresh Flow verbessert",
+        "ru": "Логин/Повторный поток улучшен",
+        "pt": "O fluxo de login/atualização melhorou",
+        "nl": "Aanmelden/verversen stroom verbeterd",
+        "fr": "Amélioration du flux de connexion/raffinage",
+        "it": "Miglioramento del flusso di Login/Refresh",
+        "es": "Mejoramiento del flujo de retorno",
+        "pl": "Zaloguj / Odśwież poprawiony przepływ",
+        "uk": "Ввійти/Поліпшити потік",
+        "zh-cn": "登录/更新流程得到改善"
+      },
       "1.6.0": {
         "en": "Adapter requires node.js >= 22 now\nAdapter requires admin >= 7.7.22 now\nFixed adapter crash if URI is empty\nSave remaining time in active folder\nDevice monitoring starts only after the adapter has started (this may take up to 2 minutes)",
         "de": "Adapter benötigt node.js >= 22 jetzt\nAdapter benötigt admin >= 7.7.22 jetzt\nFixed Adapter Crash, wenn URI leer ist\nRestzeit im aktiven Ordner speichern\nGeräteüberwachung beginnt erst nach dem Start des Adapters (dies kann bis zu 2 Minuten dauern)",
@@ -80,19 +93,6 @@
         "pl": "dla urządzeń o wartościach obiektowych",
         "uk": "виправлення для пристроїв з значеннями об'єкта",
         "zh-cn": "用于具有对象值的设备的固定"
-      },
-      "1.4.1": {
-        "en": "fixed invalid min/max values",
-        "de": "ungültige min/max-werte",
-        "ru": "недействительными",
-        "pt": "valores fixos inválidos min/max",
-        "nl": "vaste ongeldige min/max waarden",
-        "fr": "valeurs fixes min/max non valides",
-        "it": "valori fissi non validi min/max",
-        "es": "valores fijos inválidos min/max",
-        "pl": "stałe nieprawidłowe wartości min / max",
-        "uk": "фіксовані недійсні значення min/max",
-        "zh-cn": "固定无效的分钟/最大值"
       }
     },
     "titleLang": {

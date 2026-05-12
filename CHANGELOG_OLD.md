@@ -1,4 +1,9 @@
 # Older changes
+## 1.4.3 (2024-11-19)
+
+- (TA2k) fix for -001 devices
+- (simatec) Adapter has been adapted to meet Responsive Design rules.
+
 ## 1.4.2 (2024-10-25)
 
 - (TA2k) fix for devices with object values
