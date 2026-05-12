@@ -204,22 +204,25 @@ class Homeconnect extends utils.Adapter {
           tokenReceived = true;
         })
         .catch(async error => {
-          this.log.error(error);
-          this.log.error('Please open this URL in your browser and login:');
-          this.log.error(deviceAuth.verification_uri_complete);
-          if (error.response) {
-            this.log.error(JSON.stringify(error.response.data));
-            if (error.response.status === 429) {
-              this.log.info('The maximum number of requests has been reached!');
-              if (error.response.headers) {
-                if (error.response.headers['retry-after']) {
-                  this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+          const errCode = error.response?.data?.error;
+          if (errCode === 'authorization_pending' || errCode === 'slow_down') {
+            this.log.debug('Waiting for user approval...');
+          } else {
+            this.log.error(error);
+            this.log.error('Please open this URL in your browser and login:');
+            this.log.error(deviceAuth.verification_uri_complete);
+            if (error.response) {
+              this.log.error(JSON.stringify(error.response.data));
+              if (error.response.status === 429) {
+                this.log.info('The maximum number of requests has been reached!');
+                if (error.response.headers) {
+                  if (error.response.headers['retry-after']) {
+                    this.log.error(`API retry-after: ${this.convertRetryAfter(error.response.headers['retry-after'])}`);
+                  }
                 }
               }
             }
           }
-
-          this.log.info('Wait 10 seconds to retry');
 
           await this.sleep(10000);
         });
