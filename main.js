@@ -14,8 +14,6 @@ const limiting = require('./lib/rateLimiting');
 const constants = require('./lib/constants');
 const qs = require('qs');
 const { EventSource } = require('eventsource');
-const tough = require('tough-cookie');
-const { HttpsCookieAgent } = require('http-cookie-agent/http');
 class Homeconnect extends utils.Adapter {
   /**
    * @param {Partial<utils.AdapterOptions>} [options={}]
@@ -62,16 +60,10 @@ class Homeconnect extends utils.Adapter {
     this.rateLimiting = {};
     this.tokenRateLimiting = {};
     this.rateLimitingInterval = null;
-    this.cookieJar = new tough.CookieJar();
     // @ts-expect-error //Nothing
     this.requestClient = axiosRateLimit(
       axios.create({
         withCredentials: true,
-        httpsAgent: new HttpsCookieAgent({
-          cookies: {
-            jar: this.cookieJar,
-          },
-        }),
       }),
       { maxRequests: 15, perMilliseconds: 1000 },
     );
@@ -112,12 +104,12 @@ class Homeconnect extends utils.Adapter {
     if (this.session.refresh_token) {
       await this.refreshToken();
     } else {
-      if (!this.config.username || !this.config.password || !this.config.clientID) {
-        this.log.warn('please enter homeconnect app username and password and clientId in the instance settings');
+      if (!this.config.clientID) {
+        this.log.warn('Please enter your Client ID in the instance settings');
         return;
       }
 
-      this.log.debug('Start normal login');
+      this.log.debug('Start login via device flow');
       await this.login();
     }
     if (this.session.access_token) {
@@ -152,8 +144,6 @@ class Homeconnect extends utils.Adapter {
     }, 60 * 1000);
   }
   async login() {
-    let loginUrl = '';
-    let tokenRequestSuccesful = false;
     const deviceAuth = await this.requestClient({
       method: 'post',
       url: 'https://api.home-connect.com/security/oauth/device_authorization',
@@ -163,160 +153,41 @@ class Homeconnect extends utils.Adapter {
       data: `client_id=${this.config.clientID}&scope=IdentifyAppliance%20Monitor%20Settings%20Control`,
     })
       .then(res => {
-        this.log.debug(`login: ${JSON.stringify(res.data)}`);
+        this.log.debug(`Device Auth: ${JSON.stringify(res.data)}`);
         return res.data;
       })
       .catch(error => {
-        this.log.error(`login: ${error}`);
+        this.log.error(`Device authorization failed: ${error}`);
         if (error.response) {
-          this.log.error(`login: ${JSON.stringify(error.response.data)}`);
+          this.log.error(JSON.stringify(error.response.data));
           if (error.response.data.error === 'unauthorized_client') {
             this.log.error('Please check your clientID or wait 15 minutes until it is active');
           }
         }
       });
+
     if (!deviceAuth || !deviceAuth.verification_uri_complete) {
-      this.log.error('No verification_uri_complete in device_authorization');
+      this.log.error('No verification URL received from device authorization');
       return;
     }
 
-    const loginResponse = await this.requestClient({
-      method: 'post',
-      url: 'https://api.home-connect.com/security/oauth/device_login',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+    this.log.warn('====================================================');
+    this.log.warn('Please open this URL in your browser and login:');
+    this.log.warn(deviceAuth.verification_uri_complete);
+    this.log.warn('Waiting for approval...');
+    this.log.warn('====================================================');
 
-      data: qs.stringify({
-        user_code: deviceAuth.user_code,
-        client_id: this.config.clientID,
-        accept_language: 'de',
-        region: 'EU',
-        environment: 'PRD',
-        lookup: 'true',
-        email: this.config.username,
-        password: this.config.password,
-      }),
-    })
-      .then(async res => {
-        this.log.debug(`device login: ${JSON.stringify(res.data)}`);
-        if (res.data.match('data-error-data="" >(.*)<')) {
-          this.log.info(`Normal Login response ${res.data.match('data-error-data="" >(.*)<')[1]}`);
-          this.log.info('Try new SingleKey Login');
+    await this.setState('auth.verificationUrl', { val: deviceAuth.verification_uri_complete, ack: true });
 
-          const formData = await this.requestClient({
-            method: 'post',
-            url: 'https://api.home-connect.com/security/oauth/device_login',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
+    let tokenReceived = false;
 
-            data: qs.stringify({
-              user_code: deviceAuth.user_code,
-              client_id: this.config.clientID,
-              accept_language: 'de',
-              region: 'EU',
-              environment: 'PRD',
-              lookup: 'true',
-              email: this.config.username,
-            }),
-          })
-            .then(res => {
-              this.log.debug(`device login2: ${JSON.stringify(res.data)}`);
-
-              loginUrl = res.request.path;
-              return this.extractHidden(res.data);
-            })
-            .catch(error => {
-              this.log.error(`device login2: ${error}`);
-              if (error.response) {
-                this.log.error(`device login2: ${JSON.stringify(error.response.data)}`);
-              }
-            });
-          const loginParams = qs.parse(loginUrl.split('?')[1]);
-          const returnUrl = loginParams.returnUrl || loginParams.ReturnUrl;
-
-          await this.requestClient({
-            method: 'post',
-            maxBodyLength: Infinity,
-            url: 'https://singlekey-id.com/auth/de-de/login/password',
-            headers: {
-              'content-type': 'application/x-www-form-urlencoded',
-              accept: '*/*',
-              'hx-request': 'true',
-              'sec-fetch-site': 'same-origin',
-              'hx-boosted': 'true',
-              'accept-language': 'de-DE,de;q=0.9',
-              'sec-fetch-mode': 'cors',
-              origin: 'https://singlekey-id.com',
-              'user-agent':
-                'Mozilla/5.0 (iPhone; CPU iPhone OS 16_7_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-              'sec-fetch-dest': 'empty',
-            },
-            params: loginParams,
-            data: {
-              Password: this.config.password,
-              RememberMe: 'true',
-              __RequestVerificationToken: formData['undefined'],
-            },
-          }).catch(error => {
-            this.log.error(error);
-            error.response && this.log.error(JSON.stringify(error.response.data));
-          });
-          return await this.requestClient({
-            method: 'get',
-            url: `https://singlekey-id.com${returnUrl}`,
-          })
-            .then(res => {
-              this.log.debug(`Password: ${JSON.stringify(res.data)}`);
-              return res.data;
-            })
-            .catch(error => {
-              this.log.error(`Password: ${error}`);
-              error.response && this.log.error(`Password: ${JSON.stringify(error.response.data)}`);
-            });
-        }
-        this.log.info('Login details submitted');
-        return this.extractHidden(res.data);
-      })
-      .catch(error => {
-        this.log.error('Please check username and password');
-        this.log.error(error);
-        if (error.response) {
-          this.log.error(JSON.stringify(error.response.data));
-        }
-      });
-    const grantData = this.extractHidden(loginResponse);
-    await this.requestClient({
-      method: 'post',
-      url: 'https://api.home-connect.com/security/oauth/device_grant',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-
-      data: grantData,
-    })
-      .then(res => {
-        this.log.debug(`Grand: ${JSON.stringify(res.data)}`);
-        return;
-      })
-      .catch(error => {
-        this.log.error(error);
-        if (error.response) {
-          this.log.error(`Grand: ${JSON.stringify(error.response.data)}`);
-        }
-      });
-
-    await this.sleep(6000);
-
-    while (!tokenRequestSuccesful) {
+    while (!tokenReceived) {
       await this.requestClient({
         method: 'post',
         url: 'https://api.home-connect.com/security/oauth/token',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-
         data: qs.stringify({
           grant_type: 'device_code',
           device_code: deviceAuth.device_code,
@@ -326,19 +197,16 @@ class Homeconnect extends utils.Adapter {
         .then(async res => {
           this.log.debug(`Token: ${JSON.stringify(res.data)}`);
           this.session = res.data;
-          this.log.info('Token received succesfully');
+          this.log.info('Login successful - token received');
           await this.setState('info.connection', true, true);
           this.session.next = new Date().getTime() + parseInt(this.session.expires_in) * 1000;
-          //await this.setState('auth.session', { val: this.encrypt(JSON.stringify(this.session)), ack: true });
           await this.setState('auth.session', { val: JSON.stringify(this.session), ack: true });
-          tokenRequestSuccesful = true;
+          tokenReceived = true;
         })
         .catch(async error => {
           this.log.error(error);
-          this.log.error('Please check username and password or visit this site for manually login: ');
-          this.log.error('Bitte überprüfe Benutzername und Passwort oder besuche diese Seite für manuelle Anmeldung: ');
+          this.log.error('Please open this URL in your browser and login:');
           this.log.error(deviceAuth.verification_uri_complete);
-          //   this.log.error(error);
           if (error.response) {
             this.log.error(JSON.stringify(error.response.data));
             if (error.response.status === 429) {
@@ -1094,21 +962,16 @@ class Homeconnect extends utils.Adapter {
               }
             }
           }
-          if (
-            error.response.data.error === 'invalid_grant' &&
-            error.response.data.error_description === 'Backend service (SKID) request rejected'
-          ) {
-            //ToDo Delete Session and stop adapter with log
+          if (error.response.data.error === 'invalid_grant') {
             await this.setState('auth.session', '', true);
-            this.log.error(
-              `Please start adapter manually and copy the HTTP link into browser. Login and click on 'Approve'.`,
-            );
             this.setState('info.connection', false, true);
             this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
             this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
             this.rateLimitingInterval && this.clearInterval(this.rateLimitingInterval);
             this.sleepTimer && this.clearTimeout(this.sleepTimer);
             this.startRemoveEventListener();
+            this.log.info('Refresh token invalid. Starting device authorization flow...');
+            await this.login();
             return;
           }
         }
@@ -1119,6 +982,7 @@ class Homeconnect extends utils.Adapter {
         this.reLoginTimeout && this.clearTimeout(this.reLoginTimeout);
         this.refreshTokenInterval && this.clearInterval(this.refreshTokenInterval);
         this.startRemoveEventListener();
+        this.setState('info.connection', false, true);
         this.reLoginTimeout = this.setTimeout(
           async () => {
             this.restart();
@@ -1138,25 +1002,6 @@ class Homeconnect extends utils.Adapter {
       this.eventSourceState.removeEventListener('KEEP-ALIVE', () => this.resetReconnectTimeout(), false);
       this.eventSourceState = null;
     }
-  }
-  extractHidden(body) {
-    const returnObject = {};
-    const matches = this.matchAll(/<input (?=[^>]* name=["']([^'"]*)|)(?=[^>]* value=["']([^'"]*)|)/g, body);
-    for (const match of matches) {
-      returnObject[match[1]] = match[2];
-    }
-    return returnObject;
-  }
-  matchAll(re, str) {
-    let match;
-    const matches = [];
-
-    while ((match = re.exec(str))) {
-      // add all matched groups
-      matches.push(match);
-    }
-
-    return matches;
   }
   /**
    * @param ms milliseconds
