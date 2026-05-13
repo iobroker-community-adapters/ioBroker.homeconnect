@@ -85,7 +85,13 @@ Change the value of programs.selected.BSH_Common_Root_SelectedProgram leads to s
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+
+### **WORK IN PROGRESS**
+
+- (Lucky-ESA) Fixed unnecessary object overwriting (#387)
+
 ### 1.6.1 (2026-05-12)
+
 - (TA2k) Login/Refresh flow improved
 
 ### 1.6.0 (2026-05-11)

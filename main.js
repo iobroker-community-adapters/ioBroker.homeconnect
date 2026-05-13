@@ -542,6 +542,7 @@ class Homeconnect extends utils.Adapter {
               }
             }
             this.log.debug(`Create State: ${haId}${folder}.${subElement.key.replace(/\./g, '_')}`);
+            this.log.debug(`${haId} subElement: ${JSON.stringify(subElement)}`);
             let defaults;
             let type = 'mixed';
             let role = 'state';
@@ -555,15 +556,21 @@ class Homeconnect extends utils.Adapter {
               type = 'number';
               role = 'value';
               defaults = 0;
+            } else if (typeof subElement.value === 'string') {
+              type = 'string';
+              role = 'state';
+              defaults = '';
             }
             let common = {
-              name: subElement.name,
               type: type,
               role: role,
               write: true,
               read: true,
               def: defaults,
             };
+            if (subElement.name != null) {
+              common.name = subElement.name;
+            }
             if (subElement.unit && subElement.unit != '') {
               common.unit = subElement.unit;
             }
@@ -583,7 +590,6 @@ class Homeconnect extends utils.Adapter {
               common.max = subElement.constraints.max;
             }
             const path = `${haId + folder}.${subElement.key.replace(/\./g, '_')}`;
-            await this.createDataPoint(path, common, 'state', null, true, null);
             let value = null;
             if (subElement.value !== undefined) {
               this.log.debug('Set api value');
@@ -625,6 +631,7 @@ class Homeconnect extends utils.Adapter {
             role: 'state',
             write: true,
             read: true,
+            def: '',
             states: {},
           };
           if (this.availablePrograms[haId]) {
@@ -904,22 +911,27 @@ class Homeconnect extends utils.Adapter {
           }
         }
         this.log.debug(`Path: ${haId}.${folder}.${key}:${element.value}`);
-        let value = null;
+        //ToDo Create channel
+        await this.setObjectNotExistsAsync(haId + '.' + folder + '.' + key, {
+          type: 'state',
+          common: {
+            name: key,
+            type: 'mixed',
+            role: 'indicator',
+            write: true,
+            read: true,
+            unit: element.unit || '',
+          },
+          native: {},
+        })
+          .then(() => {})
+          .catch(() => {
+            this.log.error('failed set state');
+          });
         if (element.value !== undefined) {
-          this.log.debug('Set value');
-          value = element.value;
+          this.log.debug('Set event state ');
+          await this.setState(haId + '.' + folder + '.' + key, element.value, true);
         }
-        const common = {
-          name: key,
-          type: 'mixed',
-          role: 'state',
-          write: true,
-          read: true,
-        };
-        if (element.unit && element.unit != '') {
-          common.unit = element.unit;
-        }
-        await this.createDataPoint(`${haId}.${folder}.${key}`, common, 'state', value, true, null);
       }
     } catch (error) {
       this.log.error(`Parsemessage: ${error}`);
