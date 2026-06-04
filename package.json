@@ -30,7 +30,7 @@
     "axios": "^1.16.0",
     "axios-rate-limit": "^1.9.0",
     "eventsource": "^4.1.0",
-    "qs": "^6.15.1"
+    "qs": "^6.15.2"
   },
   "devDependencies": {
     "@alcalzone/release-script": "^5.2.0",
