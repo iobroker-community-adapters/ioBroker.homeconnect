@@ -29,7 +29,7 @@
     "@iobroker/adapter-core": "^3.3.2",
     "axios": "^1.16.0",
     "axios-rate-limit": "^1.9.0",
-    "eventsource": "^4.1.0",
+    "eventsource": "^5.1.1",
     "qs": "^6.15.1"
   },
   "devDependencies": {
