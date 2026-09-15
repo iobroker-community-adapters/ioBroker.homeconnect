@@ -912,7 +912,7 @@ class Homeconnect extends utils.Adapter {
         }
         this.log.debug(`Path: ${haId}.${folder}.${key}:${element.value}`);
         //ToDo Create channel
-        await this.setObjectNotExistsAsync(haId + '.' + folder + '.' + key, {
+        await this.setObjectNotExistsAsync(`${haId}.${folder}.${key}`, {
           type: 'state',
           common: {
             name: key,
@@ -930,7 +930,7 @@ class Homeconnect extends utils.Adapter {
           });
         if (element.value !== undefined) {
           this.log.debug('Set event state ');
-          await this.setState(haId + '.' + folder + '.' + key, element.value, true);
+          await this.setState(`${haId}.${folder}.${key}`, element.value, true);
         }
       }
     } catch (error) {
