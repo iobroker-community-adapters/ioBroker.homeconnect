@@ -3,7 +3,6 @@
     "step1": "Passaggio n. 1: iscriviti all'ID client. <br> Account utente di connessione predefinita per test = il tuo indirizzo e -mail nell'app HomeConnect. <br> Tipo di account = individuo",
     "step2": "Passaggio n. 2: registra l'app IoBroker. <br> ID applicazione = IoBroker. <br> flusso oauth = flusso del dispositivo. <br> Account utente di Home Connect predefinito per test = il tuo indirizzo email nell'app HomeConnect.",
     "step3": "Passaggio n. 3: attiva l'app <br> Immettere il tuo ID client qui. <br> Inserisci la tua e -mail e password dell'app HomeConnect. <br> Premi Salva e Chiudi.",
-    "App Email": "Email dell'app",
     "App Password": "Password dell'app",
     "Client ID": "ID client",
     "Language": "Lingua",
