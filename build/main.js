@@ -43,6 +43,8 @@ var import_enum_carry = require("./lib/enum-carry");
 var import_event_stream = require("./lib/event-stream");
 var import_pure_helpers = require("./lib/pure-helpers");
 var import_sign_in_help = require("./lib/sign-in-help");
+var import_native_key_migration = require("./lib/native-key-migration");
+var import_settings_migrations = require("./lib/settings-migrations");
 var import_log_dedup = require("./lib/log-dedup");
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
 const RATE_PAUSE_FALLBACK_MS = 6e4;
@@ -124,6 +126,9 @@ class Homeconnect extends utils.Adapter {
   /** Adapter start. Async body with a top-level try/catch (never a call-site .catch). */
   async onReady() {
     try {
+      if (await (0, import_native_key_migration.migrateNativeKeys)(this, import_settings_migrations.SETTINGS_MIGRATIONS, import_pure_helpers.errMessage)) {
+        return;
+      }
       await this.setStateChangedAsync("info.connection", { val: false, ack: true });
       await this.setStateChangedAsync("auth.signedIn", { val: false, ack: true });
       await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });

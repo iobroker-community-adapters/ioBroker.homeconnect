@@ -189,11 +189,12 @@ jobs:
             echo "::error ::the upgrade suite did not run although a previous inventory exists"
             exit 1
           fi
-      - name: Report when the committed inventory lags behind the code
+      - name: Fail when the committed inventory differs from what the code produces
         run: |
           if ! git diff --quiet -- test/objects.inventory.json; then
-            echo "::warning ::test/objects.inventory.json differs from what the adapter produces — the release run regenerates it"
             git diff --stat -- test/objects.inventory.json
+            echo "::error ::test/objects.inventory.json differs from what the adapter produces — regenerate it (npm run test:inventory) and commit it with the code"
+            exit 1
           fi
 
   admin-component:
@@ -215,6 +216,16 @@ jobs:
       # Needs src-admin/node_modules from the build step; the root test matrix never has them.
       - name: Type-check and test the component with its own TypeScript and vitest
         run: npm run test:admin
+
+  ci-passed:
+    # The one required check of the automerge ruleset: green only when every job that deploy waits for
+    # is green (every matrix leg, every gate job); a job skipped because of a red dependency fails it.
+    if: ${{ !cancelled() }}
+    needs: [check-and-lint, adapter-tests, repochecker-version-gate, workflow-lint, adapter-inventory, admin-component]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job deploy waits for passed
+        run: echo '${{ toJSON(needs.*.result) }}' | jq -e 'all(. == "success")'
 
   deploy:
     needs: [check-and-lint, adapter-tests, repochecker-version-gate, workflow-lint, adapter-inventory, admin-component]

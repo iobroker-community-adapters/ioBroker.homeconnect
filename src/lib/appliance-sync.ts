@@ -2454,7 +2454,7 @@ export class ApplianceSync {
   /**
    * Refresh a state object whose owned metadata changed — by MERGING, never by
    * deleting and re-creating it (the shelly adapter's model, krobi 2026-09-02:
-   * „wir halten uns an den Shelly Adapter"). A merge cannot lose anything the
+   * "we follow the Shelly adapter"). A merge cannot lose anything the
    * object carries beyond our own fields: a recording configuration, an alias
    * and the state value all stay untouched, and there is no window in which the
    * object does not exist.

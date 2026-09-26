@@ -11,6 +11,8 @@ import type { WriteRequest } from "./lib/command-dispatch";
 import { EventStream } from "./lib/event-stream";
 import { errMessage, isRecord } from "./lib/pure-helpers";
 import { looksLikeClientId } from "./lib/sign-in-help";
+import { migrateNativeKeys } from "./lib/native-key-migration";
+import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { LogDedup, categorize } from "./lib/log-dedup";
 import type { I18nKey } from "./lib/i18n";
 
@@ -169,6 +171,11 @@ export class Homeconnect extends utils.Adapter {
   /** Adapter start. Async body with a top-level try/catch (never a call-site .catch). */
   private async onReady(): Promise<void> {
     try {
+      // Obsolete instance keys are nulled once; that write restarts the instance, so this
+      // run stops here and the next one starts with the cleaned settings.
+      if (await migrateNativeKeys(this, SETTINGS_MIGRATIONS, errMessage)) {
+        return;
+      }
       // Whatever goes offline at a stop goes offline at the start too: after a
       // crash, a kill or a power cut the teardown never ran, and nothing else
       // would correct a green marker until a sign-in succeeds — which can take

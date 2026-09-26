@@ -766,7 +766,7 @@ describe("keys the extra-data opt-in delivers", () => {
 
 describe("every table entry explains its datapoint", () => {
   it("leaves no entry without a description", () => {
-    // krobi 2026-09-07: „warum kannst du nicht ALLES übersetzen". Ten entries had a
+    // krobi 2026-09-07: "why can't you translate EVERYTHING". Ten entries had a
     // name but no explanation — seven of them were a second SPELLING of an option
     // whose twin carried the text all along (`…IDos1.Active` next to `…IDos1Active`,
     // `Washer.Option.SpeedPerfect` next to `Common.Option.SpeedPerfect`). The upgrade

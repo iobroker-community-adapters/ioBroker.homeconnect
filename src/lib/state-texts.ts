@@ -5,8 +5,8 @@
 //
 // Fleet rule (krobi 2026-09-02): the description is an explanation a user can
 // read, never the manufacturer's key. And EVERY datapoint gets one — krobi
-// 2026-09-07: „warum kannst du nicht ALLES übersetzen, egal ob das meine oder
-// irgendwelche maschinen nutzen". Where the manufacturer documents nothing and
+// 2026-09-07: "why can't you translate EVERYTHING, whether my machines use it or
+// anybody else's". Where the manufacturer documents nothing and
 // the value is opaque, the honest sentence says exactly that; what is never
 // allowed is an invented meaning, and what is no longer allowed is silence.
 //

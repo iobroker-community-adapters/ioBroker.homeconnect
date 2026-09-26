@@ -84,7 +84,7 @@ vi.mock("@iobroker/adapter-core", () => {
     public getAdapterObjectsAsync = vi.fn(() => {
       const out: Record<string, unknown> = {};
       for (const [k, v] of this.objects) {
-        out[`${this.namespace}.${k}`] = v;
+        out[`${this.namespace}.${k}`] = structuredClone(v);
       }
       return Promise.resolve(out);
     });
@@ -365,6 +365,36 @@ describe("Homeconnect onReady", () => {
       expect(ctx.syncs[0].markAllUnreachable).toHaveBeenCalledTimes(1);
       expect(ctx.syncs[0].syncAppliances).not.toHaveBeenCalled();
     }
+  });
+
+  it("removes the settings an earlier version left behind once, and stops the start for the restart", async () => {
+    const ctx = setup();
+    // An instance first set up by the previous adapter generation still carries its keys.
+    ctx.i.foreign.set("system.adapter.homeconnect.0", {
+      common: { nogit: true, supportCustoms: true, enabled: true },
+      native: { clientID: CLIENT_ID, username: "me@example.com", password: "secret" },
+    });
+    await ctx.i.onReady();
+    const a = ctx.i as unknown as { extendForeignObjectAsync: ReturnType<typeof vi.fn> };
+    expect(a.extendForeignObjectAsync).toHaveBeenCalledWith("system.adapter.homeconnect.0", {
+      native: { password: null, username: null },
+      common: { nogit: null, supportCustoms: null },
+    });
+    // The write restarts the instance: nothing of this run may start after it.
+    expect(ctx.syncs).toHaveLength(0);
+    expect(ctx.auths).toHaveLength(0);
+  });
+
+  it("starts normally when no obsolete setting is left", async () => {
+    const ctx = setup();
+    ctx.i.foreign.set("system.adapter.homeconnect.0", {
+      common: { enabled: true },
+      native: { clientID: CLIENT_ID, clientSecret: "" },
+    });
+    await ctx.i.onReady();
+    const a = ctx.i as unknown as { extendForeignObjectAsync: ReturnType<typeof vi.fn> };
+    expect(a.extendForeignObjectAsync).not.toHaveBeenCalledWith("system.adapter.homeconnect.0", expect.anything());
+    expect(ctx.auths[0].start).toHaveBeenCalledTimes(1);
   });
 
   it("sorts out the previous generation's trees first, before any tree moves", async () => {

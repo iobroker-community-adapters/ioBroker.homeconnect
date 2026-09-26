@@ -3,8 +3,7 @@ name: New issue
 # A friendly first reply on every new issue that names an older adapter version: the reported
 # version is compared with the npm release, and only when they differ the issue gets the label
 # `not-latest-version` and one short bilingual note. No threats, no task list, no auto-close —
-# the reporter has already done what the form asked (feedback_issue_vorlagen_niedrige_huerde).
-# Fleet master: .consistency-master/workflows/new-issue.yml (2026-09-08).
+# the reporter has already done what the form asked.
 
 on:
   issues:

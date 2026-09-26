@@ -1,5 +1,5 @@
 // Master test of the error-text helper — taken unchanged from the fleet master
-// (Entwicklung/CLAUDE_CODING.md, "Fehlertext nur über den Helfer", workshop b911f1c);
+// (Entwicklung/CLAUDE_CODING.md, section on the error-text helper, workshop b911f1c);
 // only the function name and the import path are this adapter's.
 import http from "node:http";
 import net from "node:net";
