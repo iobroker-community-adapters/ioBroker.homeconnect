@@ -133,7 +133,6 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Changed: a button in the settings resets the sign-in, for example to switch to another Home Connect account.
 - Fixed: a Home Connect application that was disabled, deleted or given a new secret now ends the login with a clear message instead of retrying for a day.
 - Fixed: a login saved by another ioBroker installation is reported in the log instead of silently asking for a new sign-in.
-- Fixed: settings left over from older versions, such as the account password of version 1.6.x, are removed once; the instance restarts once.
 - Improved: the settings guide the Home Connect developer account step by step, with one button per step.
 
 ### 1.23.0 (2026-09-24)
