@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Zugangsdaten",
-  "credentialsInfo": "Der Adapter braucht eine eigene Anwendung im Home Connect Developer Program. Neu dabei? Im Entwicklerportal kostenlos registrieren und eine Anwendung anlegen — deren Client-ID und Client-Secret unten eintragen. Vom alten Adapter umgestiegen? Die Client-ID wurde übernommen; das zugehörige Client-Secret findest du im Portal unter Applications. Beide werden verschlüsselt gespeichert. Das Entwicklerkonto mit dem Konto der Home-Connect-App verlinken: im Profil des Portals „Default Home Connect User Account for Testing“ auf die E-Mail-Adresse der App setzen.",
-  "portalButton": "Home-Connect-Entwicklerportal öffnen",
+  "credentialsInfo": "Der Adapter meldet sich mit einer eigenen Anwendung im Home Connect Developer Program an — kostenlos, einmal einzurichten:\n1. Entwicklerkonto anlegen (erster Knopf). Als „Default Home Connect Account for Testing“ die E-Mail-Adresse deines Home-Connect-App-Kontos eintragen — genau wie in der App, in Kleinbuchstaben.\n2. Anwendung registrieren (zweiter Knopf): Application ID beliebig, OAuth Flow „Device Flow“ (später nicht mehr änderbar), Success Redirect leer, One Time Token Mode aus.\n3. 15 bis 60 Minuten warten — eine neue oder geänderte Anwendung ist erst danach bei Home Connect aktiv.\n4. Client-ID (64 Zeichen) und Client-Secret in die Felder unten kopieren und speichern.\n5. Weiter unten erscheint ein Anmelde-Link: öffnen, mit dem Home-Connect-Konto anmelden und bestätigen.\nVom alten Adapter umgestiegen? Die Client-ID wurde übernommen. Verschlüsselt gespeichert wird nur das Client-Secret.",
+  "portalButton": "Meine Anwendungen",
   "label_clientId": "Client-ID",
   "label_clientSecret": "Client-Secret",
   "headerSignin": "Anmeldung",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Fernstart erlaubt seit",
   "remoteStartAllowedSinceDesc": "Wie lange die Fernstart-Freigabe schon aktiv ist. Das Gerät nimmt sie von selbst zurück.",
   "evIDosOpenTray": "Einspülschublade offen",
-  "evIDosOpenTrayDesc": "Das Gerät bittet darum, die Einspülschublade zu öffnen - die automatische Dosierung braucht Nachschub."
+  "evIDosOpenTrayDesc": "Das Gerät bittet darum, die Einspülschublade zu öffnen - die automatische Dosierung braucht Nachschub.",
+  "registerButton": "1. Entwicklerkonto anlegen",
+  "addAppButton": "2. Anwendung registrieren",
+  "lastError": "Letztes Anmeldeproblem",
+  "lastErrorDesc": "Was Home Connect beim Ablehnen der Anmeldung geantwortet hat, im Wortlaut. Leer, solange die Anmeldung steht; Unknown, solange noch nichts gefragt wurde."
 }

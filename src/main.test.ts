@@ -88,7 +88,31 @@ vi.mock("@iobroker/adapter-core", () => {
       }
       return Promise.resolve(out);
     });
-    public getForeignObjectsAsync = vi.fn(() => Promise.resolve({}));
+    /** Objects outside the namespace (rooms/functions, aliases), by full id. */
+    public foreign = new Map<string, Record<string, unknown>>();
+    public getForeignObjectsAsync = vi.fn((pattern: string) => {
+      const prefix = pattern.replace(/\*$/, "");
+      if (prefix.startsWith(`${this.namespace}.`)) {
+        return Promise.resolve({});
+      }
+      return Promise.resolve(
+        structuredClone(Object.fromEntries([...this.foreign].filter(([id]) => id.startsWith(prefix)))),
+      );
+    });
+    public getForeignObjectAsync = vi.fn((id: string) =>
+      Promise.resolve(this.foreign.has(id) ? structuredClone(this.foreign.get(id)) : null),
+    );
+    public setForeignObject = vi.fn((id: string, obj: Record<string, unknown>) => {
+      if (id.startsWith(`${this.namespace}.`)) {
+        this.objects.set(this.key(id), structuredClone(obj));
+      } else {
+        this.foreign.set(id, structuredClone(obj));
+      }
+      return Promise.resolve();
+    });
+    public extendForeignObjectAsync = vi.fn((id: string, obj: Record<string, unknown>) => this.extendObject(id, obj));
+    public getForeignStatesAsync = vi.fn(() => Promise.resolve({}));
+    public setForeignStateAsync = vi.fn((id: string, state: unknown) => this.setState(id, state));
     public delObjectAsync = vi.fn((id: string, opts?: { recursive?: boolean }) => {
       const key = this.key(id);
       for (const k of [...this.objects.keys()]) {
@@ -146,7 +170,11 @@ const failResult = (status: number, extra: Partial<JsonResult> = {}): JsonResult
   ...extra,
 });
 
+/** A client id in the portal's form — 64 hexadecimal characters. */
+const CLIENT_ID = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+
 interface FakeSync {
+  sortOutLegacyTrees: ReturnType<typeof vi.fn>;
   migrateDeviceIds: ReturnType<typeof vi.fn>;
   migrateRenamedStates: ReturnType<typeof vi.fn>;
   primeFromObjects: ReturnType<typeof vi.fn>;
@@ -162,6 +190,8 @@ interface FakeSync {
 }
 interface FakeAuthCtl {
   start: ReturnType<typeof vi.fn>;
+  requestSignIn: ReturnType<typeof vi.fn>;
+  resetLogin: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   refreshNow: ReturnType<typeof vi.fn>;
   persistPendingToken: ReturnType<typeof vi.fn>;
@@ -199,6 +229,7 @@ function internalOf(adapter: Homeconnect): {
   sync: FakeSync | undefined;
   restBlockedUntil: number;
   objects: Map<string, Record<string, unknown>>;
+  foreign: Map<string, Record<string, unknown>>;
   states: Map<string, { val: unknown; ack: boolean }>;
   writeLog: Array<{ id: string; val: unknown }>;
   config: Record<string, unknown>;
@@ -232,7 +263,7 @@ interface Ctx {
  */
 function setup(config: Record<string, unknown> = {}): Ctx {
   const i = internalOf(new Homeconnect());
-  i.config = { clientID: "cid", clientSecret: "sec", ...config };
+  i.config = { clientID: CLIENT_ID, clientSecret: "sec", ...config };
   const syncs: FakeSync[] = [];
   const auths: FakeAuthCtl[] = [];
   const streams: FakeStream[] = [];
@@ -240,6 +271,7 @@ function setup(config: Record<string, unknown> = {}): Ctx {
   i.makeSync = (port: Record<string, (...a: never[]) => unknown>) => {
     const s: FakeSync = {
       port,
+      sortOutLegacyTrees: vi.fn(() => Promise.resolve(undefined)),
       migrateDeviceIds: vi.fn(() => Promise.resolve(undefined)),
       migrateRenamedStates: vi.fn(() => Promise.resolve(undefined)),
       primeFromObjects: vi.fn(() => Promise.resolve(undefined)),
@@ -262,6 +294,8 @@ function setup(config: Record<string, unknown> = {}): Ctx {
       port,
       accessToken: "AT",
       start: vi.fn(() => Promise.resolve(undefined)),
+      requestSignIn: vi.fn(() => Promise.resolve("A new sign-in link was requested.")),
+      resetLogin: vi.fn(() => Promise.resolve("A new sign-in link was requested.")),
       stop: vi.fn(),
       refreshNow: vi.fn(() => Promise.resolve(false)),
       persistPendingToken: vi.fn(() => Promise.resolve(undefined)),
@@ -315,13 +349,13 @@ describe("Homeconnect onReady", () => {
     expect(ctx.auths[0].start).toHaveBeenCalledTimes(1);
   });
 
-  it("stops with a hint and starts no sign-in without credentials — but greys out the markers", async () => {
-    for (const config of [{ clientID: "" }, { clientSecret: "" }]) {
+  it("stops with a hint and starts no sign-in without a client id — but greys out the markers", async () => {
+    for (const config of [{ clientID: "" }, { clientID: "  \n" }, { clientID: undefined }]) {
       const ctx = setup(config);
       // A crashed signed-in run left both markers green.
       ctx.i.states.set("auth.signedIn", { val: true, ack: true });
       await ctx.i.onReady();
-      expect(ctx.i.log.warn).toHaveBeenCalledWith(expect.stringContaining("No Home Connect client ID / secret"));
+      expect(ctx.i.log.warn).toHaveBeenCalledWith(expect.stringContaining("No Home Connect Client ID configured"));
       // Running the device flow against an empty client id produces a stream of
       // rejected requests and a sign-in link that can never work.
       expect(ctx.auths).toHaveLength(0);
@@ -333,72 +367,75 @@ describe("Homeconnect onReady", () => {
     }
   });
 
-  it("removes the previous generation's trees before anything is primed", async () => {
+  it("sorts out the previous generation's trees first, before any tree moves", async () => {
     const ctx = setup();
-    ctx.i.objects.set("SIEMENS-HCS02-0011", { type: "folder", native: {} });
-    ctx.i.objects.set("SIEMENS-HCS02-0011.status.BSH_Common_Status_DoorState", { type: "state", native: {} });
-    ctx.i.objects.set("auth.session", { type: "state", native: {} });
-
     await ctx.i.onReady();
-    expect(ctx.i.objects.has("SIEMENS-HCS02-0011")).toBe(false);
-    expect(ctx.i.objects.has("SIEMENS-HCS02-0011.status.BSH_Common_Status_DoorState")).toBe(false);
-    // The sign-in must survive the migration — otherwise every user has to
-    // re-authorise after the update.
-    expect(ctx.i.objects.has("auth.session")).toBe(true);
-    expect(ctx.i.log.info).toHaveBeenCalledWith(expect.stringContaining("1 object tree(s) of the previous"));
+    const sync = ctx.syncs[0];
+    expect(sync.sortOutLegacyTrees).toHaveBeenCalledTimes(1);
+    expect(sync.sortOutLegacyTrees.mock.invocationCallOrder[0]).toBeLessThan(
+      sync.migrateDeviceIds.mock.invocationCallOrder[0],
+    );
   });
 
-  it("plans the cleanup only from this instance's own objects", async () => {
+  it("starts no later step when sorting out the legacy trees throws", async () => {
     const ctx = setup();
-    ctx.i.objects.set("auth.session", { type: "state", native: {} });
-    const get = (ctx.i as unknown as { getAdapterObjectsAsync: ReturnType<typeof vi.fn> }).getAdapterObjectsAsync;
-    get.mockResolvedValue({
-      "homeconnect.0.auth.session": { type: "state", native: {} },
-      // A foreign id has no business here, but a mis-scoped view would put one in.
-      // Planning from the raw id would aim a recursive delete at another adapter.
-      "other.0.SIEMENS-X.status.BSH_Common_Status_DoorState": { type: "state", native: {} },
+    withSync(ctx, s => s.sortOutLegacyTrees.mockRejectedValue(new Error("objects db down")));
+    await ctx.i.onReady();
+    expect(ctx.i.log.error).toHaveBeenCalledWith("Start-up failed at the legacy cleanup: objects db down");
+    expect(ctx.syncs[0].migrateDeviceIds).not.toHaveBeenCalled();
+    expect(ctx.auths).toHaveLength(0);
+  });
+
+  it("signs in without a client secret — the device flow needs none", async () => {
+    const ctx = setup({ clientSecret: "" });
+    await ctx.i.onReady();
+    expect(ctx.auths).toHaveLength(1);
+    expect(ctx.i.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("trims the client id and warns — without stopping — when it does not look like one", async () => {
+    const ctx = setup({ clientID: `  ${CLIENT_ID}\n` });
+    await ctx.i.onReady();
+    expect(ctx.i.log.warn).not.toHaveBeenCalled();
+
+    const odd = setup({ clientID: "my-app" });
+    await odd.i.onReady();
+    expect(odd.i.log.warn).toHaveBeenCalledWith(
+      "The Client ID does not look like one of Home Connect (64 hexadecimal characters, this one has 6 characters) — copy it again from the developer portal.",
+    );
+    // Home Connect decides — the sign-in still starts and says so if the id is unknown.
+    expect(odd.auths).toHaveLength(1);
+  });
+
+  it("says nothing is known yet about a sign-in problem at start", async () => {
+    const ctx = setup();
+    ctx.i.states.set("auth.lastError", { val: "unauthorized_client: Invalid client id", ack: true });
+    await ctx.i.onReady();
+    expect(ctx.i.states.get("auth.lastError")).toEqual({ val: "Unknown", ack: true });
+    await (ctx.auths[0].port.setProblem as (text: string) => Promise<void>)(
+      "invalid_client: client secret validation failed",
+    );
+    expect(ctx.i.states.get("auth.lastError")).toEqual({
+      val: "invalid_client: client secret validation failed",
+      ack: true,
     });
-
-    await ctx.i.onReady();
-    const del = (ctx.i as unknown as { delObjectAsync: ReturnType<typeof vi.fn> }).delObjectAsync;
-    expect(del).not.toHaveBeenCalled();
   });
 
-  it("says nothing when there is nothing of the previous generation", async () => {
+  it("forgets the stored login when the controller asks", async () => {
     const ctx = setup();
-    ctx.i.objects.set("auth.session", { type: "state", native: {} });
+    ctx.i.states.set("auth.session", { val: "enc:abc", ack: true });
     await ctx.i.onReady();
-    expect(ctx.i.log.info).not.toHaveBeenCalledWith(expect.stringContaining("object tree(s) of the previous"));
-  });
-
-  it("keeps going when one legacy tree cannot be deleted", async () => {
-    const ctx = setup();
-    ctx.i.objects.set("SIEMENS-A-0011", { type: "folder", native: {} });
-    ctx.i.objects.set("SIEMENS-B-0022", { type: "folder", native: {} });
-    const del = (ctx.i as unknown as { delObjectAsync: ReturnType<typeof vi.fn> }).delObjectAsync;
-    const real = del.getMockImplementation() as (id: string, o?: unknown) => Promise<void>;
-    del.mockImplementation(async (id: string, o?: unknown) => {
-      if (id.includes("SIEMENS-A")) {
-        throw new Error("locked");
-      }
-      return real(id, o);
-    });
-
-    await ctx.i.onReady();
-    expect(ctx.i.objects.has("SIEMENS-B-0022")).toBe(false);
-    expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("could not delete SIEMENS-A-0011"));
-    // The sign-in must still start — a stuck leftover object is not a reason to
-    // leave the adapter dead.
-    expect(ctx.auths[0].start).toHaveBeenCalled();
+    await (ctx.auths[0].port.clearStoredLogin as () => Promise<void>)();
+    expect(ctx.i.states.get("auth.session")).toEqual({ val: "", ack: true });
   });
 
   it("reports a failing start-up instead of dying on an unhandled rejection", async () => {
     const ctx = setup();
-    (ctx.i as unknown as { getAdapterObjectsAsync: ReturnType<typeof vi.fn> }).getAdapterObjectsAsync.mockRejectedValue(
-      new Error("objects db down"),
+    (ctx.i as unknown as { setStateChangedAsync: ReturnType<typeof vi.fn> }).setStateChangedAsync.mockRejectedValueOnce(
+      new Error("states db down"),
     );
     await expect(ctx.i.onReady()).resolves.toBeUndefined();
-    expect(ctx.i.log.error).toHaveBeenCalledWith(expect.stringContaining("onReady failed: objects db down"));
+    expect(ctx.i.log.error).toHaveBeenCalledWith(expect.stringContaining("onReady failed: states db down"));
   });
 });
 
@@ -447,6 +484,10 @@ describe("Homeconnect stored login", () => {
     // escaping throw here would abort onReady before the device flow could run.
     ctx.i.states.set("auth.session", { val: "gAAAAA-not-ours", ack: true });
     await expect(load()).resolves.toBeUndefined();
+    // Unreadable is not absent: the user learns why a sign-in is asked for again.
+    expect(ctx.i.log.warn).toHaveBeenCalledWith(
+      "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) — a new sign-in is required.",
+    );
     ctx.i.states.set("auth.session", { val: 42, ack: true });
     await expect(load()).resolves.toBeUndefined();
   });
@@ -458,7 +499,7 @@ describe("Homeconnect sign-in wiring", () => {
     await ctx.i.onReady();
     await ctx.auths[0].port.onSignedIn();
 
-    // Device trees move to the type-plate id scheme first, then renamed states
+    // Device trees move to the current id rule first, then renamed states
     // WITHIN a device — both BEFORE priming (the maps must only ever see current
     // ids), and priming BEFORE the REST sync: it fills the maps the write path
     // needs for an appliance that is offline right now.
@@ -1140,9 +1181,15 @@ describe("Homeconnect port wiring", () => {
       setStateChanged(id: string, s: unknown): Promise<unknown>;
       getState(id: string): Promise<unknown>;
       getObject(id: string): Promise<unknown>;
-      setObjectNotExists(id: string, o: unknown): Promise<unknown>;
       delObject(id: string): Promise<unknown>;
       getForeignObjects(p: string, t: string): Promise<unknown>;
+      getAdapterObjects(): Promise<unknown>;
+      getForeignStates(p: string): Promise<unknown>;
+      setForeignObject(id: string, o: unknown): Promise<unknown>;
+      extendForeignObject(id: string, o: unknown): Promise<unknown>;
+      setForeignState(id: string, s: unknown): Promise<unknown>;
+      getAliases(): Promise<unknown>;
+      getEnums(): Promise<unknown>;
       apiGet(p: string): Promise<unknown>;
       apiWrite(r: WriteRequest): Promise<unknown>;
     };
@@ -1159,13 +1206,27 @@ describe("Homeconnect port wiring", () => {
     expect(a.setStateChangedAsync).toHaveBeenCalledWith("oven.y", { val: 2, ack: true });
     await expect(port.getState("oven.x")).resolves.toEqual({ val: 1, ack: true });
     await expect(port.getObject("oven")).resolves.toMatchObject({ type: "device" });
-    await port.setObjectNotExists("fresh", { type: "state" });
-    expect(ctx.i.objects.has("fresh")).toBe(true);
     // delObject must NOT be recursive here — the sync deletes single stale leaves.
     await port.delObject("oven.x");
     expect(a.delObjectAsync).toHaveBeenLastCalledWith("oven.x");
     await port.getForeignObjects("homeconnect.0.*", "device");
     expect(a.getForeignObjectsAsync).toHaveBeenCalledWith("homeconnect.0.*", "device");
+    // The move calls — every one by FULL id, some of them outside the namespace.
+    await port.getAdapterObjects();
+    expect(a.getAdapterObjectsAsync).toHaveBeenCalled();
+    await port.getForeignStates("homeconnect.0.oven.*");
+    expect(a.getForeignStatesAsync).toHaveBeenCalledWith("homeconnect.0.oven.*");
+    await port.setForeignObject("alias.0.x", { type: "state", common: {} });
+    expect(ctx.i.foreign.get("alias.0.x")).toMatchObject({ type: "state" });
+    await port.extendForeignObject("homeconnect.0.oven", { native: { idScheme: 3 } });
+    expect(a.extendForeignObjectAsync).toHaveBeenCalledWith("homeconnect.0.oven", { native: { idScheme: 3 } });
+    await port.setForeignState("homeconnect.0.oven.z", { val: 3, ack: true, ts: 5 });
+    expect(a.setForeignStateAsync).toHaveBeenCalledWith("homeconnect.0.oven.z", { val: 3, ack: true, ts: 5 });
+    await expect(port.getAliases()).resolves.toMatchObject({ "alias.0.x": { type: "state" } });
+    expect(a.getForeignObjectsAsync).toHaveBeenCalledWith("alias.*", "state");
+    ctx.i.foreign.set("enum.rooms.kitchen", { type: "enum", common: { members: [] } });
+    await expect(port.getEnums()).resolves.toMatchObject({ "enum.rooms.kitchen": { type: "enum" } });
+    expect(a.getForeignObjectsAsync).toHaveBeenCalledWith("enum.*", "enum");
 
     httpMock.getJson.mockResolvedValue(okResult({ v: 7 }));
     await expect(port.apiGet("/api/q")).resolves.toEqual({ v: 7 });
@@ -1307,6 +1368,68 @@ describe("Homeconnect port wiring", () => {
   });
 });
 
+describe("Homeconnect tree delete that carries rooms and functions", () => {
+  it("reads the assignments, deletes the tree once, then lists every new id — old ids gone", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      deleteTreeCarryingEnums(root: string, carry: Map<string, string[]>): Promise<number>;
+    };
+    ctx.i.objects.set("old", { type: "device" });
+    ctx.i.objects.set("old.status.doorState", { type: "state" });
+    ctx.i.foreign.set("enum.rooms.kitchen", {
+      type: "enum",
+      common: { members: ["homeconnect.0.old", "homeconnect.0.old.status.doorState", "hm-rpc.0.X"] },
+    });
+    ctx.i.foreign.set("enum.functions.doors", {
+      type: "enum",
+      common: { members: ["homeconnect.0.old.status.doorState"] },
+    });
+    const a = ctx.i as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    a.delObjectAsync.mockClear();
+
+    const carried = await port.deleteTreeCarryingEnums(
+      "old",
+      new Map([
+        ["homeconnect.0.old", ["homeconnect.0.new"]],
+        // One old datapoint can have two successors (a door text became open + locked).
+        [
+          "homeconnect.0.old.status.doorState",
+          ["homeconnect.0.new.status.doorOpen", "homeconnect.0.new.status.doorLocked"],
+        ],
+      ]),
+    );
+
+    expect(a.delObjectAsync).toHaveBeenCalledTimes(1);
+    expect(a.delObjectAsync).toHaveBeenCalledWith("old", { recursive: true });
+    expect(ctx.i.objects.has("old.status.doorState")).toBe(false);
+    expect([...(ctx.i.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members].sort()).toEqual([
+      "hm-rpc.0.X",
+      "homeconnect.0.new",
+      "homeconnect.0.new.status.doorLocked",
+      "homeconnect.0.new.status.doorOpen",
+    ]);
+    expect((ctx.i.foreign.get("enum.functions.doors")?.common as { members: string[] }).members.sort()).toEqual([
+      "homeconnect.0.new.status.doorLocked",
+      "homeconnect.0.new.status.doorOpen",
+    ]);
+    expect(carried).toBe(5);
+  });
+
+  it("only deletes when nothing of the tree is assigned anywhere", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      deleteTreeCarryingEnums(root: string, carry: Map<string, string[]>): Promise<number>;
+    };
+    ctx.i.objects.set("old", { type: "device" });
+    const a = ctx.i as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    a.setForeignObject.mockClear();
+    await expect(port.deleteTreeCarryingEnums("old", new Map())).resolves.toBe(0);
+    expect(ctx.i.objects.has("old")).toBe(false);
+    expect(a.setForeignObject).not.toHaveBeenCalled();
+  });
+});
 describe("Homeconnect connection test (settings panel button)", () => {
   /** A signed-in adapter with the stream up, ready to be tested. */
   async function signedIn(): Promise<Ctx> {
@@ -1404,7 +1527,7 @@ describe("Homeconnect connection test (settings panel button)", () => {
     const noCreds = setup({ clientID: "" });
     await noCreds.i.onReady();
     await expect(noCreds.i.checkConnection()).resolves.toMatchObject({
-      error: expect.stringContaining("No Client ID / Client Secret"),
+      error: expect.stringContaining("No Client ID configured"),
     });
 
     const ctx = setup();
@@ -1441,6 +1564,34 @@ describe("Homeconnect connection test (settings panel button)", () => {
     ctx.i.sendTo.mockClear();
     await ctx.i.onMessage({ command: "checkConnection", from: "x" });
     expect(ctx.i.sendTo).not.toHaveBeenCalled();
+  });
+
+  it("passes the panel's sign-in buttons to the sign-in and answers with what happened", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    await ctx.i.onMessage({ command: "requestSignIn", from: "system.adapter.admin.0", callback: { id: 3 } });
+    expect(ctx.auths[0].requestSignIn).toHaveBeenCalledTimes(1);
+    expect(ctx.i.sendTo).toHaveBeenLastCalledWith(
+      "system.adapter.admin.0",
+      "requestSignIn",
+      { result: "A new sign-in link was requested." },
+      { id: 3 },
+    );
+    await ctx.i.onMessage({ command: "resetLogin", from: "system.adapter.admin.0", callback: { id: 4 } });
+    expect(ctx.auths[0].resetLogin).toHaveBeenCalledTimes(1);
+    expect(ctx.auths[0].requestSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("says what is missing when a sign-in button is pressed without a client id", async () => {
+    const ctx = setup({ clientID: "" });
+    await ctx.i.onReady();
+    await ctx.i.onMessage({ command: "resetLogin", from: "system.adapter.admin.0", callback: { id: 5 } });
+    expect(ctx.i.sendTo).toHaveBeenLastCalledWith(
+      "system.adapter.admin.0",
+      "resetLogin",
+      { error: "No Client ID configured — enter it above and save first." },
+      { id: 5 },
+    );
   });
 
   it("publishes the sign-in half on its own for the panel", async () => {

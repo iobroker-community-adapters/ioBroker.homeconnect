@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Credenciais",
-  "credentialsInfo": "O adaptador precisa de uma aplicação própria no Home Connect Developer Program. É novo aqui? Registe-se gratuitamente no portal de programadores e crie uma aplicação — introduza abaixo o seu Client ID e Client Secret. Migrou do adaptador antigo? O Client ID foi transferido; consulte o Client Secret correspondente no portal em Applications. Ambos são guardados encriptados. Associe a conta de programador à conta da app Home Connect: no perfil do portal, defina «Default Home Connect User Account for Testing» com o endereço de e-mail da app.",
-  "portalButton": "Abrir portal de programadores Home Connect",
+  "credentialsInfo": "O adaptador inicia sessão com uma aplicação sua no Home Connect Developer Program — gratuito, configurado uma vez:\n1. Crie uma conta de programador (primeiro botão). Em “Default Home Connect Account for Testing” introduza o endereço de e-mail da sua conta da aplicação Home Connect — exatamente como na aplicação, em minúsculas.\n2. Registe uma aplicação (segundo botão): Application ID qualquer nome, OAuth Flow “Device Flow” (não pode ser alterado depois), Success Redirect vazio, One Time Token Mode desligado.\n3. Aguarde 15 a 60 minutos — uma aplicação nova ou alterada só fica ativa na Home Connect depois disso.\n4. Copie o Client ID (64 caracteres) e o Client Secret para os campos abaixo e guarde.\n5. Mais abaixo aparece uma ligação de início de sessão: abra-a, inicie sessão com a sua conta Home Connect e confirme.\nVem do adaptador antigo? O Client ID foi transferido. Só o Client Secret é guardado encriptado.",
+  "portalButton": "As minhas aplicações",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Início de sessão",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Início remoto permitido desde",
   "remoteStartAllowedSinceDesc": "Há quanto tempo a autorização de início remoto está activa. O aparelho retira-a sozinho.",
   "evIDosOpenTray": "Gaveta do detergente aberta",
-  "evIDosOpenTrayDesc": "O aparelho pede que a gaveta do detergente seja aberta - a dosagem automática precisa de reabastecimento."
+  "evIDosOpenTrayDesc": "O aparelho pede que a gaveta do detergente seja aberta - a dosagem automática precisa de reabastecimento.",
+  "registerButton": "1. Criar conta de programador",
+  "addAppButton": "2. Registar aplicação",
+  "lastError": "Último problema de início de sessão",
+  "lastErrorDesc": "O que o Home Connect respondeu ao recusar o início de sessão, nas suas próprias palavras. Vazio com a sessão iniciada; Unknown enquanto nada foi perguntado."
 }

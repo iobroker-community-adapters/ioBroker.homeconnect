@@ -38,13 +38,21 @@ class OAuthError extends Error {
   /**
    * @param message human-readable error message
    * @param oauthError the machine-readable OAuth `error` code, if any
+   * @param description Home Connect's own explanation (`error_description`), if any — it tells the
+   *   cases apart that share a code ("Invalid client id" and "request rejected by client
+   *   authorization authority (developer portal)" are both `unauthorized_client`)
+   * @param status the HTTP status of the answer
    */
-  constructor(message, oauthError) {
+  constructor(message, oauthError, description, status) {
     super(message);
     this.oauthError = oauthError;
+    this.description = description;
+    this.status = status;
     this.name = "OAuthError";
   }
   oauthError;
+  description;
+  status;
 }
 function accessExpiryMs(expiresInSeconds, now) {
   return now + expiresInSeconds * 1e3;
@@ -128,7 +136,13 @@ class HomeConnectAuth {
       scope: "IdentifyAppliance Monitor Settings Control"
     });
     if (!res.ok || res.body === null || typeof res.body !== "object") {
-      throw new OAuthError(`Device authorization failed (status ${res.status})`);
+      const { code, description } = this.oauthErrorOf(res.body);
+      throw new OAuthError(
+        `Device authorization failed: ${describe(code, description, res.status)}`,
+        code,
+        description,
+        res.status
+      );
     }
     const b = res.body;
     const deviceCode = b.device_code;
@@ -164,19 +178,24 @@ class HomeConnectAuth {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: deviceCode,
       client_id: this.config.clientId,
-      client_secret: this.config.clientSecret
+      ...this.secret()
     });
     if (res.ok) {
       return toStoredToken(res.body, this.now());
     }
-    const err = this.oauthErrorCode(res.body);
-    if (err === "authorization_pending") {
+    const { code, description } = this.oauthErrorOf(res.body);
+    if (code === "authorization_pending") {
       return "pending";
     }
-    if (err === "slow_down" || err === void 0 && res.status === 429) {
+    if (code === "slow_down" || code === void 0 && res.status === 429) {
       return "slow_down";
     }
-    throw new OAuthError(`Device flow failed: ${err != null ? err : `status ${res.status}`}`, err);
+    throw new OAuthError(
+      `Device flow failed: ${describe(code, description, res.status)}`,
+      code,
+      description,
+      res.status
+    );
   }
   /**
    * Refresh an access token. Home Connect rotates the refresh token, so the
@@ -190,29 +209,53 @@ class HomeConnectAuth {
     const res = await this.post(TOKEN_PATH, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_secret: this.config.clientSecret
+      ...this.secret()
     });
     if (!res.ok) {
-      const err = this.oauthErrorCode(res.body);
-      throw new OAuthError(`Token refresh failed: ${err != null ? err : `status ${res.status}`}`, err);
+      const { code, description } = this.oauthErrorOf(res.body);
+      throw new OAuthError(
+        `Token refresh failed: ${describe(code, description, res.status)}`,
+        code,
+        description,
+        res.status
+      );
     }
     return toStoredToken(res.body, this.now());
   }
   /**
-   * Best-effort extraction of the OAuth `error` code from an error response body.
+   * The client secret as a form field — only when one is configured.
+   *
+   * @returns `{ client_secret }`, or nothing
+   */
+  secret() {
+    var _a;
+    const secret = (_a = this.config.clientSecret) == null ? void 0 : _a.trim();
+    return secret ? { client_secret: secret } : {};
+  }
+  /**
+   * Best-effort extraction of the OAuth `error` code and Home Connect's `error_description` from an
+   * error response body.
    *
    * @param body the parsed (error) response body
-   * @returns the OAuth `error` code, or undefined if none is present
+   * @returns the code and the description, each undefined when absent
    */
-  oauthErrorCode(body) {
-    if (body !== null && typeof body === "object") {
-      const e = body.error;
-      if (typeof e === "string") {
-        return e;
-      }
+  oauthErrorOf(body) {
+    if (body === null || typeof body !== "object") {
+      return {};
     }
-    return void 0;
+    const b = body;
+    return {
+      code: typeof b.error === "string" && b.error.length > 0 ? b.error : void 0,
+      description: typeof b.error_description === "string" && b.error_description.trim().length > 0 ? b.error_description.trim() : void 0
+    };
   }
+}
+function describe(code, description, status) {
+  var _a;
+  if (code && description) {
+    return `${code} (${description})`;
+  }
+  return (_a = code != null ? code : description) != null ? _a : `status ${status}`;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

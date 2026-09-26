@@ -70,6 +70,19 @@ class FakeAuthPort implements AuthPort {
   notify(message: string): void {
     this.notifications.push(message);
   }
+  /** Every `auth.lastError` write, in order. */
+  readonly problems: string[] = [];
+  setProblem(text: string): Promise<void> {
+    this.problems.push(text);
+    return Promise.resolve();
+  }
+  /** How often the stored login was cleared. */
+  cleared = 0;
+  clearStoredLogin(): Promise<void> {
+    this.cleared++;
+    this.refreshToken = undefined;
+    return Promise.resolve();
+  }
   onSignedIn(): Promise<void> {
     this.signedIn++;
     return Promise.resolve();
@@ -409,7 +422,18 @@ describe("AuthController remaining paths", () => {
     firePending(h);
     await flush();
     expect(h.port.notifications).toHaveLength(1);
-    expect(h.logs.some(l => l.level === "debug" && l.msg.includes("sign-in link renewed"))).toBe(true);
+    // The code changes every five minutes: only debug names it, the notification and the info
+    // line point at the settings where the current one always stands.
+    expect(h.logs.filter(l => l.level === "debug" && l.msg.startsWith("sign-in link:")).map(l => l.msg)).toEqual([
+      "sign-in link: https://verify code 1234",
+      "sign-in link: https://verify code 5678",
+    ]);
+    expect(h.port.notifications[0]).not.toContain("1234");
+    expect(h.logs.filter(l => l.level === "info").map(l => l.msg)).toEqual([
+      "Home Connect sign-in required — open the adapter settings and follow the sign-in link shown there.",
+    ]);
+    // An expired code is no refusal — nothing is published as a problem.
+    expect(h.port.problems).toEqual([]);
   });
 
   it("keeps polling while the user has not approved yet", async () => {
@@ -744,7 +768,8 @@ describe("AuthController findings of the 2026-09-24 audit", () => {
     expect(h.port.urls.at(-1)).toBe("");
     const warns = h.logs.filter(l => l.level === "warn");
     expect(warns).toHaveLength(1);
-    expect(warns[0].msg).toContain("check the Client ID and Client Secret");
+    expect(warns[0].msg).toContain("Home Connect rejected the Client Secret");
+    expect(h.port.problems).toEqual(["invalid_client"]);
     // The next attempt after five minutes; the same answer warns no more.
     firePending(h);
     await flush();
@@ -841,5 +866,183 @@ describe("AuthController — token lifetime (audit 2026-09-24, F14)", () => {
     h.port.refreshToken = "OLD";
     await h.ctl.start();
     expect(h.logs.some(l => l.msg.includes("expires_in"))).toBe(false);
+  });
+});
+
+describe("AuthController tells what Home Connect said (2026-09-26)", () => {
+  const NOT_ACTIVE = {
+    error: "unauthorized_client",
+    error_description: "request rejected by client authorization authority (developer portal)",
+  };
+
+  it("publishes Home Connect's own words for a refused poll and says what to do", async () => {
+    const h = harness([ok(DEVICE_BODY), fail(400, NOT_ACTIVE)]);
+    await h.ctl.start();
+    firePending(h);
+    await flush();
+    expect(h.port.problems).toEqual([
+      "unauthorized_client: request rejected by client authorization authority (developer portal)",
+    ]);
+    const warn = h.logs.find(l => l.level === "warn")?.msg ?? "";
+    expect(warn).toContain(
+      "unauthorized_client (request rejected by client authorization authority (developer portal))",
+    );
+    expect(warn).toContain("15 to 60 minutes");
+  });
+
+  it("publishes a refused start of the device flow, warns once and then goes quiet", async () => {
+    const refused = { error: "unauthorized_client", error_description: "Invalid client id" };
+    const h = harness([fail(400, refused), fail(400, refused)]);
+    await h.ctl.start();
+    expect(h.port.problems).toEqual(["unauthorized_client: Invalid client id"]);
+    expect(h.logs.filter(l => l.level === "warn").map(l => l.msg)).toEqual([
+      "Could not start the Home Connect sign-in (Device authorization failed: unauthorized_client (Invalid client id))." +
+        " Home Connect does not know this Client ID — copy it again from the developer portal (64 hexadecimal characters)." +
+        " Next attempt in 5 minutes.",
+    ]);
+    firePending(h);
+    await flush();
+    expect(h.logs.filter(l => l.level === "warn")).toHaveLength(1);
+  });
+
+  it("clears the problem once signed in", async () => {
+    const h = harness([ok(DEVICE_BODY), fail(400, NOT_ACTIVE), ok(DEVICE_BODY), ok(TOKEN_BODY)]);
+    await h.ctl.start();
+    firePending(h); // refused → retry in 5 min
+    await flush();
+    firePending(h); // new device flow
+    await flush();
+    firePending(h); // approved
+    await flush();
+    expect(h.port.problems.at(-1)).toBe("");
+    expect(h.port.signedIn).toBe(1);
+  });
+
+  it("ends the login when the refresh is refused for the application, instead of retrying for a day", async () => {
+    const refused = { error: "invalid_client", error_description: "client secret validation failed" };
+    const h = harness([ok(TOKEN_BODY), fail(401, refused), ok(DEVICE_BODY)]);
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    expect(await h.ctl.refreshNow()).toBe(false);
+    await flush();
+    expect(h.ctl.accessToken).toBeUndefined();
+    expect(h.port.connected.at(-1)).toBe(false);
+    expect(h.port.problems).toContain("invalid_client: client secret validation failed");
+    expect(h.port.urls).toContain("https://verify?code=1234");
+  });
+
+  it("goes to a new sign-in at start when the stored login's application is refused", async () => {
+    const refused = { error: "unauthorized_client", error_description: "Invalid client id" };
+    const h = harness([fail(400, refused), ok(DEVICE_BODY)]);
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    // Not the transient 30-second retry of the stored login: that can never succeed now.
+    expect(h.calls.map(c => c.path)).toEqual(["/security/oauth/token", "/security/oauth/device_authorization"]);
+    expect(h.port.problems).toEqual(["unauthorized_client: Invalid client id"]);
+  });
+});
+
+describe("AuthController pauses an unconfirmed sign-in after an hour (krobi 2026-09-26)", () => {
+  /** A device flow whose code is never confirmed: every poll says pending until the code expires. */
+  const EXPIRED = { error: "expired_token" };
+
+  it("renews the link for an hour, then stops asking Home Connect", async () => {
+    const results: FormPostResult[] = [];
+    for (let n = 0; n < 20; n++) {
+      results.push(ok(DEVICE_BODY), fail(400, EXPIRED));
+    }
+    const h = harness(results);
+    await h.ctl.start();
+    // Each round: the poll answers "expired", a new link follows.
+    // Ten minutes a round, until nothing is pending any more.
+    for (let round = 0; round < 12 && h.timers.some(t => !t.interval); round++) {
+      h.clock.t += 10 * 60_000;
+      firePending(h);
+      await flush();
+    }
+    // Minute 0 and every ten minutes up to minute 50: six links, then the pause at minute 60.
+    expect(h.calls.filter(c => c.path.endsWith("device_authorization"))).toHaveLength(6);
+    expect(h.port.urls.at(-1)).toBe("");
+    expect(h.timers.filter(t => !t.interval)).toEqual([]);
+    expect(h.logs.filter(l => l.level === "info").map(l => l.msg)).toContain(
+      "No sign-in was confirmed within an hour — the adapter stops asking Home Connect for sign-in links. " +
+        "Request a new one in the adapter settings when you are ready.",
+    );
+  });
+
+  it("starts a new episode on request — with a new notification", async () => {
+    const results: FormPostResult[] = [];
+    for (let n = 0; n < 20; n++) {
+      results.push(ok(DEVICE_BODY), fail(400, EXPIRED));
+    }
+    const h = harness(results);
+    await h.ctl.start();
+    // Ten minutes a round, until nothing is pending any more.
+    for (let round = 0; round < 12 && h.timers.some(t => !t.interval); round++) {
+      h.clock.t += 10 * 60_000;
+      firePending(h);
+      await flush();
+    }
+    const before = h.calls.length;
+    await expect(h.ctl.requestSignIn()).resolves.toBe("A new sign-in link was requested.");
+    expect(h.calls.slice(before).map(c => c.path)).toEqual(["/security/oauth/device_authorization"]);
+    expect(h.port.urls.at(-1)).toBe("https://verify?code=1234");
+    expect(h.port.notifications).toHaveLength(2);
+  });
+
+  it("cancels a pending poll when a new link is requested, instead of polling two codes", async () => {
+    const h = harness([ok(DEVICE_BODY), ok({ ...DEVICE_BODY, device_code: "DC2" })]);
+    await h.ctl.start();
+    expect(h.timers.filter(t => !t.interval)).toHaveLength(1);
+    await h.ctl.requestSignIn();
+    expect(h.timers.filter(t => !t.interval)).toHaveLength(1);
+  });
+});
+
+describe("AuthController reset from the settings panel", () => {
+  it("says so when already signed in instead of starting a second sign-in", async () => {
+    const h = harness([ok(TOKEN_BODY)]);
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    await expect(h.ctl.requestSignIn()).resolves.toContain("Already signed in");
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it("forgets the login, reports not signed in and starts a new sign-in", async () => {
+    const h = harness([ok(TOKEN_BODY), ok(DEVICE_BODY)]);
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    expect(h.timers.filter(t => t.interval)).toHaveLength(1);
+    await expect(h.ctl.resetLogin()).resolves.toBe("A new sign-in link was requested.");
+    expect(h.port.cleared).toBe(1);
+    expect(h.ctl.accessToken).toBeUndefined();
+    expect(h.port.connected.at(-1)).toBe(false);
+    // The periodic refresh of the old login is gone; the device flow polls.
+    expect(h.timers.filter(t => t.interval)).toEqual([]);
+    expect(h.port.urls.at(-1)).toBe("https://verify?code=1234");
+    expect(h.logs.filter(l => l.level === "info").map(l => l.msg)).toContain(
+      "Home Connect login reset — a new sign-in follows.",
+    );
+  });
+
+  it("does nothing on a stopped controller", async () => {
+    const h = harness([]);
+    h.ctl.stop();
+    await expect(h.ctl.requestSignIn()).resolves.toBe("The adapter is stopping.");
+    await expect(h.ctl.resetLogin()).resolves.toBe("The adapter is stopping.");
+    expect(h.port.cleared).toBe(0);
+  });
+});
+
+describe("AuthController hints by Home Connect's words (needle run 2026-09-26)", () => {
+  it("names the Client ID as the problem when Home Connect says the id is invalid", async () => {
+    const h = harness([
+      ok(DEVICE_BODY),
+      fail(400, { error: "unauthorized_client", error_description: "Invalid client id" }),
+    ]);
+    await h.ctl.start();
+    firePending(h);
+    await flush();
+    expect(h.logs.find(l => l.level === "warn")?.msg).toContain("Home Connect does not know this Client ID");
   });
 });

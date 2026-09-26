@@ -26,7 +26,10 @@ import {
   type WriteContext,
   type WriteRequest,
 } from "./command-dispatch";
-import { slugify, disambiguateSlug, isRecord, errMessage, cleanLabel, humanizeId, coerceForType } from "./pure-helpers";
+import { isRecord, errMessage, cleanLabel, humanizeId, coerceForType, slugOf } from "./pure-helpers";
+import { ID_SCHEME, deviceIdFor, legacyRootOf } from "./device-id";
+import { copyDeviceTree, keepHistoryUnder, movedId, retargetAliases, type DeviceMoveDeps } from "./device-move";
+import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
 import type { SseEvent } from "./sse-parser";
@@ -48,14 +51,34 @@ export interface AdapterPort {
   getState(id: string): Promise<ioBroker.State | null | undefined>;
   /** Read an object. */
   getObject(id: string): Promise<ioBroker.Object | null | undefined>;
-  /** Create an object only if it does not exist (full shape, no merge). */
-  setObjectNotExists(id: string, obj: ioBroker.PartialObject): Promise<unknown>;
   /** Delete an object (leaf state). */
   delObject(id: string): Promise<void>;
   /** Delete an object and everything below it (a whole appliance tree). */
   delObjectRecursive(id: string): Promise<void>;
   /** Enumerate this instance's objects of a type (for start-up priming and tree moves). */
   getForeignObjects(pattern: string, type: "state" | "device" | "channel"): Promise<Record<string, ioBroker.Object>>;
+  /** Every object of this instance, of every type, keyed by full id — a tree move copies them all. */
+  getAdapterObjects(): Promise<Record<string, ioBroker.Object | null | undefined>>;
+  /** Every state matching a full-id pattern — a tree move carries them with `ack`, `ts`, `lc` and `q`. */
+  getForeignStates(pattern: string): Promise<Record<string, ioBroker.State | null | undefined>>;
+  /** Write an object whole, by full id — also outside the namespace (an alias). */
+  setForeignObject(id: string, obj: ioBroker.SettableObject): Promise<unknown>;
+  /** Merge into an object, by full id. */
+  extendForeignObject(id: string, patch: ioBroker.PartialObject): Promise<unknown>;
+  /** Write a state, by full id. */
+  setForeignState(id: string, state: ioBroker.SettableState): Promise<unknown>;
+  /** Every alias state object (`alias.*`). */
+  getAliases(): Promise<Record<string, ioBroker.Object | null | undefined>>;
+  /** Every room and function (`enum.*`) — to see which objects of a tree are assigned. */
+  getEnums(): Promise<Record<string, unknown>>;
+  /**
+   * Delete a whole tree (namespace-relative root) and carry the room and function assignments of
+   * its objects to the ids that take their place — through the fleet helper `moveWithEnums`, which
+   * reads the assignments before the delete and writes them after it.
+   *
+   * @returns how many room/function entries now list one of the new ids
+   */
+  deleteTreeCarryingEnums(root: string, carry: ReadonlyMap<string, readonly string[]>): Promise<number>;
   /**
    * GET a Home Connect resource (token + 401-refresh handled by main).
    * `null` = the appliance answered that there is none (no program selected /
@@ -261,6 +284,17 @@ function stringOrUndef(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * Whether an object carries a recording configuration (`common.custom` with at least one entry).
+ *
+ * @param obj the object as read
+ * @returns whether something records it
+ */
+function hasRecording(obj: ioBroker.Object): boolean {
+  const custom = (obj.common as { custom?: unknown } | undefined)?.custom;
+  return isRecord(custom) && Object.keys(custom).length > 0;
+}
+
 /** The `common` fields the transformer owns. `name` is handled by the label refresh, not the signature. */
 const OWNED_COMMON_KEYS = ["type", "role", "read", "write", "unit", "min", "max", "step", "states", "def"] as const;
 
@@ -342,17 +376,13 @@ export function parseAppliancePath(path: string): { haId: string; subpath: strin
 }
 
 /**
- * The device-id source for an appliance: the E-number from its type plate — the
- * one identifier that is printed on the machine, never changes, and names the
- * exact model. The user's appliance name stays the display name (`common.name`)
- * only; it is mutable in the app and collides on default names ("Geschirrspüler").
- * Records without an E-number fall back to the model code (vib), then the haId.
+ * The name an appliance is shown by when the app gives none: its E-number, else its model code.
  *
- * @param a the appliance record (or a device object's stored native)
- * @returns the raw id source string (slugified by the caller)
+ * @param a the appliance record
+ * @returns the fallback name, or undefined
  */
-function applianceIdSource(a: Record<string, unknown>): string | undefined {
-  for (const field of [a.enumber, a.vib, a.haId]) {
+function fallbackName(a: Record<string, unknown>): string | undefined {
+  for (const field of [a.enumber, a.vib]) {
     if (typeof field === "string" && field.trim().length > 0) {
       return field;
     }
@@ -362,7 +392,7 @@ function applianceIdSource(a: Record<string, unknown>): string | undefined {
 
 /** Builds + updates the appliance object tree and routes writes back to the Home Connect API. */
 export class ApplianceSync {
-  /** haId → device id (type-plate based), for routing stream events. */
+  /** haId → device id (model + number, see device-id.ts), for routing stream events. */
   private readonly deviceIdByHaId = new Map<string, string>();
   /** device id → haId, for routing writes back to the appliance. */
   private readonly haIdByDeviceId = new Map<string, string>();
@@ -468,6 +498,17 @@ export class ApplianceSync {
    * program costs nothing) and lets a genuine change re-arm it.
    */
   private readonly armedProgramByDeviceId = new Map<string, string>();
+  /**
+   * device ids decided under the current rule ({@link ID_SCHEME}) — their device object carries the
+   * mark. A tree without it still has an older id; the sync must not stamp one on it.
+   */
+  private readonly idDecided = new Set<string>();
+  /**
+   * Roots of the previous adapter generation (community 1.6.x) that wait for their appliance: they
+   * are adopted — recordings, rooms, functions and aliases carried to the new datapoints — once the
+   * appliance list has created the new tree ({@link adoptLegacyTrees}). No tree pass touches them.
+   */
+  private readonly pendingLegacyRoots = new Set<string>();
 
   /**
    * @param port the injected adapter capabilities
@@ -602,6 +643,8 @@ export class ApplianceSync {
       // Device objects carry the haId in native — without the deviceId↔haId maps
       // the write path can't resolve a target, so this must run before the state pass.
       const devices = await this.port.getForeignObjects(`${this.port.namespace}.*`, "device");
+      const haIdOf = (obj: ioBroker.Object | undefined): unknown =>
+        (obj?.native as { haId?: unknown } | undefined)?.haId;
       for (const [fullId, obj] of Object.entries(devices)) {
         const deviceId = this.relId(fullId);
         const native = (obj.native ?? {}) as {
@@ -609,10 +652,22 @@ export class ApplianceSync {
           type?: unknown;
           programOptions?: unknown;
           settingDefs?: unknown;
+          idScheme?: unknown;
+          movingTo?: unknown;
         };
-        if (deviceId.length > 0 && !deviceId.includes(".") && typeof native.haId === "string") {
+        // A move that did not finish leaves the old tree with its journal next to the new one. The
+        // appliance lives in the new tree once that exists — the old one is only waiting for the
+        // next start to finish the move. Without a new tree the run goes on under the old id.
+        const moving =
+          typeof native.movingTo === "string" &&
+          haIdOf(devices[`${this.port.namespace}.${native.movingTo}`]) === native.haId;
+        if (deviceId.length > 0 && !deviceId.includes(".") && typeof native.haId === "string" && !moving) {
           this.deviceIdByHaId.set(native.haId, deviceId);
           this.haIdByDeviceId.set(deviceId, native.haId);
+          const idScheme = native.idScheme === ID_SCHEME ? ID_SCHEME : undefined;
+          if (idScheme) {
+            this.idDecided.add(deviceId);
+          }
           if (typeof native.type === "string") {
             this.typeByDeviceId.set(deviceId, native.type);
           }
@@ -633,6 +688,7 @@ export class ApplianceSync {
                     brand: stringOrUndef((native as { brand?: unknown }).brand),
                     vib: stringOrUndef((native as { vib?: unknown }).vib),
                     enumber: stringOrUndef((native as { enumber?: unknown }).enumber),
+                    idScheme,
                   },
                   // The icon AS STORED, not the one the map would give: an object
                   // written before the adapter had pictograms carries none, and
@@ -694,6 +750,11 @@ export class ApplianceSync {
       const objects = await this.port.getForeignObjects(`${this.port.namespace}.*`, "state");
       for (const [fullId, obj] of Object.entries(objects)) {
         const rel = this.relId(fullId);
+        if (!this.haIdByDeviceId.has(rel.split(".")[0] ?? "")) {
+          // Not an appliance tree of this run: the instance's own states, a tree of the previous
+          // adapter generation waiting to be adopted, or the old half of an unfinished move.
+          continue;
+        }
         const native = (obj.native ?? {}) as Record<string, unknown>;
         const bshKey = typeof native.bshKey === "string" ? native.bshKey : undefined;
         const bshValues = Array.isArray(native.bshValues)
@@ -821,8 +882,9 @@ export class ApplianceSync {
         const rel = this.relId(fullId);
         const parts = rel.split(".");
         // Only the per-appliance channels: the instance's own (auth, info) come
-        // from the manifest and are named there.
-        if (parts.length !== 2) {
+        // from the manifest and are named there, and a tree that is no appliance
+        // of this run (a legacy tree, the old half of a move) is not ours to name.
+        if (parts.length !== 2 || !this.haIdByDeviceId.has(parts[0] ?? "")) {
           continue;
         }
         const fresh = channelName(parts[1]);
@@ -837,133 +899,378 @@ export class ApplianceSync {
   }
 
   /**
-   * One-time move of device trees to the type-plate id scheme (the folder id is
-   * the E-number, the display name stays the appliance's app name). Legacy
-   * name-based trees are moved wholesale — device object, channels, states,
-   * their values and the user's custom/history settings — because the folder id
-   * is what scripts and charts point at, and the update must do the move, not
-   * the user. Runs BEFORE the state migration and priming, so the maps only
-   * ever see current ids.
-   *
-   * A device whose stored native carries no E-number/model code yet keeps its
-   * id this run; the next sync persists those fields and the next start moves
-   * it. Ids already on the scheme are claimed first, so a legacy tree's move
-   * can never bump an already-migrated sibling onto a new suffix.
+   * Sort out the trees the previous adapter generation (community 1.6.x) left behind — an update
+   * cleans up after itself, the user never deletes objects by hand. A tree nobody attached anything
+   * to goes right away. A tree with a recording, a room or function assignment or an alias pointing
+   * into it waits for its appliance: once the appliance list has created the new tree and the
+   * appliance has been read in full, {@link adoptLegacyTree} carries those over and deletes the old
+   * tree. Runs first at start, so no tree pass ever sees a legacy state.
    */
-  async migrateDeviceIds(): Promise<void> {
+  async sortOutLegacyTrees(): Promise<void> {
     try {
-      const devices = await this.port.getForeignObjects(`${this.port.namespace}.*`, "device");
-      const entries: Array<{ id: string; obj: ioBroker.Object; base: string; haId: string }> = [];
-      // Every existing device id is off limits as a move target — a user could
-      // have NAMED one appliance like another one's model code, and merging two
-      // trees loses one of them. This includes trees that carry no plate data.
-      const occupied = new Set<string>();
-      for (const [fullId, obj] of Object.entries(devices)) {
-        const id = this.relId(fullId);
-        const native = (obj.native ?? {}) as { haId?: unknown; enumber?: unknown; vib?: unknown };
-        if (id.length === 0 || id.includes(".") || typeof native.haId !== "string") {
-          continue;
+      const all = await this.port.getAdapterObjects();
+      const relative: Record<string, { type?: string; native?: unknown }> = {};
+      for (const [id, obj] of Object.entries(all)) {
+        const rel = this.relId(id);
+        if (rel !== id && obj) {
+          relative[rel] = { type: obj.type, native: obj.native };
         }
-        occupied.add(id);
-        const source = [native.enumber, native.vib].find(
-          (v): v is string => typeof v === "string" && v.trim().length > 0,
+      }
+      const roots = planLegacyCleanup(relative);
+      if (roots.length === 0) {
+        return;
+      }
+      const attached = await this.attachedIds();
+      let removed = 0;
+      for (const root of roots) {
+        const rootFull = `${this.port.namespace}.${root}`;
+        const holds = Object.entries(all).some(
+          ([id, obj]) =>
+            (id === rootFull || id.startsWith(`${rootFull}.`)) &&
+            (attached.has(id) || (obj?.type === "state" && hasRecording(obj))),
         );
-        if (!source) {
+        if (holds) {
+          this.pendingLegacyRoots.add(root);
           continue;
         }
-        entries.push({ id, obj, base: slugify(source), haId: native.haId });
-      }
-      // Deterministic across runs: stable order, and scheme-conform ids keep theirs.
-      entries.sort((a, b) => (a.haId < b.haId ? -1 : a.haId > b.haId ? 1 : 0));
-      const taken = new Set<string>();
-      const schemeIdByHaId = new Map<string, string>();
-      for (const e of entries) {
-        if (e.id === e.base || e.id.startsWith(`${e.base}-`)) {
-          taken.add(e.id);
-          schemeIdByHaId.set(e.haId, e.id);
+        try {
+          await this.port.delObjectRecursive(root);
+          removed++;
+        } catch (e) {
+          this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`);
         }
       }
-      for (const e of entries) {
-        if (taken.has(e.id)) {
-          continue;
-        }
-        // The same appliance already has a scheme-conform tree: a move that was
-        // interrupted (crash, kill, power cut) left both. It is RESUMED into that
-        // tree — a fresh id would leave a phantom appliance that counts as
-        // offline forever.
-        const resumeInto = schemeIdByHaId.get(e.haId);
-        if (resumeInto) {
-          await this.moveApplianceTree(e.id, resumeInto, e.obj, true);
-          continue;
-        }
-        const blocked = new Set([...taken, ...occupied].filter(x => x !== e.id));
-        const to = disambiguateSlug(e.base, e.haId, blocked);
-        taken.add(to);
-        await this.moveApplianceTree(e.id, to, e.obj);
+      if (removed > 0) {
+        this.port.log.info(
+          `Removed ${removed} object tree(s) of the previous adapter generation — the new device tree replaces them; your sign-in is kept.`,
+        );
+      }
+      if (this.pendingLegacyRoots.size > 0) {
+        this.port.log.info(
+          `${this.pendingLegacyRoots.size} object tree(s) of the previous adapter generation carry recordings, rooms or aliases — ` +
+            `they move to the new datapoints once the appliance has been read.`,
+        );
       }
     } catch (e) {
-      this.port.log.warn(`migrating device ids failed: ${errMessage(e)}`);
+      this.port.log.warn(`sorting out the previous adapter generation's trees failed: ${errMessage(e)}`);
     }
   }
 
   /**
-   * Move one appliance's whole object tree to a new device id: device object
-   * (with the online-marker link rewritten), channel objects, state objects with
-   * their `common` (the recording configuration above all) and `native`, and the
-   * current state values. The old tree is deleted afterwards. The NAME travels
-   * with the object but is not preserved as such — it belongs to the adapter and
-   * is rewritten at the next priming (decision 12).
+   * The full ids that a room, a function or an alias points at.
    *
-   * @param from the current (legacy) device id
-   * @param to the new type-plate device id
-   * @param device the device object as read from the DB
-   * @param resume the target already exists from an interrupted move — what is there stays
+   * @returns the ids
    */
-  private async moveApplianceTree(from: string, to: string, device: ioBroker.Object, resume = false): Promise<void> {
-    const prefix = `${this.port.namespace}.`;
-    const name = typeof device.common?.name === "string" ? device.common.name : from;
-    const common = {
-      ...(device.common ?? {}),
-      // The marker link carries the FULL path — pointing at the old folder would
-      // leave the green/grey dot reading a state that no longer updates.
-      statusStates: { onlineId: `${prefix}${to}.info.reachable` },
-    } as Record<string, unknown>;
-    await this.port.setObjectNotExists(to, { type: "device", common, native: device.native ?? {} });
-    for (const type of ["channel", "state"] as const) {
-      const objects = await this.port.getForeignObjects(`${prefix}${from}.*`, type);
-      for (const [fullId, obj] of Object.entries(objects)) {
-        const rel = this.relId(fullId);
-        if (!rel.startsWith(`${from}.`)) {
-          continue;
-        }
-        const target = `${to}.${rel.slice(from.length + 1)}`;
-        if (resume && (await this.port.getObject(target))) {
-          // Already moved before the interruption — keep it (and its value).
-          continue;
-        }
-        // The whole object moves with it — including a recording configuration
-        // the user attached to it. A move is the adapter's own maintenance; it
-        // must not cost the user their charts (shelly's line: adapter
-        // maintenance never destroys what it does not own).
-        await this.port.setObjectNotExists(target, {
-          type,
-          common: obj.common ?? {},
-          native: obj.native ?? {},
-        } as ioBroker.PartialObject);
-        if (type === "state") {
-          const previous = await this.port.getState(rel);
-          if (previous && previous.val !== null && previous.val !== undefined) {
-            await this.port.setState(target, { val: previous.val, ack: true });
+  private async attachedIds(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (const obj of Object.values(await this.port.getEnums())) {
+      const members = (obj as { common?: { members?: unknown } } | null)?.common?.members;
+      if (Array.isArray(members)) {
+        for (const member of members) {
+          if (typeof member === "string") {
+            ids.add(member);
           }
         }
       }
     }
-    await this.port.delObjectRecursive(from);
-    this.port.log.info(
-      resume
-        ? `Appliance "${name}": finished the interrupted move to ${to}.`
-        : `Appliance "${name}" moved to ${to} — device folders are now named by the type plate's E-number.`,
+    for (const obj of Object.values(await this.port.getAliases())) {
+      const target = (obj?.common as { alias?: { id?: unknown } } | undefined)?.alias?.id;
+      for (const id of typeof target === "string" ? [target] : Object.values(isRecord(target) ? target : {})) {
+        if (typeof id === "string") {
+          ids.add(id);
+        }
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * The datapoints of the new tree that take the place of one legacy datapoint: a raw BSH key leaf
+   * (`status.BSH_Common_Status_OperationState`) becomes the key again and goes through the same
+   * expansion as the sync (`status.operationState` and `status.programRunning`); the old
+   * `general.connected` becomes `info.reachable`. Anything else has no counterpart.
+   *
+   * @param rel the legacy state's namespace-relative id
+   * @param deviceId the appliance's new device id
+   * @returns the namespace-relative target ids, the main one first
+   */
+  private legacyTargets(rel: string, deviceId: string): string[] {
+    const parts = rel.split(".");
+    const leaf = parts.at(-1) ?? "";
+    if (parts.length === 3 && parts[1] === "general" && leaf === "connected") {
+      return [`${deviceId}.info.reachable`];
+    }
+    if (!LEGACY_LEAF.test(leaf)) {
+      return [];
+    }
+    const lockable = LOCKABLE_DOOR_TYPES.has(this.typeByDeviceId.get(deviceId) ?? "");
+    return expandBshItem({ key: leaf.replace(/_/g, "."), value: undefined }, lockable).map(
+      t => `${deviceId}.${t.channel}.${t.id}`,
     );
+  }
+
+  /**
+   * Hand a legacy tree over to its appliance's new tree and delete it: every recording moves to the
+   * datapoint that takes its place — continuing its series under the old id (`aliasId`) where the
+   * value type stays the same, as a new series where it changed (a door text became yes/no) — the
+   * room and function assignments and the aliases follow. A legacy datapoint without a counterpart
+   * goes with the tree; the log line says how many of them carried something.
+   *
+   * @param deviceId the appliance's new device id
+   * @param haId its haId
+   */
+  private async adoptLegacyTree(deviceId: string, haId: string): Promise<void> {
+    const root = legacyRootOf(haId);
+    if (!this.pendingLegacyRoots.delete(root)) {
+      return;
+    }
+    const ns = this.port.namespace;
+    const rootFull = `${ns}.${root}`;
+    try {
+      const all = await this.port.getAdapterObjects();
+      const attached = await this.attachedIds();
+      const carry = new Map<string, string[]>();
+      let recordings = 0;
+      let lost = 0;
+      for (const [id, obj] of Object.entries(all)) {
+        if (!obj || obj.type !== "state" || !id.startsWith(`${rootFull}.`)) {
+          continue;
+        }
+        const targets = this.legacyTargets(this.relId(id), deviceId)
+          .map(rel => `${ns}.${rel}`)
+          .filter(full => all[full]?.type === "state");
+        const recorded = hasRecording(obj);
+        if (targets.length === 0) {
+          if (recorded || attached.has(id)) {
+            lost++;
+          }
+          continue;
+        }
+        carry.set(id, targets);
+        if (!recorded) {
+          continue;
+        }
+        for (const target of targets) {
+          const existing = all[target]?.common as { custom?: unknown; type?: unknown } | undefined;
+          if (isRecord(existing?.custom) && Object.keys(existing.custom).length > 0) {
+            continue; // the new datapoint already records — its settings stay
+          }
+          const custom = JSON.parse(JSON.stringify(obj.common.custom)) as Record<string, unknown>;
+          // Same value type: the series goes on under the old id. A new value type starts a new
+          // series — an old series of text would otherwise go on with yes/no values mixed into it.
+          if (existing?.type === (obj.common as { type?: unknown }).type) {
+            keepHistoryUnder(custom, id);
+          }
+          await this.port.extendForeignObject(target, { common: { custom } });
+        }
+        recordings++;
+      }
+      const aliases = await retargetAliases(
+        await this.port.getAliases(),
+        id => carry.get(id)?.[0],
+        (id, obj) => this.port.setForeignObject(id, obj),
+      );
+      const enums = await this.port.deleteTreeCarryingEnums(root, carry);
+      const carried = [
+        ...(recordings > 0 ? [`${recordings} recording(s)`] : []),
+        ...(enums > 0 ? [`${enums} room/function entr${enums === 1 ? "y" : "ies"}`] : []),
+        ...(aliases > 0 ? [`${aliases} alias(es)`] : []),
+      ];
+      this.port.log.info(
+        `${this.label(deviceId)}: took over the object tree ${root} of the previous adapter generation` +
+          `${carried.length > 0 ? ` — ${carried.join(", ")} carried to the new datapoints` : ""}` +
+          `${lost > 0 ? `; ${lost} datapoint(s) with a recording, room or alias have no counterpart and are gone` : ""}.`,
+      );
+    } catch (e) {
+      // The root waits again: the next full read tries once more.
+      this.pendingLegacyRoots.add(root);
+      this.port.log.warn(`${this.label(deviceId)}: taking over the old object tree ${root} failed: ${errMessage(e)}`);
+    }
+  }
+
+  /**
+   * Delete the waiting legacy trees whose appliance is no longer on the account — nothing will ever
+   * take them over. Only after a list that named appliances (see {@link syncAppliances}).
+   *
+   * @param listed the haIds the account listed
+   */
+  private async dropOrphanLegacyTrees(listed: ReadonlySet<string>): Promise<void> {
+    const wanted = new Set([...listed].map(legacyRootOf));
+    for (const root of [...this.pendingLegacyRoots]) {
+      if (wanted.has(root)) {
+        continue;
+      }
+      this.pendingLegacyRoots.delete(root);
+      try {
+        await this.port.delObjectRecursive(root);
+        this.port.log.info(
+          `Removed the object tree ${root} of the previous adapter generation — its appliance is not on the Home Connect account.`,
+        );
+      } catch (e) {
+        this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`);
+      }
+    }
+  }
+
+  /**
+   * The one-time move of every appliance tree an earlier version created under an older id rule —
+   * the app name (up to 1.12.x) or the E-number from the type plate (1.13.0 to 1.23.x), both of which
+   * name the MODEL only — to its model and the last four characters of its own number
+   * ({@link deviceIdFor}, `sx87tx02ce-5775`). Runs on every start, BEFORE the datapoint migration and
+   * priming, so the maps only ever see current ids; a tree whose id is final carries
+   * `native.idScheme` and costs one comparison.
+   *
+   * The order keeps every step repeatable: the journal (`native.movingTo` at the OLD device object)
+   * first, then the copy ({@link copyDeviceTree}: objects with their recording settings, values,
+   * alias targets, the mark last), then the delete of the old tree, which carries the room and
+   * function assignments. A start that finds the journal again finds the copy complete and only
+   * finishes what is left.
+   *
+   * A tree whose stored native carries neither a model code nor an E-number yet keeps its id this
+   * run; the next sync persists those fields and the next start moves it. The trees are handled in
+   * haId order, so two appliances of one model whose numbers end alike get the same ids on every
+   * start and every installation.
+   */
+  async migrateDeviceIds(): Promise<void> {
+    try {
+      const devices = await this.port.getForeignObjects(`${this.port.namespace}.*`, "device");
+      type Tree = { id: string; name: string; native: Record<string, unknown> & { haId: string } };
+      const byHaId = new Map<string, Tree[]>();
+      const taken = new Set<string>();
+      for (const [fullId, obj] of Object.entries(devices)) {
+        const id = this.relId(fullId);
+        const native = (obj.native ?? {}) as Record<string, unknown>;
+        if (id.length === 0 || id.includes(".") || typeof native.haId !== "string") {
+          continue;
+        }
+        taken.add(id);
+        const name = typeof obj.common?.name === "string" && obj.common.name.length > 0 ? obj.common.name : id;
+        const trees = byHaId.get(native.haId) ?? [];
+        trees.push({ id, name, native: native as Tree["native"] });
+        byHaId.set(native.haId, trees);
+      }
+      const moves: Array<{ from: string; to: string; name: string; fillOnly: boolean }> = [];
+      // haId order: two appliances of one model whose numbers end alike get the same ids on every
+      // start and every installation — the listing order of the object database is no order.
+      for (const haId of [...byHaId.keys()].sort()) {
+        const trees = byHaId.get(haId)!;
+        // One appliance, one tree. Two trees of one appliance are what an interrupted move leaves
+        // behind: the one that is kept is the finished one, else the target of a journal, else the
+        // one the 1.13.0 rule named after the E-number (where the older rule's move went), else the
+        // first. The others are leftovers — what they still hold that the kept tree lacks moves in.
+        const journalTargets = new Set(trees.map(t => t.native.movingTo).filter(v => typeof v === "string"));
+        const eNumberId = (t: Tree): boolean => {
+          const plate = typeof t.native.enumber === "string" ? slugOf(t.native.enumber) : "";
+          return plate.length > 0 && (t.id === plate || t.id.startsWith(`${plate}-`));
+        };
+        const kept =
+          trees.find(t => t.native.idScheme === ID_SCHEME) ??
+          trees.find(t => journalTargets.has(t.id)) ??
+          (trees.length > 1 ? trees.find(eNumberId) : undefined) ??
+          [...trees].sort((a, b) => a.id.localeCompare(b.id))[0];
+        let target: string | undefined;
+        const journal = kept.native.movingTo;
+        if (kept.native.idScheme === ID_SCHEME) {
+          target = kept.id;
+        } else if (typeof journal === "string" && journal.length > 0 && !journal.includes(".") && journal !== kept.id) {
+          // A move that did not finish: it goes on to the id it was decided for.
+          target = journal;
+          taken.add(journal);
+        } else if ([kept.native.vib, kept.native.enumber].some(v => typeof v === "string" && v.trim().length > 0)) {
+          const own = new Set(trees.map(t => t.id));
+          target = deviceIdFor(
+            { haId, vib: kept.native.vib, enumber: kept.native.enumber, type: kept.native.type },
+            new Set([...taken].filter(other => !own.has(other))),
+          );
+          taken.add(target);
+        }
+        if (target === undefined) {
+          // No model code and no E-number stored yet: the next sync persists them, the next start
+          // moves the tree. Guessing now would move it twice.
+          continue;
+        }
+        if (target === kept.id) {
+          if (kept.native.idScheme !== ID_SCHEME) {
+            await this.port.extendObject(kept.id, { native: { idScheme: ID_SCHEME } });
+          }
+        } else {
+          moves.push({ from: kept.id, to: target, name: kept.name, fillOnly: false });
+        }
+        for (const leftover of trees) {
+          if (leftover !== kept) {
+            moves.push({ from: leftover.id, to: target, name: kept.name, fillOnly: true });
+          }
+        }
+      }
+      for (const move of moves) {
+        if (this.stopped) {
+          return;
+        }
+        await this.moveDeviceTree(move.from, move.to, move.name, move.fillOnly);
+      }
+    } catch (e) {
+      this.port.log.warn(`migrating device ids failed: ${errMessage(e)} — the appliances run under their current ids`);
+    }
+  }
+
+  /**
+   * Move one appliance tree: journal, copy, delete with the room and function assignments carried.
+   * A failure leaves the journal in place — the next start tries again, and this run keeps the
+   * appliance where it was.
+   *
+   * @param from the current device id
+   * @param to the new device id
+   * @param name the appliance's display name, for the log line
+   * @param fillOnly `from` is a leftover next to the kept tree — only what that one lacks moves in
+   */
+  private async moveDeviceTree(from: string, to: string, name: string, fillOnly: boolean): Promise<void> {
+    const ns = this.port.namespace;
+    try {
+      await this.port.extendObject(from, { native: { movingTo: to } });
+      const report = await copyDeviceTree(this.moveDeps(), from, to, fillOnly);
+      const objects = await this.port.getAdapterObjects();
+      const carry = new Map<string, string[]>();
+      for (const id of Object.keys(objects)) {
+        const next = movedId(id, `${ns}.${from}`, `${ns}.${to}`);
+        if (next) {
+          carry.set(id, [next]);
+        }
+      }
+      report.enums = await this.port.deleteTreeCarryingEnums(from, carry);
+      const carried = [
+        ...(report.enums > 0 ? [`${report.enums} room/function entr${report.enums === 1 ? "y" : "ies"}`] : []),
+        ...(report.aliases > 0 ? [`${report.aliases} alias(es)`] : []),
+      ];
+      this.port.log.info(
+        `${
+          fillOnly
+            ? `Appliance "${name}": finished the interrupted move of ${from} to ${to} — moved ${report.datapoints} more datapoint(s)`
+            : `Appliance "${name}": device id is now ${to} (was ${from}) — moved ${report.datapoints} datapoint(s)`
+        }${carried.length > 0 ? ` with ${carried.join(", ")}` : ""}` +
+          `${report.history > 0 ? `; ${report.history} recording(s) keep their history` : ""}`,
+      );
+    } catch (e) {
+      this.port.log.warn(
+        `Appliance "${name}": could not move ${from} to ${to} (${errMessage(e)}) — tried again on the next start`,
+      );
+    }
+  }
+
+  /**
+   * The object and state calls a tree move needs, over the port.
+   *
+   * @returns the move's dependencies
+   */
+  private moveDeps(): DeviceMoveDeps {
+    return {
+      namespace: this.port.namespace,
+      objects: () => this.port.getAdapterObjects(),
+      states: pattern => this.port.getForeignStates(pattern),
+      setObject: (id, obj) => this.port.setForeignObject(id, obj),
+      extendObject: (id, patch) => this.port.extendForeignObject(id, patch),
+      setState: (id, state) => this.port.setForeignState(id, state),
+      aliases: () => this.port.getAliases(),
+    };
   }
 
   /**
@@ -974,9 +1281,10 @@ export class ApplianceSync {
    * Covered: every state whose stored BSH key now routes to a different
    * channel/id (the old "misc" mis-channeling, nested keys), the door text
    * states that became booleans, and the whole `programs` channel of appliance
-   * types that have no programs. A 1:1 rename carries the user's history
-   * configuration and a custom name along; a reshaped state (text → boolean
-   * pair) starts fresh and gets its live value from the next sync.
+   * types that have no programs. A 1:1 rename carries the user's recording
+   * along and continues its series under the old id (`aliasId`); a reshaped
+   * state (text → boolean pair) starts fresh and gets its live value from the
+   * next sync. Rooms, functions and aliases follow to the new place either way.
    */
   async migrateRenamedStates(): Promise<void> {
     try {
@@ -1000,7 +1308,10 @@ export class ApplianceSync {
         }
       }
       const drainedCandidates = new Set<string>();
+      /** old full id → the full ids that take its place, for the rooms and the aliases. */
+      const moved = new Map<string, string[]>();
       let migrated = 0;
+      let history = 0;
       for (const [fullId, obj] of Object.entries(states)) {
         const rel = this.relId(fullId);
         const parts = rel.split(".");
@@ -1012,7 +1323,7 @@ export class ApplianceSync {
         const type = typeByDevice.get(deviceId);
         // A program-less appliance type loses its whole programs channel.
         if (type && PROGRAMLESS_TYPES.has(type) && parts[1] === "programs") {
-          await this.deleteMigratedState(rel, channelPath, remaining, drainedCandidates);
+          await this.deleteMigratedState(rel, [], channelPath, remaining, drainedCandidates);
           migrated++;
           continue;
         }
@@ -1054,6 +1365,12 @@ export class ApplianceSync {
             // the user's recording configuration — a migration is our own
             // maintenance, it must not cost the user their charts.
             Object.assign(common, oldCommon);
+            // The recording goes on in its series, under the id it ran under so far.
+            if (oldCommon.custom) {
+              const custom = JSON.parse(JSON.stringify(oldCommon.custom)) as Record<string, unknown>;
+              history += keepHistoryUnder(custom, fullId);
+              common.custom = custom;
+            }
             if (t.channel === "settings") {
               // The old misc mis-channeling also mis-derived read-only; the next
               // REST sync re-tightens genuine read-only settings via the signature.
@@ -1086,16 +1403,30 @@ export class ApplianceSync {
           }
           this.port.log.debug(`migrated ${rel} → ${newRel}`);
         }
-        await this.deleteMigratedState(rel, channelPath, remaining, drainedCandidates);
+        const targets = expanded.map(t => `${this.port.namespace}.${deviceId}.${t.channel}.${t.id}`);
+        moved.set(fullId, targets);
+        await this.deleteMigratedState(rel, targets, channelPath, remaining, drainedCandidates);
         migrated++;
       }
+      const aliases =
+        moved.size > 0
+          ? await retargetAliases(
+              await this.port.getAliases(),
+              id => moved.get(id)?.[0],
+              (id, obj) => this.port.setForeignObject(id, obj),
+            )
+          : 0;
       for (const channelPath of drainedCandidates) {
         if ((remaining.get(channelPath) ?? 0) === 0) {
           await this.port.delObject(channelPath).catch(() => undefined);
         }
       }
       if (migrated > 0) {
-        this.port.log.info(`Migrated ${migrated} datapoint(s) to the corrected tree layout.`);
+        this.port.log.info(
+          `Migrated ${migrated} datapoint(s) to the corrected tree layout` +
+            `${aliases > 0 ? ` with ${aliases} alias(es)` : ""}` +
+            `${history > 0 ? `; ${history} recording(s) keep their history` : ""}.`,
+        );
       }
     } catch (e) {
       this.port.log.warn(`migrating renamed datapoints failed: ${errMessage(e)}`);
@@ -1103,22 +1434,25 @@ export class ApplianceSync {
   }
 
   /**
-   * Delete one migrated-away state and account for its channel possibly
+   * Delete one migrated-away state — its room and function assignments go to the
+   * datapoints that take its place — and account for its channel possibly
    * draining empty (the channel object is removed at the end then).
    *
    * @param rel the namespace-relative state id to delete
+   * @param targets the full ids that take its place (none: it simply goes)
    * @param channelPath the device-qualified channel it lives under
    * @param remaining the per-channel remaining-state counter
    * @param drained the set of channels that may end up empty
    */
   private async deleteMigratedState(
     rel: string,
+    targets: readonly string[],
     channelPath: string,
     remaining: Map<string, number>,
     drained: Set<string>,
   ): Promise<void> {
     try {
-      await this.port.delObject(rel);
+      await this.port.deleteTreeCarryingEnums(rel, new Map([[`${this.port.namespace}.${rel}`, [...targets]]]));
     } catch (e) {
       this.port.log.debug(`removing ${rel} failed: ${errMessage(e)}`);
     }
@@ -1300,6 +1634,7 @@ export class ApplianceSync {
       // warning above, not by hammering the endpoint on every stream flap.
       return true;
     }
+    await this.dropOrphanLegacyTrees(seen);
     for (const [haId, deviceId] of [...this.deviceIdByHaId]) {
       if (!seen.has(haId)) {
         this.port.log.info(
@@ -1331,12 +1666,15 @@ export class ApplianceSync {
    *
    * @param deviceId the id-safe device path segment
    * @param name the appliance's display name (cleaned cloud text)
-   * @param native the type-plate fields, exactly the five the adapter owns
+   * @param native the appliance's own fields, the ones the adapter owns
    * @param native.haId the appliance's haId (the cloud's own identifier)
    * @param native.type the appliance type, e.g. "Dishwasher"
    * @param native.brand the brand from the type plate
    * @param native.vib the model code (VIB)
    * @param native.enumber the E-number from the type plate
+   * @param native.idScheme the id-rule generation the device id was decided under (`ID_SCHEME`), or
+   *   undefined for a tree that still carries an older id — the mark is part of the object, so a
+   *   decided id is written with it and a stored one compared with it
    * @param icon the pictogram for the appliance type, or `undefined` for a type
    *   we have none for. Passed IN rather than derived here for the same reason
    *   the name is: priming has to be able to form the signature of what is
@@ -1347,7 +1685,7 @@ export class ApplianceSync {
   private deviceObject(
     deviceId: string,
     name: string,
-    native: { haId: string; type?: string; brand?: string; vib?: string; enumber?: string },
+    native: { haId: string; type?: string; brand?: string; vib?: string; enumber?: string; idScheme?: number },
     icon: string | undefined,
   ): ioBroker.PartialObject {
     return {
@@ -1362,12 +1700,13 @@ export class ApplianceSync {
         brand: native.brand,
         vib: native.vib,
         enumber: native.enumber,
+        idScheme: native.idScheme,
       },
     };
   }
 
   /**
-   * Build the object tree for one appliance under its type-plate id and sync its data
+   * Build the object tree for one appliance under its device id and sync its data
    * (only when currently connected).
    *
    * @param a the appliance record from /api/homeappliances
@@ -1379,8 +1718,8 @@ export class ApplianceSync {
     }
     // The app name is cloud text: cleaned before it becomes an object name and a
     // log label (a line break in it would split both).
-    const name = cleanLabel(a.name, applianceIdSource(a) ?? haId);
-    const deviceId = this.deviceIdByHaId.get(haId) ?? this.assignDeviceId(haId, applianceIdSource(a) ?? haId, name);
+    const name = cleanLabel(a.name, fallbackName(a) ?? haId);
+    const deviceId = this.deviceIdByHaId.get(haId) ?? this.assignDeviceId(a, haId, name);
     this.nameByDeviceId.set(deviceId, name);
     const deviceObj = this.deviceObject(
       deviceId,
@@ -1391,6 +1730,7 @@ export class ApplianceSync {
         brand: stringOrUndef(a.brand),
         vib: stringOrUndef(a.vib),
         enumber: stringOrUndef(a.enumber),
+        idScheme: this.idDecided.has(deviceId) ? ID_SCHEME : undefined,
       },
       deviceIcon(stringOrUndef(a.type)),
     );
@@ -1701,6 +2041,7 @@ export class ApplianceSync {
     this.settingDefs.delete(deviceId);
     this.settingDefsDirty.delete(deviceId);
     this.armedProgramByDeviceId.delete(deviceId);
+    this.idDecided.delete(deviceId);
     for (const rel of [...this.knownStates.keys()]) {
       if (rel === deviceId || rel.startsWith(`${deviceId}.`)) {
         this.knownStates.delete(rel);
@@ -1710,24 +2051,35 @@ export class ApplianceSync {
   }
 
   /**
-   * Assign a stable, collision-free device id to an haId (first time seen).
-   * The id comes from the type plate ({@link applianceIdSource}); two identical
-   * models on one account get the haId suffix from {@link disambiguateSlug}.
-   * Once assigned, the id is pinned (via the DB and priming) — a later rename
-   * in the app changes only the display name, never the folder.
+   * Assign the device id of an appliance seen for the first time: its model and the last four
+   * characters of its own number ({@link deviceIdFor}); an appliance of the same model whose number
+   * ends alike already holds that id, so this one gets the whole number. Decided once — the device
+   * object carries it with the mark `native.idScheme`, priming pins it, and a later rename in the app
+   * changes only the display name, never the folder.
    *
-   * @param haId the appliance's haId
-   * @param idSource the raw id source (E-number, model code, or haId)
-   * @param name its friendly display name (for the one-time log line)
+   * @param a the appliance record
+   * @param haId its haId
+   * @param name its display name (for the one-time log line)
    * @returns the assigned device id
    */
-  private assignDeviceId(haId: string, idSource: string, name: string): string {
-    const deviceId = disambiguateSlug(slugify(idSource), haId, new Set(this.haIdByDeviceId.keys()));
+  private assignDeviceId(a: Record<string, unknown>, haId: string, name: string): string {
+    const deviceId = deviceIdFor({ haId, vib: a.vib, enumber: a.enumber, type: a.type }, this.takenDeviceIds());
     this.deviceIdByHaId.set(haId, deviceId);
     this.haIdByDeviceId.set(deviceId, haId);
     this.nameByDeviceId.set(deviceId, name);
+    this.idDecided.add(deviceId);
     this.port.log.info(`New appliance ${this.label(deviceId)} — creating its tree.`);
     return deviceId;
+  }
+
+  /**
+   * Every device id that is in use or reserved: the appliances known to this run, and the trees of
+   * the previous adapter generation that still wait for their appliance.
+   *
+   * @returns the ids a new appliance must not take
+   */
+  private takenDeviceIds(): Set<string> {
+    return new Set([...this.haIdByDeviceId.keys(), ...this.pendingLegacyRoots]);
   }
 
   /**
@@ -1770,6 +2122,9 @@ export class ApplianceSync {
       // A full read: a "not ready" re-read still armed from an earlier pass has
       // nothing left to do (it cost a second full pass of six requests).
       this.cancelNotReadyRetry(deviceId);
+      // Every datapoint the appliance has exists now — the tree the previous adapter
+      // generation built for it can hand over what the user attached to it.
+      await this.adoptLegacyTree(deviceId, haId);
     } finally {
       this.syncing.delete(deviceId);
       if (this.resyncPending.delete(deviceId) && !this.stopped && this.haIdByDeviceId.get(deviceId) === haId) {

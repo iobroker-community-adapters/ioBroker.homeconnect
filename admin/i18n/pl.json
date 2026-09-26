@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Dane logowania",
-  "credentialsInfo": "Adapter potrzebuje własnej aplikacji w Home Connect Developer Program. Jesteś tu nowy? Zarejestruj się bezpłatnie w portalu deweloperów i utwórz aplikację — wpisz poniżej jej Client ID i Client Secret. Przechodzisz ze starego adaptera? Client ID został przejęty; odpowiadający mu Client Secret znajdziesz w portalu w sekcji Applications. Oba są przechowywane w postaci zaszyfrowanej. Połącz konto dewelopera z kontem aplikacji Home Connect: w profilu portalu ustaw „Default Home Connect User Account for Testing” na adres e-mail aplikacji.",
-  "portalButton": "Otwórz portal deweloperów Home Connect",
+  "credentialsInfo": "Adapter loguje się własną aplikacją w Home Connect Developer Program — bezpłatnie, konfiguracja jednorazowa:\n1. Załóż konto dewelopera (pierwszy przycisk). W polu „Default Home Connect Account for Testing” wpisz adres e-mail konta aplikacji Home Connect — dokładnie jak w aplikacji, małymi literami.\n2. Zarejestruj aplikację (drugi przycisk): Application ID dowolna nazwa, OAuth Flow „Device Flow” (później nie da się zmienić), Success Redirect puste, One Time Token Mode wyłączony.\n3. Odczekaj 15–60 minut — nowa lub zmieniona aplikacja staje się aktywna w Home Connect dopiero po tym czasie.\n4. Skopiuj Client ID (64 znaki) i Client Secret do pól poniżej i zapisz.\n5. Niżej pojawi się link logowania: otwórz go, zaloguj się kontem Home Connect i potwierdź.\nPrzechodzisz ze starego adaptera? Client ID został przejęty. Zaszyfrowany jest tylko Client Secret.",
+  "portalButton": "Moje aplikacje",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Logowanie",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Zdalny start dozwolony od",
   "remoteStartAllowedSinceDesc": "Jak długo aktywne jest zezwolenie na zdalny start. Urządzenie samo je wycofuje.",
   "evIDosOpenTray": "Szuflada na detergent otwarta",
-  "evIDosOpenTrayDesc": "Urządzenie prosi o otwarcie szuflady na detergent - automatyczne dozowanie wymaga uzupełnienia."
+  "evIDosOpenTrayDesc": "Urządzenie prosi o otwarcie szuflady na detergent - automatyczne dozowanie wymaga uzupełnienia.",
+  "registerButton": "1. Załóż konto dewelopera",
+  "addAppButton": "2. Zarejestruj aplikację",
+  "lastError": "Ostatni problem z logowaniem",
+  "lastErrorDesc": "Odpowiedź Home Connect przy odrzuceniu logowania, dosłownie. Puste, gdy logowanie działa; Unknown, dopóki o nic nie pytano."
 }

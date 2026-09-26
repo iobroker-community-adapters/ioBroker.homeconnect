@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Inloggegevens",
-  "credentialsInfo": "De adapter heeft een eigen applicatie in het Home Connect Developer Program nodig. Nieuw hier? Registreer gratis in het ontwikkelaarsportaal en maak een applicatie aan — vul hieronder de Client ID en het Client Secret in. Overgestapt van de oude adapter? De Client ID is overgenomen; zoek het bijbehorende Client Secret op in het portaal onder Applications. Beide worden versleuteld opgeslagen. Koppel het ontwikkelaarsaccount aan het account van de Home Connect-app: zet in het profiel van het portaal „Default Home Connect User Account for Testing” op het e-mailadres van de app.",
-  "portalButton": "Home Connect-ontwikkelaarsportaal openen",
+  "credentialsInfo": "De adapter meldt zich aan met een eigen applicatie in het Home Connect Developer Program — gratis, eenmalig in te stellen:\n1. Maak een ontwikkelaarsaccount aan (eerste knop). Vul bij „Default Home Connect Account for Testing” het e-mailadres van je Home Connect-app-account in — precies zoals in de app, in kleine letters.\n2. Registreer een applicatie (tweede knop): Application ID een willekeurige naam, OAuth Flow „Device Flow” (later niet te wijzigen), Success Redirect leeg, One Time Token Mode uit.\n3. Wacht 15 tot 60 minuten — een nieuwe of gewijzigde applicatie is pas daarna actief bij Home Connect.\n4. Kopieer de Client ID (64 tekens) en het Client Secret naar de velden hieronder en sla op.\n5. Verderop verschijnt een aanmeldlink: open die, meld je aan met je Home Connect-account en bevestig.\nOvergestapt van de oude adapter? De Client ID is overgenomen. Alleen het Client Secret wordt versleuteld opgeslagen.",
+  "portalButton": "Mijn applicaties",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Aanmelden",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Start op afstand toegestaan sinds",
   "remoteStartAllowedSinceDesc": "Hoe lang de vrijgave voor starten op afstand al actief is. Het apparaat trekt die zelf in.",
   "evIDosOpenTray": "Wasmiddellade open",
-  "evIDosOpenTrayDesc": "Het apparaat vraagt om de wasmiddellade te openen - de automatische dosering moet worden bijgevuld."
+  "evIDosOpenTrayDesc": "Het apparaat vraagt om de wasmiddellade te openen - de automatische dosering moet worden bijgevuld.",
+  "registerButton": "1. Ontwikkelaarsaccount aanmaken",
+  "addAppButton": "2. Applicatie registreren",
+  "lastError": "Laatste aanmeldprobleem",
+  "lastErrorDesc": "Wat Home Connect antwoordde toen het de aanmelding weigerde, letterlijk. Leeg zolang je aangemeld bent; Unknown zolang er nog niets is gevraagd."
 }

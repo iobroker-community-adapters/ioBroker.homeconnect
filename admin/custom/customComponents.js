@@ -1,1 +1,1 @@
-import{n as e,t}from"./assets/virtual_mf-REMOTE_ENTRY_ID___mfe_internal__HomeConnectComponentSet__customComponents_js-yBuKO-Bx.js";export{t as get,e as init};
+import{n as e,t}from"./assets/virtual_mf-REMOTE_ENTRY_ID___mfe_internal__HomeConnectComponentSet__customComponents_js-BBiG1qBc.js";export{t as get,e as init};

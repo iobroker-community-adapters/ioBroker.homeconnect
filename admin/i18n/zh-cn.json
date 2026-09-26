@@ -1,7 +1,7 @@
 {
   "headerCredentials": "凭据",
-  "credentialsInfo": "适配器需要在 Home Connect Developer Program 中拥有自己的应用程序。第一次使用？请在开发者门户免费注册并创建一个应用程序——将其 Client ID 和 Client Secret 填入下方。从旧适配器升级？Client ID 已被接管；请在门户的 Applications 下查找对应的 Client Secret。两者均加密存储。 将开发者账户与 Home Connect 应用账户关联：在门户的个人资料中，把“Default Home Connect User Account for Testing”设置为应用所用的电子邮件地址。",
-  "portalButton": "打开 Home Connect 开发者门户",
+  "credentialsInfo": "适配器使用您在 Home Connect Developer Program 中自己的应用登录——免费，只需设置一次：\n1. 创建开发者帐户（第一个按钮）。在“Default Home Connect Account for Testing”中填写 Home Connect 应用帐户的电子邮件地址——与应用中完全一致，使用小写字母。\n2. 注册应用（第二个按钮）：Application ID 任意名称，OAuth Flow 选择“Device Flow”（之后无法更改），Success Redirect 留空，One Time Token Mode 关闭。\n3. 等待 15 到 60 分钟——新建或修改的应用之后才会在 Home Connect 生效。\n4. 将 Client ID（64 个字符）和 Client Secret 复制到下方字段并保存。\n5. 下方会出现登录链接：打开它，使用 Home Connect 帐户登录并确认。\n从旧适配器迁移？Client ID 已沿用。只有 Client Secret 会加密保存。",
+  "portalButton": "我的应用",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "登录",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "远程启动自此时允许",
   "remoteStartAllowedSinceDesc": "远程启动许可已生效多久。设备会自行撤回。",
   "evIDosOpenTray": "洗涤剂抽屉已打开",
-  "evIDosOpenTrayDesc": "设备提示打开洗涤剂抽屉——自动投放需要补充。"
+  "evIDosOpenTrayDesc": "设备提示打开洗涤剂抽屉——自动投放需要补充。",
+  "registerButton": "1. 创建开发者帐户",
+  "addAppButton": "2. 注册应用",
+  "lastError": "最近的登录问题",
+  "lastErrorDesc": "Home Connect 拒绝登录时的原始回复。已登录时为空；尚未询问时为 Unknown。"
 }

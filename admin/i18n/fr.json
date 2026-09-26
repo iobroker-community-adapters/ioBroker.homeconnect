@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Identifiants",
-  "credentialsInfo": "L'adaptateur a besoin de sa propre application dans le Home Connect Developer Program. Nouveau ici ? Inscrivez-vous gratuitement sur le portail développeurs et créez une application — saisissez ci-dessous son Client ID et son Client Secret. Vous venez de l'ancien adaptateur ? Le Client ID a été repris ; retrouvez le Client Secret correspondant sur le portail sous Applications. Les deux sont stockés chiffrés. Reliez le compte développeur au compte de l’application Home Connect : dans le profil du portail, renseignez « Default Home Connect User Account for Testing » avec l’adresse e-mail de l’application.",
-  "portalButton": "Ouvrir le portail développeurs Home Connect",
+  "credentialsInfo": "L'adaptateur se connecte avec votre propre application du Home Connect Developer Program — gratuit, à configurer une seule fois :\n1. Créez un compte développeur (premier bouton). Dans « Default Home Connect Account for Testing », saisissez l'adresse e-mail de votre compte de l'application Home Connect — exactement comme dans l'application, en minuscules.\n2. Enregistrez une application (deuxième bouton) : Application ID au choix, OAuth Flow « Device Flow » (non modifiable ensuite), Success Redirect vide, One Time Token Mode désactivé.\n3. Attendez 15 à 60 minutes — une application nouvelle ou modifiée n'est active chez Home Connect qu'après ce délai.\n4. Copiez le Client ID (64 caractères) et le Client Secret dans les champs ci-dessous et enregistrez.\n5. Un lien de connexion apparaît plus bas : ouvrez-le, connectez-vous avec votre compte Home Connect et confirmez.\nVous venez de l'ancien adaptateur ? Le Client ID a été repris. Seul le Client Secret est stocké chiffré.",
+  "portalButton": "Mes applications",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Connexion",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Démarrage à distance autorisé depuis",
   "remoteStartAllowedSinceDesc": "Depuis combien de temps l'autorisation de démarrage à distance est active. L'appareil la retire de lui-même.",
   "evIDosOpenTray": "Tiroir à produit ouvert",
-  "evIDosOpenTrayDesc": "L'appareil demande d'ouvrir le tiroir à produit - le dosage automatique doit être rempli."
+  "evIDosOpenTrayDesc": "L'appareil demande d'ouvrir le tiroir à produit - le dosage automatique doit être rempli.",
+  "registerButton": "1. Créer un compte développeur",
+  "addAppButton": "2. Enregistrer une application",
+  "lastError": "Dernier problème de connexion",
+  "lastErrorDesc": "Ce que Home Connect a répondu en refusant la connexion, mot pour mot. Vide tant que la connexion est établie ; Unknown tant que rien n'a été demandé."
 }

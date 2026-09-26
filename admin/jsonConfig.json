@@ -17,6 +17,32 @@
       "xl": 12,
       "style": { "fontSize": 14, "marginBottom": 16, "whiteSpace": "pre-line" }
     },
+    "_registerLink": {
+      "type": "staticLink",
+      "href": "https://developer.home-connect.com/user/register",
+      "label": "registerButton",
+      "button": true,
+      "variant": "outlined",
+      "color": "primary",
+      "xs": 12,
+      "sm": 6,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
+    },
+    "_addAppLink": {
+      "type": "staticLink",
+      "href": "https://developer.home-connect.com/applications/add",
+      "label": "addAppButton",
+      "button": true,
+      "variant": "outlined",
+      "color": "primary",
+      "xs": 12,
+      "sm": 6,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
+    },
     "_portalLink": {
       "type": "staticLink",
       "href": "https://developer.home-connect.com/applications",
@@ -25,10 +51,10 @@
       "variant": "outlined",
       "color": "primary",
       "xs": 12,
-      "sm": 8,
-      "md": 6,
-      "lg": 4,
-      "xl": 4
+      "sm": 6,
+      "md": 4,
+      "lg": 3,
+      "xl": 3
     },
     "clientID": {
       "type": "text",

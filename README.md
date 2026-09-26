@@ -29,26 +29,42 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 ## Configuration
 
-Home Connect requires a developer application (Client ID + Client Secret). This is free and takes a few minutes. Three things belong together: your normal Home Connect account, a developer account linked to it, and an application registered in the developer account.
+The adapter signs in with an application of your own in the free Home Connect Developer Program. Three things belong together: your normal Home Connect account (the one of the Home Connect app, where your appliances are paired), a developer account linked to it, and an application registered in the developer account. The settings page walks you through it with a checklist and one button per step.
 
-1. You need your normal **Home Connect account** — the one of the Home Connect app, where your appliances are paired.
-2. Create a free developer account at [developer.home-connect.com](https://developer.home-connect.com). In its profile, set **Default Home Connect User Account for Testing** to the e-mail address of your Home Connect app account — this links the two accounts — and choose **Account Type:** `Individual`.
-3. Go to **Applications → Register Application** and fill in:
-   - **OAuth Flow:** `Device Flow`
+1. Create a free developer account at [developer.home-connect.com](https://developer.home-connect.com/user/register). As **Default Home Connect Account for Testing** enter the e-mail address of your Home Connect app account — exactly as in the app, in **lower case**. This links the two accounts.
+2. [Register an application](https://developer.home-connect.com/applications/add):
    - **Application ID:** any name, e.g. `ioBroker`
-   - **Success Redirect:** any URI, e.g. `https://example.com`
-   - **Home Connect User Account for Testing:** can stay empty — the default from your profile applies
-4. Save. Copy the generated **Client ID** and **Client Secret** into the adapter settings and save again — the settings page has a button that takes you straight to the portal's application list (that is also where you look up the Client Secret of an existing application).
-5. A one-time **sign-in link** appears right in the adapter settings (the code to confirm is in the notification and in the log). Open it, sign in with your Home Connect account and confirm — the panel switches to **signed in** once it is done.
-6. **Test connection** in the same panel asks the running adapter to make a real request to Home Connect and shows what it found: how many appliances the account lists, how many are connected right now, and whether live updates are connected — or the exact reason when something is wrong (a rejected login, an unreachable service, a rate-limit pause).
+   - **OAuth Flow:** `Device Flow` — it cannot be changed later; an application with another flow has to be registered anew
+   - **Success Redirect:** leave empty
+   - **One Time Token Mode:** off
+3. **Wait 15 to 60 minutes.** A new or edited application only becomes active at Home Connect after that — a sign-in before then is refused.
+4. Copy the **Client ID** (64 characters) and the **Client Secret** into the adapter settings and save.
+5. A **sign-in link** appears in the settings, together with the code it carries. Open it, sign in with your Home Connect account and confirm the code — the panel switches to **signed in** once it is done.
+6. **Test connection** in the same panel asks the running adapter to make a real request to Home Connect and shows what it found: how many appliances the account lists, how many are connected right now, and whether live updates are connected — or the exact reason when something is wrong.
 
-The adapter stores the login **encrypted** and reconnects automatically; the sign-in survives adapter and version updates, so you only do it once.
+The login is kept across adapter and version updates, so you sign in once. **Reset sign-in** in the panel forgets it and starts a new sign-in — for example to switch to another Home Connect account.
+
+A sign-in link is renewed every five minutes while it waits. If nobody confirms one for an hour, the adapter stops asking Home Connect for new ones; **Request a new sign-in link** in the panel starts again (so does a restart).
+
+### When the sign-in is refused
+
+The panel shows what Home Connect answered and what to do about it; `auth.lastError` carries Home Connect's own words.
+
+| Home Connect answers | What it means | What to do |
+|---|---|---|
+| `unauthorized_client: Invalid client id` | The Client ID is unknown | Copy it again from your application (64 characters) |
+| `unauthorized_client: request rejected by client authorization authority (developer portal)` | The application is not active (yet) | Wait 15 to 60 minutes after registering or editing it; check that its status is **Enabled**; then request a new sign-in link |
+| `unauthorized_client: client not authorized for this oauth flow (grant_type)` | The application uses another OAuth flow | Register a new application with **Device Flow** |
+| `invalid_client` | The Client Secret was rejected | Check the Client Secret |
+| `access_denied` | The account was refused | Check that the account works in the Home Connect app (SingleKey ID, accepted terms of use) and that it is the one entered in the developer portal |
+
+Of the settings, only the Client Secret is stored encrypted; the login itself (`auth.session`) is stored encrypted too. A login saved by another ioBroker installation (after moving to a new system) cannot be read — the log says so, and one new sign-in is needed. Home Connect in China (`api.home-connect.cn`) is not supported.
 
 ## Updating from 1.6.x
 
-The update takes care of itself: your sign-in and Client ID are kept, and the old raw object tree is removed automatically — every appliance reappears under a clean device folder (named by its type plate's E-number, with the name from the app as display name). Two things to know:
+The update takes care of itself: your sign-in and Client ID are kept, and the old raw object tree is replaced — every appliance reappears under a clean device folder (named by its model and its own number, with the name from the app as display name). What you attached to the old tree comes along: recording settings, rooms, functions and aliases move to the datapoint that takes the old one's place, and a recording continues its series where the value type stayed the same. The log names what was carried and what had no counterpart. Two things to know:
 
-1. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it. If your Home Connect application was created without a secret, register a new application (see above); the sign-in panel then guides you through a one-time sign-in.
+1. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
 2. Point your scripts and visualization at the new readable data points listed below — that cleaner tree is the whole point of this generation.
 
 ## Data points
@@ -59,11 +75,12 @@ At instance level:
 |---|---|
 | `info.connection` | Whether the adapter is signed in **and** its live event stream is connected — only then do values flow |
 | `auth.signedIn` | Whether the adapter holds a usable Home Connect login (the settings panel uses it to tell "signed in, live updates down" from "not signed in") |
+| `auth.lastError` | What Home Connect answered when it refused the sign-in, in its own words — empty while signed in, `Unknown` while nothing was asked yet |
 | `info.devicesTotal` | How many appliances are paired with your Home Connect account |
 | `info.devicesOnline` | How many of them are connected right now |
 | `info.devicesAllOnline` | True only while every appliance is connected — note that household appliances are switched off most of the time, so this is a "everything is running" display rather than an alarm source |
 
-Each paired appliance appears under a device folder named by the E-number from its type plate (e.g. `sx87tx02ce-60`) — the one identifier that never changes and tells you the exact model, even with two appliances of the same kind. The name from your Home Connect app shows next to it as the display name and follows renames live. Two appliances of the identical model are told apart by a serial-based suffix. Each device has these channels:
+Each paired appliance appears under a device folder named by its model and the last four characters of its own Home Connect number (e.g. `sx87tx02ce-5775`) — two appliances of the identical model get two folders, and the folder never changes. The name from your Home Connect app shows next to it as the display name and follows renames live. Each device has these channels:
 
 | Channel | Contents |
 |---|---|
@@ -103,6 +120,20 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+
+### **WORK IN PROGRESS**
+
+- Changed: every appliance gets a new object ID once — its model and the end of its own number, e.g. `sx87tx02ce-5775`; scripts and visualizations need the new IDs.
+- Changed: the move carries values, recording settings, rooms, functions and aliases along, and recorded history continues in its old series.
+- Changed: two appliances of the same model now always get a folder each, named by their own number.
+- Changed: coming from version 1.6.x, recordings, rooms and aliases of the old tree are carried over to the new datapoints instead of being lost.
+- Changed: when Home Connect refuses the sign-in, the settings show why and what to do, and the answer is kept in `auth.lastError`.
+- Changed: the settings show the code to confirm next to the sign-in link; the notification no longer shows a code that has expired meanwhile.
+- Changed: if nobody confirms a sign-in link for an hour, the adapter stops asking for new ones; a button in the settings requests a new link.
+- Changed: a button in the settings resets the sign-in, for example to switch to another Home Connect account.
+- Fixed: a Home Connect application that was disabled, deleted or given a new secret now ends the login with a clear message instead of retrying for a day.
+- Fixed: a login saved by another ioBroker installation is reported in the log instead of silently asking for a new sign-in.
+- Improved: the settings guide the Home Connect developer account step by step, with one button per step.
 
 ### 1.23.0 (2026-09-24)
 

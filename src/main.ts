@@ -5,10 +5,12 @@ import { HomeConnectAuth, extractRefreshToken, type StoredToken } from "./lib/oa
 import { getJson, postForm, putJson, deleteJson, type JsonResult } from "./lib/http";
 import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
 import { AuthController, type AuthPort } from "./lib/auth-controller";
-import { planLegacyCleanup } from "./lib/legacy-cleanup";
+import { enumMembersUnder } from "./lib/device-move";
+import { moveWithEnums } from "./lib/enum-carry";
 import type { WriteRequest } from "./lib/command-dispatch";
 import { EventStream } from "./lib/event-stream";
 import { errMessage, isRecord } from "./lib/pure-helpers";
+import { looksLikeClientId } from "./lib/sign-in-help";
 import { LogDedup, categorize } from "./lib/log-dedup";
 import type { I18nKey } from "./lib/i18n";
 
@@ -101,8 +103,8 @@ const NOT_READY_ANSWERS = new Set(["SDK.Error.HomeAppliance.Connection.Initializ
 /**
  * ioBroker.homeconnect — Home Connect / BSH home appliances (Bosch, Siemens,
  * NEFF, Gaggenau) via the Home Connect cloud API. Greenfield TypeScript rewrite:
- * OAuth device flow, a clean device tree (folders named by the type plate's
- * E-number, speaking state ids below), a single live event stream, and a
+ * OAuth device flow, a clean device tree (folders named by the model and the
+ * appliance's own number, speaking state ids below), a single live event stream, and a
  * write path that turns state changes back into Home Connect commands.
  */
 export class Homeconnect extends utils.Adapter {
@@ -174,6 +176,8 @@ export class Homeconnect extends utils.Adapter {
       // credentials.
       await this.setStateChangedAsync("info.connection", { val: false, ack: true });
       await this.setStateChangedAsync("auth.signedIn", { val: false, ack: true });
+      // Nothing asked Home Connect yet this run — the fleet's word for "nothing to report".
+      await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });
 
       // Translated object names (channels, markers, buttons) come from admin/i18n.
       // Initialised before the credential check, so an instance that is not
@@ -181,20 +185,21 @@ export class Homeconnect extends utils.Adapter {
       await I18n.init(join(this.adapterDir, "admin"), this);
       await this.refreshManifestObjects();
 
-      await this.cleanupLegacyObjects();
-
       // The local start-up steps run ONCE per run, here — none of them talks to
       // the cloud. In the sign-in callback they ran again on every runtime
       // re-sign-in: priming added every writable option back into the armed
       // option gate (writes to other programs' options went out), and the
-      // reachable stamp flipped every online appliance to offline. Device trees
-      // move to the type-plate id scheme first, then renamed datapoints WITHIN a
-      // device — both BEFORE priming, so the in-memory maps only ever see current
-      // ids; the unreachable stamp comes last: the previous run's values survive
-      // in the database, and nothing else corrects a stale "reachable".
+      // reachable stamp flipped every online appliance to offline. The previous
+      // adapter generation's trees are sorted out first (removed, or held for
+      // their appliance when something is attached to them), then device trees
+      // move to the current id rule, then renamed datapoints WITHIN a device —
+      // all BEFORE priming, so the in-memory maps only ever see current ids; the
+      // unreachable stamp comes last: the previous run's values survive in the
+      // database, and nothing else corrects a stale "reachable".
       const sync = this.makeSync(this.makePort());
       this.sync = sync;
       const steps: Array<[string, () => Promise<unknown>]> = [
+        ["legacy cleanup", () => sync.sortOutLegacyTrees()],
         ["device id migration", () => sync.migrateDeviceIds()],
         ["datapoint migration", () => sync.migrateRenamedStates()],
         ["priming", () => sync.primeFromObjects()],
@@ -217,13 +222,20 @@ export class Homeconnect extends utils.Adapter {
         }
       }
 
-      const clientId = this.config.clientID;
-      const clientSecret = this.config.clientSecret;
-      if (!clientId || !clientSecret) {
+      // Pasted from the portal, a Client ID often carries a space or a line break at an end.
+      const clientId = typeof this.config.clientID === "string" ? this.config.clientID.trim() : "";
+      const clientSecret = typeof this.config.clientSecret === "string" ? this.config.clientSecret.trim() : "";
+      if (!clientId) {
         this.log.warn(
-          "No Home Connect client ID / secret configured — open the adapter settings and enter your developer application credentials.",
+          "No Home Connect Client ID configured — open the adapter settings and enter the Client ID of your developer application.",
         );
         return;
+      }
+      if (!looksLikeClientId(clientId)) {
+        // Only a warning: Home Connect decides, and says so if it does not know the id.
+        this.log.warn(
+          `The Client ID does not look like one of Home Connect (64 hexadecimal characters, this one has ${clientId.length} characters) — copy it again from the developer portal.`,
+        );
       }
 
       const auth = new HomeConnectAuth({ clientId, clientSecret, baseUrl: DEFAULT_BASE_URL }, (path, form) =>
@@ -265,6 +277,7 @@ export class Homeconnect extends utils.Adapter {
         common: { name: t("verificationUrl"), desc: t("verificationUrlDesc") },
       });
       await this.extendObject("auth.signedIn", { common: { name: t("signedIn"), desc: t("signedInDesc") } });
+      await this.extendObject("auth.lastError", { common: { name: t("lastError"), desc: t("lastErrorDesc") } });
       await this.extendObject("info", { common: { name: t("channelInfo") } });
       await this.extendObject("info.connection", { common: { name: t("connection"), desc: t("connectionDesc") } });
       await this.extendObject("info.devicesTotal", {
@@ -282,34 +295,6 @@ export class Homeconnect extends utils.Adapter {
     }
   }
 
-  /**
-   * Remove the previous adapter generation's object trees (raw haId roots with
-   * underscored BSH keys) — an update must clean up after itself, the user does
-   * not delete objects by hand. Runs before priming, so legacy states never
-   * enter the in-memory maps; self-terminating (nothing left → nothing planned).
-   */
-  private async cleanupLegacyObjects(): Promise<void> {
-    const objects = await this.getAdapterObjectsAsync();
-    const prefix = `${this.namespace}.`;
-    const relative: Record<string, { type?: string; native?: unknown }> = {};
-    for (const [id, obj] of Object.entries(objects)) {
-      if (id.startsWith(prefix)) {
-        relative[id.slice(prefix.length)] = { type: obj?.type, native: obj?.native };
-      }
-    }
-    const roots = planLegacyCleanup(relative);
-    for (const root of roots) {
-      await this.delObjectAsync(root, { recursive: true }).catch((e: unknown) =>
-        this.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`),
-      );
-    }
-    if (roots.length > 0) {
-      this.log.info(
-        `Removed ${roots.length} object tree(s) of the previous adapter generation — the new device tree replaces them; your sign-in is kept.`,
-      );
-    }
-  }
-
   /** Build the port ApplianceSync talks to the adapter through. */
   private makePort(): AdapterPort {
     return {
@@ -320,15 +305,51 @@ export class Homeconnect extends utils.Adapter {
       setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
       getState: id => this.getStateAsync(id),
       getObject: id => this.getObjectAsync(id),
-      setObjectNotExists: (id, obj) => this.setObjectNotExistsAsync(id, obj as ioBroker.SettableObject),
       delObject: id => this.delObjectAsync(id),
       delObjectRecursive: id => this.delObjectAsync(id, { recursive: true }),
       getForeignObjects: (pattern, type) => this.getForeignObjectsAsync(pattern, type),
+      getAdapterObjects: () => this.getAdapterObjectsAsync(),
+      getForeignStates: pattern => this.getForeignStatesAsync(pattern),
+      setForeignObject: (id, obj) => this.setForeignObject(id, obj),
+      extendForeignObject: (id, patch) => this.extendForeignObjectAsync(id, patch),
+      setForeignState: (id, state) => this.setForeignStateAsync(id, state),
+      getAliases: () => this.getForeignObjectsAsync("alias.*", "state"),
+      getEnums: async () => (await this.getForeignObjectsAsync("enum.*", "enum")) ?? {},
+      deleteTreeCarryingEnums: (root, carry) => this.deleteTreeCarryingEnums(root, carry),
       apiGet: path => this.apiGet(path),
       apiWrite: req => this.apiWrite(req),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: handle => this.clearTimeout(handle as ioBroker.Timeout),
     };
+  }
+
+  /**
+   * Delete a whole tree and carry the room and function assignments of its objects to the ids that
+   * take their place — through the fleet helper, in its order: the assignments are read first, the
+   * tree is deleted, the new ids are written last. The delete removes the old ids from every enum,
+   * written back from the adapter's enum cache, and would take away an id written before it.
+   *
+   * @param root the namespace-relative root that goes away
+   * @param carry old full id → the full ids that take its place
+   * @returns how many room/function entries now list one of the new ids
+   */
+  private async deleteTreeCarryingEnums(root: string, carry: ReadonlyMap<string, readonly string[]>): Promise<number> {
+    const members = enumMembersUnder(await this.getForeignObjectsAsync("enum.*", "enum"), `${this.namespace}.${root}`);
+    const carried = new Set<string>();
+    // One carry per moved member and new id, nested so that every one reads before the single delete runs.
+    let remove = async (): Promise<unknown> => this.delObjectAsync(root, { recursive: true });
+    for (const oldId of members) {
+      for (const newId of carry.get(oldId) ?? []) {
+        const inner = remove;
+        remove = async () => {
+          for (const enumId of await moveWithEnums(this, oldId, newId, inner, errMessage)) {
+            carried.add(`${enumId}|${newId}`);
+          }
+        };
+      }
+    }
+    await remove();
+    return carried.size;
   }
 
   /** Build the port the AuthController drives the sign-in lifecycle through. */
@@ -343,6 +364,12 @@ export class Homeconnect extends utils.Adapter {
       setConnected: async connected => {
         this.signedIn = connected;
         await this.publishConnection();
+      },
+      setProblem: async text => {
+        await this.setStateChangedAsync("auth.lastError", { val: text, ack: true });
+      },
+      clearStoredLogin: async () => {
+        await this.setState("auth.session", { val: "", ack: true });
       },
       notify: message => this.notifyUser(message),
       onSignedIn: () => this.onAuthenticated(),
@@ -376,6 +403,12 @@ export class Homeconnect extends utils.Adapter {
     try {
       return extractRefreshToken(this.decrypt(raw));
     } catch {
+      // Encrypted with another installation's secret — the ioBroker data was moved to a new
+      // system, or restored from a backup of another one. Unreadable is not the same as absent:
+      // the user is told why a sign-in is asked for again.
+      this.log.warn(
+        "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) — a new sign-in is required.",
+      );
       return undefined;
     }
   }
@@ -606,6 +639,16 @@ export class Homeconnect extends utils.Adapter {
         }
         return;
       }
+      if (obj.command === "requestSignIn" || obj.command === "resetLogin") {
+        const authCtl = this.authCtl;
+        const answer = authCtl
+          ? { result: obj.command === "resetLogin" ? await authCtl.resetLogin() : await authCtl.requestSignIn() }
+          : { error: "No Client ID configured — enter it above and save first." };
+        if (obj.callback) {
+          this.sendTo(obj.from, obj.command, answer, obj.callback);
+        }
+        return;
+      }
       if (obj.callback) {
         this.sendTo(obj.from, obj.command, { error: `Unknown command: ${String(obj.command)}` }, obj.callback);
       }
@@ -628,8 +671,8 @@ export class Homeconnect extends utils.Adapter {
    * @returns `{ result }` on success, `{ error }` otherwise (the admin's sendTo contract)
    */
   private async checkConnection(): Promise<{ result: string } | { error: string }> {
-    if (!this.config.clientID || !this.config.clientSecret) {
-      return { error: "No Client ID / Client Secret configured — enter them above and save first." };
+    if (typeof this.config.clientID !== "string" || this.config.clientID.trim().length === 0) {
+      return { error: "No Client ID configured — enter it above and save first." };
     }
     if (!this.authCtl?.accessToken) {
       const url = (await this.getStateAsync("auth.verificationUrl"))?.val;
@@ -990,6 +1033,8 @@ export class Homeconnect extends utils.Adapter {
       const writes: Promise<unknown>[] = [
         this.setState("info.connection", { val: false, ack: true }),
         this.setState("auth.signedIn", { val: false, ack: true }),
+        // Off: nothing to report (the fleet's reason-text rule) — the next start asks again.
+        this.setState("auth.lastError", { val: "Unknown", ack: true }),
       ];
       // A rotated refresh token the object database refused earlier gets its last
       // chance here: Home Connect kills the previous one the moment it hands out

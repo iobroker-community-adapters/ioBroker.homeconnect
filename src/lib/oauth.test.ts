@@ -270,3 +270,93 @@ describe("findings of the 2026-09-24 audit", () => {
     await expect(new HomeConnectAuth(CONFIG, post, () => NOW).pollForToken("DC")).resolves.toBe("slow_down");
   });
 });
+
+describe("the client secret is sent only when one is configured (2026-09-26)", () => {
+  const TOKEN = { access_token: "AT", refresh_token: "RT", expires_in: 86_400 };
+
+  it("polls and refreshes without client_secret when none is set", async () => {
+    for (const clientSecret of [undefined, "", "   "]) {
+      const { post, calls } = fakePoster([
+        { status: 200, ok: true, body: TOKEN },
+        { status: 200, ok: true, body: TOKEN },
+      ]);
+      const auth = new HomeConnectAuth({ ...CONFIG, clientSecret }, post, () => NOW);
+      await auth.pollForToken("DC");
+      await auth.refresh("RT");
+      expect(calls.map(c => Object.keys(c.form).sort())).toEqual([
+        ["client_id", "device_code", "grant_type"],
+        ["grant_type", "refresh_token"],
+      ]);
+    }
+  });
+
+  it("sends a configured secret, trimmed", async () => {
+    const { post, calls } = fakePoster([
+      { status: 200, ok: true, body: TOKEN },
+      { status: 200, ok: true, body: TOKEN },
+    ]);
+    const auth = new HomeConnectAuth({ ...CONFIG, clientSecret: " s3cret\n" }, post, () => NOW);
+    await auth.pollForToken("DC");
+    await auth.refresh("RT");
+    expect(calls.map(c => c.form.client_secret)).toEqual(["s3cret", "s3cret"]);
+  });
+});
+
+describe("a refusal keeps Home Connect's own words (2026-09-26)", () => {
+  const body = {
+    error: "unauthorized_client",
+    error_description: "request rejected by client authorization authority (developer portal)",
+  };
+
+  it("on the start of the device flow", async () => {
+    const { post } = fakePoster([{ status: 400, ok: false, body }]);
+    const err = await new HomeConnectAuth(CONFIG, post, () => NOW).startDeviceFlow().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OAuthError);
+    expect(err).toMatchObject({
+      oauthError: "unauthorized_client",
+      description: "request rejected by client authorization authority (developer portal)",
+      status: 400,
+      message:
+        "Device authorization failed: unauthorized_client (request rejected by client authorization authority (developer portal))",
+    });
+  });
+
+  it("on a poll and on a refresh", async () => {
+    const { post } = fakePoster([
+      { status: 400, ok: false, body },
+      {
+        status: 401,
+        ok: false,
+        body: { error: "invalid_client", error_description: " client secret validation failed " },
+      },
+    ]);
+    const auth = new HomeConnectAuth(CONFIG, post, () => NOW);
+    await expect(auth.pollForToken("DC")).rejects.toMatchObject({
+      oauthError: "unauthorized_client",
+      description: body.error_description,
+    });
+    await expect(auth.refresh("RT")).rejects.toMatchObject({
+      oauthError: "invalid_client",
+      description: "client secret validation failed",
+      message: "Token refresh failed: invalid_client (client secret validation failed)",
+    });
+  });
+
+  it("falls back to the status when Home Connect sent no words", async () => {
+    const { post } = fakePoster([{ status: 503, ok: false, body: "Service Unavailable" }]);
+    await expect(new HomeConnectAuth(CONFIG, post, () => NOW).startDeviceFlow()).rejects.toMatchObject({
+      oauthError: undefined,
+      description: undefined,
+      message: "Device authorization failed: status 503",
+    });
+  });
+});
+
+describe("a refusal without a body (needle run 2026-09-26)", () => {
+  it("names the status when the body is empty", async () => {
+    const { post } = fakePoster([{ status: 502, ok: false, body: null }]);
+    await expect(new HomeConnectAuth(CONFIG, post, () => NOW).pollForToken("DC")).rejects.toMatchObject({
+      message: "Device flow failed: status 502",
+    });
+  });
+});

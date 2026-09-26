@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Credenciales",
-  "credentialsInfo": "El adaptador necesita una aplicación propia en el Home Connect Developer Program. ¿Eres nuevo? Regístrate gratis en el portal de desarrolladores y crea una aplicación — introduce abajo su Client ID y Client Secret. ¿Vienes del adaptador antiguo? El Client ID se ha conservado; busca el Client Secret correspondiente en el portal, en Applications. Ambos se guardan cifrados. Vincula la cuenta de desarrollador con la cuenta de la app Home Connect: en el perfil del portal, pon en «Default Home Connect User Account for Testing» la dirección de correo de la app.",
-  "portalButton": "Abrir el portal de desarrolladores de Home Connect",
+  "credentialsInfo": "El adaptador inicia sesión con una aplicación propia en el Home Connect Developer Program — gratis, se configura una vez:\n1. Crea una cuenta de desarrollador (primer botón). En «Default Home Connect Account for Testing» introduce la dirección de correo de tu cuenta de la app Home Connect — exactamente como en la app, en minúsculas.\n2. Registra una aplicación (segundo botón): Application ID cualquier nombre, OAuth Flow «Device Flow» (no se puede cambiar después), Success Redirect vacío, One Time Token Mode desactivado.\n3. Espera de 15 a 60 minutos — una aplicación nueva o modificada solo está activa en Home Connect después.\n4. Copia el Client ID (64 caracteres) y el Client Secret en los campos de abajo y guarda.\n5. Más abajo aparece un enlace de inicio de sesión: ábrelo, inicia sesión con tu cuenta Home Connect y confirma.\n¿Vienes del adaptador antiguo? El Client ID se ha conservado. Solo el Client Secret se guarda cifrado.",
+  "portalButton": "Mis aplicaciones",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Inicio de sesión",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Inicio remoto permitido desde",
   "remoteStartAllowedSinceDesc": "Cuánto tiempo lleva activa la autorización de inicio remoto. El aparato la retira por sí mismo.",
   "evIDosOpenTray": "Cajón del detergente abierto",
-  "evIDosOpenTrayDesc": "El aparato pide abrir el cajón del detergente - la dosificación automática necesita relleno."
+  "evIDosOpenTrayDesc": "El aparato pide abrir el cajón del detergente - la dosificación automática necesita relleno.",
+  "registerButton": "1. Crear cuenta de desarrollador",
+  "addAppButton": "2. Registrar aplicación",
+  "lastError": "Último problema de inicio de sesión",
+  "lastErrorDesc": "Lo que respondió Home Connect al rechazar el inicio de sesión, literalmente. Vacío mientras la sesión está iniciada; Unknown mientras no se ha preguntado nada."
 }

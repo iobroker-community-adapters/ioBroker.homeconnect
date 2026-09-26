@@ -20,30 +20,16 @@ var pure_helpers_exports = {};
 __export(pure_helpers_exports, {
   cleanLabel: () => cleanLabel,
   coerceForType: () => coerceForType,
-  disambiguateSlug: () => disambiguateSlug,
   errMessage: () => errMessage,
   humanizeId: () => humanizeId,
   isRecord: () => isRecord,
   numberOrUndef: () => numberOrUndef,
-  slugify: () => slugify,
+  slugOf: () => slugOf,
   stringArrayOrUndef: () => stringArrayOrUndef
 });
 module.exports = __toCommonJS(pure_helpers_exports);
-function slugify(name) {
-  const slug = name.toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug.length > 0 ? slug : "device";
-}
-function disambiguateSlug(baseSlug, haId, taken) {
-  if (!taken.has(baseSlug)) {
-    return baseSlug;
-  }
-  const suffix = haId.replace(/[^a-zA-Z0-9]/g, "").slice(-4).toLowerCase() || "2";
-  let candidate = `${baseSlug}-${suffix}`;
-  let n = 2;
-  while (taken.has(candidate)) {
-    candidate = `${baseSlug}-${suffix}-${n++}`;
-  }
-  return candidate;
+function slugOf(name) {
+  return name.toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 function errMessage(err) {
   var _a;
@@ -154,12 +140,11 @@ function coerceForType(value, type) {
 0 && (module.exports = {
   cleanLabel,
   coerceForType,
-  disambiguateSlug,
   errMessage,
   humanizeId,
   isRecord,
   numberOrUndef,
-  slugify,
+  slugOf,
   stringArrayOrUndef
 });
 //# sourceMappingURL=pure-helpers.js.map

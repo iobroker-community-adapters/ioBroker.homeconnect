@@ -38,9 +38,11 @@ var import_oauth = require("./lib/oauth");
 var import_http = require("./lib/http");
 var import_appliance_sync = require("./lib/appliance-sync");
 var import_auth_controller = require("./lib/auth-controller");
-var import_legacy_cleanup = require("./lib/legacy-cleanup");
+var import_device_move = require("./lib/device-move");
+var import_enum_carry = require("./lib/enum-carry");
 var import_event_stream = require("./lib/event-stream");
 var import_pure_helpers = require("./lib/pure-helpers");
+var import_sign_in_help = require("./lib/sign-in-help");
 var import_log_dedup = require("./lib/log-dedup");
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
 const RATE_PAUSE_FALLBACK_MS = 6e4;
@@ -124,12 +126,13 @@ class Homeconnect extends utils.Adapter {
     try {
       await this.setStateChangedAsync("info.connection", { val: false, ack: true });
       await this.setStateChangedAsync("auth.signedIn", { val: false, ack: true });
+      await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });
       await import_adapter_core.I18n.init((0, import_node_path.join)(this.adapterDir, "admin"), this);
       await this.refreshManifestObjects();
-      await this.cleanupLegacyObjects();
       const sync = this.makeSync(this.makePort());
       this.sync = sync;
       const steps = [
+        ["legacy cleanup", () => sync.sortOutLegacyTrees()],
         ["device id migration", () => sync.migrateDeviceIds()],
         ["datapoint migration", () => sync.migrateRenamedStates()],
         ["priming", () => sync.primeFromObjects()],
@@ -151,13 +154,18 @@ class Homeconnect extends utils.Adapter {
           return;
         }
       }
-      const clientId = this.config.clientID;
-      const clientSecret = this.config.clientSecret;
-      if (!clientId || !clientSecret) {
+      const clientId = typeof this.config.clientID === "string" ? this.config.clientID.trim() : "";
+      const clientSecret = typeof this.config.clientSecret === "string" ? this.config.clientSecret.trim() : "";
+      if (!clientId) {
         this.log.warn(
-          "No Home Connect client ID / secret configured \u2014 open the adapter settings and enter your developer application credentials."
+          "No Home Connect Client ID configured \u2014 open the adapter settings and enter the Client ID of your developer application."
         );
         return;
+      }
+      if (!(0, import_sign_in_help.looksLikeClientId)(clientId)) {
+        this.log.warn(
+          `The Client ID does not look like one of Home Connect (64 hexadecimal characters, this one has ${clientId.length} characters) \u2014 copy it again from the developer portal.`
+        );
       }
       const auth = new import_oauth.HomeConnectAuth(
         { clientId, clientSecret, baseUrl: DEFAULT_BASE_URL },
@@ -198,6 +206,7 @@ class Homeconnect extends utils.Adapter {
         common: { name: t("verificationUrl"), desc: t("verificationUrlDesc") }
       });
       await this.extendObject("auth.signedIn", { common: { name: t("signedIn"), desc: t("signedInDesc") } });
+      await this.extendObject("auth.lastError", { common: { name: t("lastError"), desc: t("lastErrorDesc") } });
       await this.extendObject("info", { common: { name: t("channelInfo") } });
       await this.extendObject("info.connection", { common: { name: t("connection"), desc: t("connectionDesc") } });
       await this.extendObject("info.devicesTotal", {
@@ -213,33 +222,6 @@ class Homeconnect extends utils.Adapter {
       this.log.debug(`Could not refresh the manifest object names: ${(0, import_pure_helpers.errMessage)(e)}`);
     }
   }
-  /**
-   * Remove the previous adapter generation's object trees (raw haId roots with
-   * underscored BSH keys) — an update must clean up after itself, the user does
-   * not delete objects by hand. Runs before priming, so legacy states never
-   * enter the in-memory maps; self-terminating (nothing left → nothing planned).
-   */
-  async cleanupLegacyObjects() {
-    const objects = await this.getAdapterObjectsAsync();
-    const prefix = `${this.namespace}.`;
-    const relative = {};
-    for (const [id, obj] of Object.entries(objects)) {
-      if (id.startsWith(prefix)) {
-        relative[id.slice(prefix.length)] = { type: obj == null ? void 0 : obj.type, native: obj == null ? void 0 : obj.native };
-      }
-    }
-    const roots = (0, import_legacy_cleanup.planLegacyCleanup)(relative);
-    for (const root of roots) {
-      await this.delObjectAsync(root, { recursive: true }).catch(
-        (e) => this.log.debug(`legacy cleanup: could not delete ${root}: ${(0, import_pure_helpers.errMessage)(e)}`)
-      );
-    }
-    if (roots.length > 0) {
-      this.log.info(
-        `Removed ${roots.length} object tree(s) of the previous adapter generation \u2014 the new device tree replaces them; your sign-in is kept.`
-      );
-    }
-  }
   /** Build the port ApplianceSync talks to the adapter through. */
   makePort() {
     return {
@@ -250,15 +232,53 @@ class Homeconnect extends utils.Adapter {
       setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
       getState: (id) => this.getStateAsync(id),
       getObject: (id) => this.getObjectAsync(id),
-      setObjectNotExists: (id, obj) => this.setObjectNotExistsAsync(id, obj),
       delObject: (id) => this.delObjectAsync(id),
       delObjectRecursive: (id) => this.delObjectAsync(id, { recursive: true }),
       getForeignObjects: (pattern, type) => this.getForeignObjectsAsync(pattern, type),
+      getAdapterObjects: () => this.getAdapterObjectsAsync(),
+      getForeignStates: (pattern) => this.getForeignStatesAsync(pattern),
+      setForeignObject: (id, obj) => this.setForeignObject(id, obj),
+      extendForeignObject: (id, patch) => this.extendForeignObjectAsync(id, patch),
+      setForeignState: (id, state) => this.setForeignStateAsync(id, state),
+      getAliases: () => this.getForeignObjectsAsync("alias.*", "state"),
+      getEnums: async () => {
+        var _a;
+        return (_a = await this.getForeignObjectsAsync("enum.*", "enum")) != null ? _a : {};
+      },
+      deleteTreeCarryingEnums: (root, carry) => this.deleteTreeCarryingEnums(root, carry),
       apiGet: (path) => this.apiGet(path),
       apiWrite: (req) => this.apiWrite(req),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: (handle) => this.clearTimeout(handle)
     };
+  }
+  /**
+   * Delete a whole tree and carry the room and function assignments of its objects to the ids that
+   * take their place — through the fleet helper, in its order: the assignments are read first, the
+   * tree is deleted, the new ids are written last. The delete removes the old ids from every enum,
+   * written back from the adapter's enum cache, and would take away an id written before it.
+   *
+   * @param root the namespace-relative root that goes away
+   * @param carry old full id → the full ids that take its place
+   * @returns how many room/function entries now list one of the new ids
+   */
+  async deleteTreeCarryingEnums(root, carry) {
+    var _a;
+    const members = (0, import_device_move.enumMembersUnder)(await this.getForeignObjectsAsync("enum.*", "enum"), `${this.namespace}.${root}`);
+    const carried = /* @__PURE__ */ new Set();
+    let remove = async () => this.delObjectAsync(root, { recursive: true });
+    for (const oldId of members) {
+      for (const newId of (_a = carry.get(oldId)) != null ? _a : []) {
+        const inner = remove;
+        remove = async () => {
+          for (const enumId of await (0, import_enum_carry.moveWithEnums)(this, oldId, newId, inner, import_pure_helpers.errMessage)) {
+            carried.add(`${enumId}|${newId}`);
+          }
+        };
+      }
+    }
+    await remove();
+    return carried.size;
   }
   /** Build the port the AuthController drives the sign-in lifecycle through. */
   makeAuthPort() {
@@ -272,6 +292,12 @@ class Homeconnect extends utils.Adapter {
       setConnected: async (connected) => {
         this.signedIn = connected;
         await this.publishConnection();
+      },
+      setProblem: async (text) => {
+        await this.setStateChangedAsync("auth.lastError", { val: text, ack: true });
+      },
+      clearStoredLogin: async () => {
+        await this.setState("auth.session", { val: "", ack: true });
       },
       notify: (message) => this.notifyUser(message),
       onSignedIn: () => this.onAuthenticated(),
@@ -300,6 +326,9 @@ class Homeconnect extends utils.Adapter {
     try {
       return (0, import_oauth.extractRefreshToken)(this.decrypt(raw));
     } catch {
+      this.log.warn(
+        "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) \u2014 a new sign-in is required."
+      );
       return void 0;
     }
   }
@@ -503,6 +532,14 @@ class Homeconnect extends utils.Adapter {
         }
         return;
       }
+      if (obj.command === "requestSignIn" || obj.command === "resetLogin") {
+        const authCtl = this.authCtl;
+        const answer = authCtl ? { result: obj.command === "resetLogin" ? await authCtl.resetLogin() : await authCtl.requestSignIn() } : { error: "No Client ID configured \u2014 enter it above and save first." };
+        if (obj.callback) {
+          this.sendTo(obj.from, obj.command, answer, obj.callback);
+        }
+        return;
+      }
       if (obj.callback) {
         this.sendTo(obj.from, obj.command, { error: `Unknown command: ${String(obj.command)}` }, obj.callback);
       }
@@ -525,8 +562,8 @@ class Homeconnect extends utils.Adapter {
    */
   async checkConnection() {
     var _a, _b, _c, _d, _e, _f;
-    if (!this.config.clientID || !this.config.clientSecret) {
-      return { error: "No Client ID / Client Secret configured \u2014 enter them above and save first." };
+    if (typeof this.config.clientID !== "string" || this.config.clientID.trim().length === 0) {
+      return { error: "No Client ID configured \u2014 enter it above and save first." };
     }
     if (!((_a = this.authCtl) == null ? void 0 : _a.accessToken)) {
       const url = (_b = await this.getStateAsync("auth.verificationUrl")) == null ? void 0 : _b.val;
@@ -831,7 +868,9 @@ class Homeconnect extends utils.Adapter {
       }
       const writes = [
         this.setState("info.connection", { val: false, ack: true }),
-        this.setState("auth.signedIn", { val: false, ack: true })
+        this.setState("auth.signedIn", { val: false, ack: true }),
+        // Off: nothing to report (the fleet's reason-text rule) — the next start asks again.
+        this.setState("auth.lastError", { val: "Unknown", ack: true })
       ];
       if (authCtl) {
         writes.push(authCtl.settle().then(() => authCtl.persistPendingToken()));

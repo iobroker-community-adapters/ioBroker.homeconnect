@@ -8,6 +8,7 @@
       "auth.session": "session",
       "auth.verificationUrl": "verificationUrl",
       "auth.signedIn": "signedIn",
+      "auth.lastError": "lastError",
       "info": "channelInfo",
       "info.connection": "connection",
       "info.devicesTotal": "devicesTotal",
@@ -17,6 +18,7 @@
     "desc": {
       "auth.session": "sessionDesc",
       "auth.signedIn": "signedInDesc",
+      "auth.lastError": "lastErrorDesc",
       "auth.verificationUrl": "verificationUrlDesc",
       "info.connection": "connectionDesc",
       "info.devicesTotal": "devicesTotalDesc",

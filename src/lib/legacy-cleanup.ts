@@ -21,7 +21,7 @@ export interface CleanupObject {
 }
 
 /** Leaf names of the old generation: a raw BSH key with dots turned into underscores. */
-const LEGACY_LEAF = /^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)+$/;
+export const LEGACY_LEAF = /^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)+$/;
 
 /**
  * Plan the removal of the previous adapter generation's object trees.

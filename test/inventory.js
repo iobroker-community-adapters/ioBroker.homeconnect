@@ -30,8 +30,14 @@ const APPLIANCE_COUNT = fs.readdirSync(FIXTURE_DIR).filter(f => f.endsWith(".jso
 const VOLATILE = ["ts", "from", "user", "acl"];
 const COMPARED = ["name", "desc", "role", "type", "unit"];
 
-/** Adapter-specific config the fixtures need. The values only ever reach the fake endpoint. */
-const FIXTURE_NATIVE = { clientID: "fixture-client-id", clientSecret: "fixture-client-secret" };
+/**
+ * Adapter-specific config the fixtures need. The values only ever reach the fake endpoint; the
+ * Client ID has the portal's form (64 hexadecimal characters) — any other form draws a warning.
+ */
+const FIXTURE_NATIVE = {
+  clientID: "F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7",
+  clientSecret: "fixture-client-secret",
+};
 
 /** The environment that puts the fixtures in front of the adapter's own fetch. */
 const FIXTURE_ENV = { NODE_OPTIONS: `--require ${HOOK}` };

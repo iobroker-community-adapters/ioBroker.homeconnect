@@ -18,6 +18,7 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var legacy_cleanup_exports = {};
 __export(legacy_cleanup_exports, {
+  LEGACY_LEAF: () => LEGACY_LEAF,
   planLegacyCleanup: () => planLegacyCleanup
 });
 module.exports = __toCommonJS(legacy_cleanup_exports);
@@ -61,6 +62,7 @@ function planLegacyCleanup(objects) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  LEGACY_LEAF,
   planLegacyCleanup
 });
 //# sourceMappingURL=legacy-cleanup.js.map

@@ -384,6 +384,44 @@
       "native": {}
     },
     {
+      "_id": "auth.lastError",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": {
+          "en": "Last sign-in problem",
+          "de": "Letztes Anmeldeproblem",
+          "ru": "Последняя проблема входа",
+          "pt": "Último problema de início de sessão",
+          "nl": "Laatste aanmeldprobleem",
+          "fr": "Dernier problème de connexion",
+          "it": "Ultimo problema di accesso",
+          "es": "Último problema de inicio de sesión",
+          "pl": "Ostatni problem z logowaniem",
+          "uk": "Остання проблема входу",
+          "zh-cn": "最近的登录问题"
+        },
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": "Unknown",
+        "desc": {
+          "en": "What Home Connect answered when it refused the sign-in, in its own words. Empty while signed in, Unknown while nothing was asked yet.",
+          "de": "Was Home Connect beim Ablehnen der Anmeldung geantwortet hat, im Wortlaut. Leer, solange die Anmeldung steht; Unknown, solange noch nichts gefragt wurde.",
+          "ru": "Ответ Home Connect при отказе во входе, дословно. Пусто, пока вход выполнен; Unknown, пока запрос ещё не отправлялся.",
+          "pt": "O que o Home Connect respondeu ao recusar o início de sessão, nas suas próprias palavras. Vazio com a sessão iniciada; Unknown enquanto nada foi perguntado.",
+          "nl": "Wat Home Connect antwoordde toen het de aanmelding weigerde, letterlijk. Leeg zolang je aangemeld bent; Unknown zolang er nog niets is gevraagd.",
+          "fr": "Ce que Home Connect a répondu en refusant la connexion, mot pour mot. Vide tant que la connexion est établie ; Unknown tant que rien n'a été demandé.",
+          "it": "La risposta di Home Connect quando ha rifiutato l'accesso, alla lettera. Vuoto finché l'accesso è attivo; Unknown finché non è stato chiesto nulla.",
+          "es": "Lo que respondió Home Connect al rechazar el inicio de sesión, literalmente. Vacío mientras la sesión está iniciada; Unknown mientras no se ha preguntado nada.",
+          "pl": "Odpowiedź Home Connect przy odrzuceniu logowania, dosłownie. Puste, gdy logowanie działa; Unknown, dopóki o nic nie pytano.",
+          "uk": "Відповідь Home Connect під час відмови у вході, дослівно. Порожньо, поки вхід виконано; Unknown, поки нічого не запитували.",
+          "zh-cn": "Home Connect 拒绝登录时的原始回复。已登录时为空；尚未询问时为 Unknown。"
+        }
+      },
+      "native": {}
+    },
+    {
       "_id": "info",
       "type": "channel",
       "common": {

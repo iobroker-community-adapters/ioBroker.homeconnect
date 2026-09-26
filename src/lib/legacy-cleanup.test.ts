@@ -99,3 +99,25 @@ describe("planLegacyCleanup", () => {
     expect(planLegacyCleanup(objects)).toEqual(["SIEMENS-HCS02DWH1-0123456789AB"]);
   });
 });
+
+describe("planLegacyCleanup — a numeric haId root", () => {
+  it("recognises a 1.6.x tree whose root is an all-digit haId by its raw-key leaves", () => {
+    // Siemens appliances measured live carry an 18-digit haId: lower-case by nature,
+    // so only the underscored leaves can give the tree away.
+    const objects = {
+      "015090396331005775": { type: "device", native: {} } as CleanupObject,
+      "015090396331005775.general.connected": state(),
+      "015090396331005775.commands.BSH_Common_Command_StopProgram": state(),
+    };
+    expect(planLegacyCleanup(objects)).toEqual(["015090396331005775"]);
+  });
+
+  it("does not flag a tree of the current rule — lower-case, a device object with the haId, camelCase leaves", () => {
+    const objects = {
+      "sx87tx02ce-5775": { type: "device", native: { haId: "015090396331005775", idScheme: 3 } } as CleanupObject,
+      "sx87tx02ce-5775.status.operationState": state(),
+      "sx87tx02ce-5775.commands.stopProgram": state(),
+    };
+    expect(planLegacyCleanup(objects)).toEqual([]);
+  });
+});

@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Credenziali",
-  "credentialsInfo": "L'adattatore ha bisogno di una propria applicazione nel Home Connect Developer Program. Sei nuovo? Registrati gratuitamente nel portale sviluppatori e crea un'applicazione — inserisci qui sotto il suo Client ID e il Client Secret. Arrivi dal vecchio adattatore? Il Client ID è stato ripreso; trova il Client Secret corrispondente nel portale sotto Applications. Entrambi vengono salvati cifrati. Collega l’account sviluppatore all’account dell’app Home Connect: nel profilo del portale imposta «Default Home Connect User Account for Testing» sull’indirizzo e-mail dell’app.",
-  "portalButton": "Apri il portale sviluppatori Home Connect",
+  "credentialsInfo": "L'adattatore accede con una tua applicazione nell'Home Connect Developer Program — gratuita, da configurare una sola volta:\n1. Crea un account sviluppatore (primo pulsante). In «Default Home Connect Account for Testing» inserisci l'indirizzo e-mail del tuo account dell'app Home Connect — esattamente come nell'app, in minuscolo.\n2. Registra un'applicazione (secondo pulsante): Application ID a piacere, OAuth Flow «Device Flow» (non modificabile in seguito), Success Redirect vuoto, One Time Token Mode disattivato.\n3. Attendi da 15 a 60 minuti — un'applicazione nuova o modificata diventa attiva presso Home Connect solo dopo.\n4. Copia il Client ID (64 caratteri) e il Client Secret nei campi qui sotto e salva.\n5. Più in basso compare un link di accesso: aprilo, accedi con il tuo account Home Connect e conferma.\nArrivi dal vecchio adattatore? Il Client ID è stato ripreso. Solo il Client Secret viene salvato cifrato.",
+  "portalButton": "Le mie applicazioni",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Accesso",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Avvio remoto consentito da",
   "remoteStartAllowedSinceDesc": "Da quanto tempo è attivo il consenso all'avvio remoto. L'apparecchio lo revoca da sé.",
   "evIDosOpenTray": "Cassetto del detersivo aperto",
-  "evIDosOpenTrayDesc": "L'apparecchio chiede di aprire il cassetto del detersivo - il dosaggio automatico va rifornito."
+  "evIDosOpenTrayDesc": "L'apparecchio chiede di aprire il cassetto del detersivo - il dosaggio automatico va rifornito.",
+  "registerButton": "1. Crea account sviluppatore",
+  "addAppButton": "2. Registra applicazione",
+  "lastError": "Ultimo problema di accesso",
+  "lastErrorDesc": "La risposta di Home Connect quando ha rifiutato l'accesso, alla lettera. Vuoto finché l'accesso è attivo; Unknown finché non è stato chiesto nulla."
 }

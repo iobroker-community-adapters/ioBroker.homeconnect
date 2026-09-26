@@ -1,16 +1,17 @@
 // Small pure helpers, isolated so they can be unit-tested without an adapter.
 
 /**
- * Turn a source string (a type-plate E-number, or a name) into an id-safe path segment.
+ * Turn a source string (a model code, or a name) into an id-safe path segment —
+ * or nothing, when not a single letter or digit is left.
  * "SX87TX02CE/60" → "sx87tx02ce-60", "Kühl-Gefrier-Kombination" → "kuehl-gefrier-kombination".
  * German umlauts are transliterated, all other accented letters lose their
  * diacritics (Unicode decomposition); anything else non-alphanumeric becomes a hyphen.
  *
- * @param name the friendly device name (may be empty)
- * @returns a lower-case id-safe slug, or "device" if nothing usable remains
+ * @param name the source text (may be empty)
+ * @returns a lower-case id-safe slug, possibly empty
  */
-export function slugify(name: string): string {
-  const slug = name
+export function slugOf(name: string): string {
+  return name
     .toLowerCase()
     .replace(/ä/g, "ae")
     .replace(/ö/g, "oe")
@@ -20,36 +21,6 @@ export function slugify(name: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug.length > 0 ? slug : "device";
-}
-
-/**
- * Disambiguate a device slug against the slugs already taken this sync. Two
- * appliances whose names slugify to the same string (two "Geschirrspüler", or
- * default names) would otherwise collapse into one object tree and mis-route
- * writes. On a collision the haId's last 4 hex make the slug unique + stable
- * (the same appliance always resolves to the same slug).
- *
- * @param baseSlug the slug from {@link slugify}
- * @param haId the appliance's haId (its stable identity)
- * @param taken the slugs already assigned in this sync pass
- * @returns baseSlug if free, else `${baseSlug}-${last4OfHaId}`
- */
-export function disambiguateSlug(baseSlug: string, haId: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(baseSlug)) {
-    return baseSlug;
-  }
-  const suffix =
-    haId
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .slice(-4)
-      .toLowerCase() || "2";
-  let candidate = `${baseSlug}-${suffix}`;
-  let n = 2;
-  while (taken.has(candidate)) {
-    candidate = `${baseSlug}-${suffix}-${n++}`;
-  }
-  return candidate;
 }
 
 /**

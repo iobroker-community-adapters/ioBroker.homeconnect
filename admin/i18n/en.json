@@ -1,7 +1,7 @@
 {
   "headerCredentials": "Credentials",
-  "credentialsInfo": "The adapter needs its own application in the Home Connect Developer Program. New here? Register for free in the developer portal and create an application — enter its Client ID and Client Secret below. Upgrading from the old adapter? Your Client ID was carried over; look up the matching Client Secret in the portal under Applications. Both are stored encrypted. Link the developer account to your Home Connect app account: in the portal profile, set “Default Home Connect User Account for Testing” to the app's e-mail address.",
-  "portalButton": "Open Home Connect developer portal",
+  "credentialsInfo": "The adapter signs in with an application of your own in the Home Connect Developer Program — free of charge, set up once:\n1. Create a developer account (first button). As “Default Home Connect Account for Testing” enter the e-mail address of your Home Connect app account — exactly as in the app, in lower case.\n2. Register an application (second button): Application ID any name, OAuth Flow “Device Flow” (it cannot be changed later), Success Redirect empty, One Time Token Mode off.\n3. Wait 15 to 60 minutes — a new or edited application only becomes active at Home Connect after that.\n4. Copy the Client ID (64 characters) and the Client Secret into the fields below and save.\n5. A sign-in link appears further down: open it, sign in with your Home Connect account and confirm.\nComing from the old adapter? The Client ID was carried over. Only the Client Secret is stored encrypted.",
+  "portalButton": "My applications",
   "label_clientId": "Client ID",
   "label_clientSecret": "Client Secret",
   "headerSignin": "Sign-in",
@@ -602,5 +602,9 @@
   "stRemoteStartAllowedSince": "Remote start allowed since",
   "remoteStartAllowedSinceDesc": "How long the remote start release has been active. The appliance withdraws it on its own.",
   "evIDosOpenTray": "Detergent drawer open",
-  "evIDosOpenTrayDesc": "The appliance asks for the detergent drawer to be opened - the automatic dosing needs a refill."
+  "evIDosOpenTrayDesc": "The appliance asks for the detergent drawer to be opened - the automatic dosing needs a refill.",
+  "registerButton": "1. Create a developer account",
+  "addAppButton": "2. Register an application",
+  "lastError": "Last sign-in problem",
+  "lastErrorDesc": "What Home Connect answered when it refused the sign-in, in its own words. Empty while signed in, Unknown while nothing was asked yet."
 }

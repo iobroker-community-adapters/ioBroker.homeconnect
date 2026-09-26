@@ -9,6 +9,7 @@
 import { needsRefresh, OAuthError, REFRESH_CHECK_INTERVAL_MS } from "./oauth";
 import type { HomeConnectAuth, DeviceAuthorization, StoredToken } from "./oauth";
 import { errMessage } from "./pure-helpers";
+import { refusalText, signInHint } from "./sign-in-help";
 
 /** Retry the initial sign-in this soon after a transient (non-auth) refresh failure. */
 export const AUTH_RETRY_MS = 30 * 1000;
@@ -23,6 +24,16 @@ const REFRESH_BACKOFF_MAX_MS = 30 * 60 * 1000;
 const DEVICE_FLOW_RETRY_MS = 5 * 60 * 1000;
 /** RFC 8628: when the server answers slow_down, grow the poll interval by 5 s. */
 export const SLOW_DOWN_STEP_MS = 5_000;
+/**
+ * How long one sign-in episode keeps asking Home Connect for fresh links. A code lives 5 minutes;
+ * without a limit an unconfirmed sign-in renewed it forever — about 290 codes and 17 000 token
+ * requests a day for an instance nobody signs in to. After this the sign-in pauses until the user
+ * asks for a new link in the settings (or the instance restarts). krobi 2026-09-26.
+ */
+export const SIGN_IN_WINDOW_MS = 60 * 60_000;
+/** The notification and the log line when a sign-in is needed — without the code, which changes every 5 minutes. */
+export const SIGN_IN_REQUIRED =
+  "Home Connect sign-in required — open the adapter settings and follow the sign-in link shown there.";
 
 /**
  * Device-flow poll answers that END the current code: the OAuth error codes of
@@ -49,6 +60,18 @@ const CONFIG_ERRORS = new Set([
   "invalid_scope",
 ]);
 
+/**
+ * Whether a refresh answer means the login cannot come back: revoked, or the application itself
+ * refused — then a new sign-in is the only way, and retrying on the back-off would only wait for
+ * the access token to die.
+ *
+ * @param code the OAuth `error` code of the refresh answer
+ * @returns whether a new sign-in is needed
+ */
+function isLoginOver(code: string | undefined): boolean {
+  return code === "invalid_grant" || (code !== undefined && CONFIG_ERRORS.has(code));
+}
+
 /** The slice of the adapter the auth lifecycle needs — injected so it can be faked in tests. */
 export interface AuthPort {
   /** The adapter logger. */
@@ -63,6 +86,13 @@ export interface AuthPort {
   setConnected(connected: boolean): Promise<void>;
   /** Raise the persistent "sign-in required" notification. */
   notify(message: string): void;
+  /**
+   * Publish what Home Connect said when it refused the sign-in (`auth.lastError`): its own words,
+   * "" once signed in.
+   */
+  setProblem(text: string): Promise<void>;
+  /** Forget the stored login (`auth.session`). */
+  clearStoredLogin(): Promise<void>;
   /** Called after every successful sign-in (initial or re-auth): wire up the adapter. */
   onSignedIn(): Promise<void>;
   /** Schedule a callback (the adapter's managed setTimeout). */
@@ -98,6 +128,10 @@ export class AuthController {
   private unsavedToken: StoredToken | undefined;
   /** Whether this sign-in episode already warned about a configuration answer (repeats → debug). */
   private configWarned = false;
+  /** Whether this sign-in episode already warned about a failed start of the device flow (repeats → debug). */
+  private startWarned = false;
+  /** Epoch-ms the current sign-in episode began — see {@link SIGN_IN_WINDOW_MS}. */
+  private episodeStartedAt: number | undefined;
   /**
    * Token requests in flight (refresh at start, runtime refresh, device-flow
    * poll) including the persisting of what they bring. Home Connect rotates the
@@ -202,8 +236,13 @@ export class AuthController {
           this.port.log.debug(`refresh failed after stop: ${errMessage(e)}`);
           return;
         }
-        if (e instanceof OAuthError && e.oauthError === "invalid_grant") {
-          this.port.log.warn("Stored login is no longer valid — a new device-flow sign-in is required.");
+        if (e instanceof OAuthError && isLoginOver(e.oauthError)) {
+          // Revoked, or the application itself is refused (deleted, disabled, secret changed):
+          // the stored login cannot come back — a new sign-in is the only way.
+          await this.reportRefusal(e);
+          this.port.log.warn(
+            `Stored login is no longer valid (${errMessage(e)}) — ${signInHint(e.oauthError, e.description)} A new sign-in is required.`,
+          );
           // fall through to the device flow
         } else {
           const delay = this.nextRefreshBackoff();
@@ -228,25 +267,121 @@ export class AuthController {
     if (this.stopped) {
       return;
     }
+    this.episodeStartedAt ??= this.now();
+    if (this.now() - this.episodeStartedAt >= SIGN_IN_WINDOW_MS) {
+      await this.pause();
+      return;
+    }
     let dev: DeviceAuthorization;
     try {
       dev = await this.auth.startDeviceFlow();
     } catch (e) {
-      this.port.log.warn(`Could not start the Home Connect sign-in (${errMessage(e)}) — next attempt in 5 minutes.`);
+      if (e instanceof OAuthError && e.oauthError !== undefined) {
+        await this.reportRefusal(e);
+      }
+      const level = this.startWarned ? "debug" : "warn";
+      this.startWarned = true;
+      const hint =
+        e instanceof OAuthError && e.oauthError !== undefined ? ` ${signInHint(e.oauthError, e.description)}` : "";
+      this.port.log[level](
+        `Could not start the Home Connect sign-in (${errMessage(e)}).${hint} Next attempt in 5 minutes.`,
+      );
       this.retryTimer = this.port.setTimer(() => void this.guard(() => this.runDeviceFlow()), DEVICE_FLOW_RETRY_MS);
       return;
     }
     const url = dev.verificationUriComplete ?? dev.verificationUri;
     await this.port.setVerificationUrl(url);
-    const message = `Home Connect sign-in required: open ${dev.verificationUri} and enter code ${dev.userCode}`;
-    if (this.signInAnnounced) {
-      this.port.log.debug(`sign-in link renewed: ${dev.verificationUri} code ${dev.userCode}`);
-    } else {
-      this.port.log.info(message);
-      this.port.notify(message);
+    // The code changes every five minutes: the notification and the info line point at the
+    // settings, where the current link and code always stand; only debug names the code.
+    this.port.log.debug(`sign-in link: ${dev.verificationUri} code ${dev.userCode}`);
+    if (!this.signInAnnounced) {
+      this.port.log.info(SIGN_IN_REQUIRED);
+      this.port.notify(SIGN_IN_REQUIRED);
       this.signInAnnounced = true;
     }
     this.pollDeviceFlow(dev.deviceCode, dev.intervalMs, dev.expiresAt);
+  }
+
+  /**
+   * Stop asking Home Connect for sign-in links: the episode ran {@link SIGN_IN_WINDOW_MS} without a
+   * confirmation. The settings panel offers a new link ({@link requestSignIn}); a restart starts
+   * over too.
+   */
+  private async pause(): Promise<void> {
+    await this.port.setVerificationUrl("");
+    this.port.log.info(
+      "No sign-in was confirmed within an hour — the adapter stops asking Home Connect for sign-in links. " +
+        "Request a new one in the adapter settings when you are ready.",
+    );
+  }
+
+  /**
+   * Publish Home Connect's own words for a refusal (`auth.lastError`).
+   *
+   * @param e the refusal
+   */
+  private async reportRefusal(e: OAuthError): Promise<void> {
+    const text = refusalText(e.oauthError, e.description);
+    if (text !== undefined) {
+      await this.port.setProblem(text);
+    }
+  }
+
+  /**
+   * Start a new sign-in episode now — the settings panel's "request a new sign-in link": after the
+   * pause, after a refusal that was fixed in the portal, or simply because the user is ready.
+   *
+   * @returns what happened, in a sentence for the panel
+   */
+  async requestSignIn(): Promise<string> {
+    if (this.stopped) {
+      return "The adapter is stopping.";
+    }
+    if (this.token) {
+      return 'Already signed in — use "Reset sign-in" to sign in with another account.';
+    }
+    this.clearSignInTimers();
+    this.episodeStartedAt = undefined;
+    this.signInAnnounced = false;
+    this.configWarned = false;
+    this.startWarned = false;
+    await this.port.setVerificationUrl("");
+    await this.runDeviceFlow();
+    return "A new sign-in link was requested.";
+  }
+
+  /**
+   * Forget the login and sign in afresh — to switch to another Home Connect account, or when the
+   * stored login is in doubt.
+   *
+   * @returns what happened, in a sentence for the panel
+   */
+  async resetLogin(): Promise<string> {
+    if (this.stopped) {
+      return "The adapter is stopping.";
+    }
+    if (this.refreshTimer) {
+      this.port.clearIntervalTimer(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    this.token = undefined;
+    this.unsavedToken = undefined;
+    await this.port.clearStoredLogin();
+    await this.port.setConnected(false);
+    this.port.log.info("Home Connect login reset — a new sign-in follows.");
+    return this.requestSignIn();
+  }
+
+  /** Cancel the device-flow poll and a pending retry. */
+  private clearSignInTimers(): void {
+    if (this.deviceFlowTimer) {
+      this.port.clearTimer(this.deviceFlowTimer);
+      this.deviceFlowTimer = undefined;
+    }
+    if (this.retryTimer) {
+      this.port.clearTimer(this.retryTimer);
+      this.retryTimer = undefined;
+    }
   }
 
   /**
@@ -279,11 +414,13 @@ export class AuthController {
           // token arrived (a state write, the sign-in chain) is not a poll
           // failure and stays with the guard around this callback.
           const code = e instanceof OAuthError ? e.oauthError : undefined;
+          const description = e instanceof OAuthError ? e.description : undefined;
           if (code !== undefined && CONFIG_ERRORS.has(code)) {
             const level = this.configWarned ? "debug" : "warn";
             this.configWarned = true;
+            await this.reportRefusal(e as OAuthError);
             this.port.log[level](
-              `Home Connect rejected the sign-in (${errMessage(e)}) — check the Client ID and Client Secret in the adapter settings. Next sign-in attempt in 5 minutes.`,
+              `Home Connect rejected the sign-in (${errMessage(e)}) — ${signInHint(code, description)} Next sign-in attempt in 5 minutes.`,
             );
             await this.port.setVerificationUrl("");
             this.retryTimer = this.port.setTimer(
@@ -297,7 +434,15 @@ export class AuthController {
             this.pollDeviceFlow(deviceCode, intervalMs, expiresAt);
             return;
           }
-          this.port.log.warn(`Home Connect sign-in failed (${errMessage(e)}) — requesting a fresh sign-in link.`);
+          if (code === "expired_token") {
+            // Not a refusal: the code simply ran out unconfirmed.
+            this.port.log.debug("the sign-in code expired unconfirmed — requesting a fresh sign-in link.");
+          } else {
+            await this.reportRefusal(e as OAuthError);
+            this.port.log.warn(
+              `Home Connect sign-in failed (${errMessage(e)}) — ${signInHint(code, description)} Requesting a fresh sign-in link.`,
+            );
+          }
           await this.port.setVerificationUrl("");
           await this.runDeviceFlow();
           return;
@@ -401,10 +546,13 @@ export class AuthController {
     }
     this.signInAnnounced = false;
     this.configWarned = false;
+    this.startWarned = false;
+    this.episodeStartedAt = undefined;
     this.refreshWarned = false;
     this.refreshFailures = 0;
     this.nextRefreshAllowed = 0;
     this.armRefreshTimer();
+    await this.port.setProblem("");
     await this.port.onSignedIn();
   }
 
@@ -469,13 +617,20 @@ export class AuthController {
           this.port.log.debug("Home Connect: access token refreshed.");
           return true;
         } catch (e) {
-          if (e instanceof OAuthError && e.oauthError === "invalid_grant") {
-            // Only a revoked login ends the signed-in state. A transient failure
-            // keeps the current access token, which stays valid until its expiry —
-            // reporting "not connected" for it would be a false alarm.
+          if (e instanceof OAuthError && isLoginOver(e.oauthError)) {
+            // Only a login that cannot come back ends the signed-in state: revoked
+            // (`invalid_grant`), or the application refused (deleted, disabled, its
+            // secret changed). A transient failure keeps the current access token,
+            // which stays valid until its expiry — reporting "not connected" for it
+            // would be a false alarm; retrying a refusal on the back-off would only
+            // keep "signed in" on screen until the token dies after 24 hours.
             await this.port.setConnected(false);
-            this.port.log.warn("Home Connect login was revoked — a new sign-in is required.");
+            await this.reportRefusal(e);
+            this.port.log.warn(
+              `Home Connect login is no longer valid (${errMessage(e)}) — ${signInHint(e.oauthError, e.description)} A new sign-in is required.`,
+            );
             this.token = undefined;
+            this.episodeStartedAt = undefined;
             void this.guard(() => this.runDeviceFlow());
           } else if (this.stopped) {
             // Failed on the way out: no warning about an attempt that never comes.

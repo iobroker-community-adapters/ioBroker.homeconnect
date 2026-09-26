@@ -26,8 +26,12 @@ const ASSUMED_LIFETIME_S = 86_400;
 export interface OAuthConfig {
   /** Home Connect developer application client ID. */
   clientId: string;
-  /** Home Connect developer application client secret. */
-  clientSecret: string;
+  /**
+   * Home Connect developer application client secret — sent only when set. The device flow's
+   * token request needs none (api-docs, Authorization → Device Flow); an application whose
+   * "Client Secret Always Required" is on still asks for it.
+   */
+  clientSecret?: string;
   /** Region base URL, e.g. "https://api.home-connect.com". */
   baseUrl: string;
 }
@@ -84,10 +88,16 @@ export class OAuthError extends Error {
   /**
    * @param message human-readable error message
    * @param oauthError the machine-readable OAuth `error` code, if any
+   * @param description Home Connect's own explanation (`error_description`), if any — it tells the
+   *   cases apart that share a code ("Invalid client id" and "request rejected by client
+   *   authorization authority (developer portal)" are both `unauthorized_client`)
+   * @param status the HTTP status of the answer
    */
   constructor(
     message: string,
     readonly oauthError?: string,
+    readonly description?: string,
+    readonly status?: number,
   ) {
     super(message);
     this.name = "OAuthError";
@@ -233,7 +243,13 @@ export class HomeConnectAuth {
       scope: "IdentifyAppliance Monitor Settings Control",
     });
     if (!res.ok || res.body === null || typeof res.body !== "object") {
-      throw new OAuthError(`Device authorization failed (status ${res.status})`);
+      const { code, description } = this.oauthErrorOf(res.body);
+      throw new OAuthError(
+        `Device authorization failed: ${describe(code, description, res.status)}`,
+        code,
+        description,
+        res.status,
+      );
     }
     const b = res.body as Record<string, unknown>;
     const deviceCode = b.device_code;
@@ -272,21 +288,26 @@ export class HomeConnectAuth {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: deviceCode,
       client_id: this.config.clientId,
-      client_secret: this.config.clientSecret,
+      ...this.secret(),
     });
     if (res.ok) {
       return toStoredToken(res.body, this.now());
     }
-    const err = this.oauthErrorCode(res.body);
-    if (err === "authorization_pending") {
+    const { code, description } = this.oauthErrorOf(res.body);
+    if (code === "authorization_pending") {
       return "pending";
     }
     // A 429 without an OAuth code is the token endpoint's own rate limit: slowing
     // down is the answer, not polling on at the same interval.
-    if (err === "slow_down" || (err === undefined && res.status === 429)) {
+    if (code === "slow_down" || (code === undefined && res.status === 429)) {
       return "slow_down";
     }
-    throw new OAuthError(`Device flow failed: ${err ?? `status ${res.status}`}`, err);
+    throw new OAuthError(
+      `Device flow failed: ${describe(code, description, res.status)}`,
+      code,
+      description,
+      res.status,
+    );
   }
 
   /**
@@ -301,28 +322,63 @@ export class HomeConnectAuth {
     const res = await this.post(TOKEN_PATH, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_secret: this.config.clientSecret,
+      ...this.secret(),
     });
     if (!res.ok) {
-      const err = this.oauthErrorCode(res.body);
-      throw new OAuthError(`Token refresh failed: ${err ?? `status ${res.status}`}`, err);
+      const { code, description } = this.oauthErrorOf(res.body);
+      throw new OAuthError(
+        `Token refresh failed: ${describe(code, description, res.status)}`,
+        code,
+        description,
+        res.status,
+      );
     }
     return toStoredToken(res.body, this.now());
   }
 
   /**
-   * Best-effort extraction of the OAuth `error` code from an error response body.
+   * The client secret as a form field — only when one is configured.
+   *
+   * @returns `{ client_secret }`, or nothing
+   */
+  private secret(): { client_secret?: string } {
+    const secret = this.config.clientSecret?.trim();
+    return secret ? { client_secret: secret } : {};
+  }
+
+  /**
+   * Best-effort extraction of the OAuth `error` code and Home Connect's `error_description` from an
+   * error response body.
    *
    * @param body the parsed (error) response body
-   * @returns the OAuth `error` code, or undefined if none is present
+   * @returns the code and the description, each undefined when absent
    */
-  private oauthErrorCode(body: unknown): string | undefined {
-    if (body !== null && typeof body === "object") {
-      const e = (body as Record<string, unknown>).error;
-      if (typeof e === "string") {
-        return e;
-      }
+  private oauthErrorOf(body: unknown): { code?: string; description?: string } {
+    if (body === null || typeof body !== "object") {
+      return {};
     }
-    return undefined;
+    const b = body as Record<string, unknown>;
+    return {
+      code: typeof b.error === "string" && b.error.length > 0 ? b.error : undefined,
+      description:
+        typeof b.error_description === "string" && b.error_description.trim().length > 0
+          ? b.error_description.trim()
+          : undefined,
+    };
   }
+}
+
+/**
+ * One line for an OAuth failure: the code and Home Connect's own words, else the HTTP status.
+ *
+ * @param code the OAuth `error` code
+ * @param description Home Connect's `error_description`
+ * @param status the HTTP status
+ * @returns e.g. `unauthorized_client (Invalid client id)`
+ */
+function describe(code: string | undefined, description: string | undefined, status: number): string {
+  if (code && description) {
+    return `${code} (${description})`;
+  }
+  return code ?? description ?? `status ${status}`;
 }

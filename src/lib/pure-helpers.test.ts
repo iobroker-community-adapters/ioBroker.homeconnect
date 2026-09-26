@@ -1,49 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { slugify, disambiguateSlug, errMessage, cleanLabel, humanizeId, coerceForType } from "./pure-helpers";
+import { slugOf, errMessage, cleanLabel, humanizeId, coerceForType } from "./pure-helpers";
 
-describe("slugify", () => {
+describe("slugOf", () => {
   it("transliterates umlauts and lower-cases", () => {
-    expect(slugify("Geschirrspüler")).toBe("geschirrspueler");
-    expect(slugify("Kühl-Gefrier-Kombination")).toBe("kuehl-gefrier-kombination");
-    expect(slugify("Waschtrockner")).toBe("waschtrockner");
-    expect(slugify("Straße")).toBe("strasse");
+    expect(slugOf("Geschirrspüler")).toBe("geschirrspueler");
+    expect(slugOf("Kühl-Gefrier-Kombination")).toBe("kuehl-gefrier-kombination");
+    expect(slugOf("Waschtrockner")).toBe("waschtrockner");
+    expect(slugOf("Straße")).toBe("strasse");
   });
 
   it("strips diacritics from non-German accented letters instead of dropping them", () => {
-    expect(slugify("Réfrigérateur")).toBe("refrigerateur");
-    expect(slugify("Cafetera automática")).toBe("cafetera-automatica");
-    expect(slugify("Piekarnik Świętokrzyski")).toBe("piekarnik-swietokrzyski");
+    expect(slugOf("Réfrigérateur")).toBe("refrigerateur");
+    expect(slugOf("Cafetera automática")).toBe("cafetera-automatica");
+    expect(slugOf("Piekarnik Świętokrzyski")).toBe("piekarnik-swietokrzyski");
   });
 
   it("collapses other characters to single hyphens and trims them", () => {
-    expect(slugify("Bosch  Serie 6 / 2024")).toBe("bosch-serie-6-2024");
-    expect(slugify("--edge--")).toBe("edge");
+    expect(slugOf("Bosch  Serie 6 / 2024")).toBe("bosch-serie-6-2024");
+    expect(slugOf("SX87TX02CE/60")).toBe("sx87tx02ce-60");
+    expect(slugOf("--edge--")).toBe("edge");
   });
 
-  it("falls back to 'device' when nothing usable remains", () => {
-    expect(slugify("")).toBe("device");
-    expect(slugify("///")).toBe("device");
-  });
-});
-
-describe("disambiguateSlug", () => {
-  it("returns the base slug when it is not taken", () => {
-    expect(disambiguateSlug("geschirrspueler", "SIEMENS-HCS02-AABBCCDDEEFF", new Set())).toBe("geschirrspueler");
-  });
-
-  it("appends the last 4 haId hex on a collision, stable per appliance", () => {
-    const taken = new Set(["geschirrspueler"]);
-    expect(disambiguateSlug("geschirrspueler", "SIEMENS-HCS02-AABBCCDDE1F2", taken)).toBe("geschirrspueler-e1f2");
-  });
-
-  it("keeps disambiguating when the suffixed slug is also taken", () => {
-    const taken = new Set(["dishwasher", "dishwasher-e1f2"]);
-    expect(disambiguateSlug("dishwasher", "HA-XXXX-XXXXE1F2", taken)).toBe("dishwasher-e1f2-2");
-  });
-
-  it("falls back to a numeric suffix when the haId has no usable tail", () => {
-    const taken = new Set(["oven"]);
-    expect(disambiguateSlug("oven", "----", taken)).toBe("oven-2");
+  it("is empty when nothing usable remains", () => {
+    expect(slugOf("")).toBe("");
+    expect(slugOf("///")).toBe("");
   });
 });
 
