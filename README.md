@@ -121,7 +121,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 1.24.0 (2026-09-26)
 
 - Changed: every appliance gets a new object ID once — its model and the end of its own number, e.g. `sx87tx02ce-5775`; scripts and visualizations need the new IDs.
 - Changed: the move carries values, recording settings, rooms, functions and aliases along, and recorded history continues in its old series.
@@ -176,10 +176,6 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Improved: a large installation no longer risks a one-minute cloud pause during a cold start; the adapter now paces its requests to the Home Connect limit.
 - Improved: the sign-in page in the instance settings keeps updating when it is opened before the adapter has run for the first time.
 - Changed: the data point auth.session is now named "Stored login" and explains that it holds the encrypted account login.
-
-### 1.19.1 (2026-09-14)
-
-- Fixed: the appliance pictograms of 1.19.0 were invisible in the dark Admin themes. They now follow the theme and read everywhere; existing devices get the corrected icon on the first sync.
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 

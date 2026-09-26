@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.23.0",
+    "version": "1.24.0",
     "news": {
+      "1.24.0": {
+        "en": "Device ids are now model plus last four characters of the appliance number; the tree moves once with values, recordings, rooms and aliases. Clearer sign-in with Home Connect's reason.",
+        "de": "Geräte-Ids sind jetzt Modell plus die letzten vier Zeichen der Gerätenummer; der Baum zieht einmal um, samt Werten, Aufzeichnung, Räumen, Aliasen. Anmeldung nennt Home Connects Grund.",
+        "ru": "Идентификатор прибора теперь — модель плюс четыре последних символа номера; дерево переносится один раз со значениями, историей, комнатами и алиасами. Вход называет причину Home Connect.",
+        "pt": "Os ids passam a ser modelo mais os últimos quatro caracteres do número do aparelho; a árvore muda uma vez com valores, históricos, divisões e aliases. O login indica o motivo.",
+        "nl": "Apparaat-id's zijn nu model plus de laatste vier tekens van het apparaatnummer; de boom verhuist eenmaal met waarden, historie, ruimtes en aliassen. Aanmelden noemt de reden.",
+        "fr": "Les ids deviennent modèle plus les quatre derniers caractères du numéro d'appareil ; l'arbre migre une fois avec valeurs, historiques, pièces et alias. La connexion donne la raison.",
+        "it": "Gli id diventano modello più gli ultimi quattro caratteri del numero dell'apparecchio; l'albero si sposta una volta con valori, storici, stanze e alias. L'accesso indica il motivo.",
+        "es": "Los ids pasan a ser modelo más los cuatro últimos caracteres del número del aparato; el árbol se mueve una vez con valores, históricos, estancias y alias. El inicio indica el motivo.",
+        "pl": "Identyfikatory to teraz model plus cztery ostatnie znaki numeru urządzenia; drzewo przenosi się raz z wartościami, historią, pokojami i aliasami. Logowanie podaje przyczynę.",
+        "uk": "Ідентифікатор приладу тепер — модель плюс чотири останні символи номера; дерево переноситься один раз зі значеннями, історією, кімнатами й аліасами. Вхід називає причину Home Connect.",
+        "zh-cn": "设备 ID 现为型号加设备编号的后四位；对象树只迁移一次，并带上数值、历史记录、房间和别名。登录失败时会显示 Home Connect 给出的原因。"
+      },
       "1.23.0": {
         "en": "Live updates and control no longer stop after a broken answer at start, a wrong secret no longer loops the sign-in, and options stay set at program start.",
         "de": "Live-Updates und Steuerung fallen nach einer kaputten Antwort beim Start nicht mehr aus, ein falsches Secret dreht die Anmeldung nicht mehr, Optionen bleiben beim Programmstart.",
@@ -80,19 +93,6 @@
         "pl": "Każde urządzenie pokazuje teraz w drzewie obiektów mały piktogram swojego typu - zmywarka, piekarnik, pralka i czternaście innych, dla motywu jasnego i ciemnego.",
         "uk": "Кожен прилад тепер показує в дереві об'єктів невелику піктограму свого типу: посудомийна машина, духовка, пральна машина та ще чотирнадцять, для світлої та темної теми.",
         "zh-cn": "每台设备现在都会在对象树中显示一个表示其类型的小图标 — 洗碗机、烤箱、洗衣机以及另外十四种，适用于浅色和深色主题。"
-      },
-      "1.18.2": {
-        "en": "The lifetime counters and the detergent drawer event of the extended Home Connect data access carry a name and an explanation in your language.",
-        "de": "Die Lebenszeit-Zähler und das Einspülschubladen-Ereignis des erweiterten Home-Connect-Zugriffs tragen Namen und Erklärung in deiner Sprache.",
-        "ru": "Счётчики за весь срок службы и событие лотка для моющего средства расширенного доступа Home Connect получили название и пояснение на вашем языке.",
-        "pt": "Os contadores de vida útil e o evento da gaveta do detergente do acesso alargado Home Connect têm nome e explicação no seu idioma.",
-        "nl": "De levensduurtellers en de wasmiddellade-gebeurtenis van de uitgebreide Home Connect-toegang hebben een naam en uitleg in je taal.",
-        "fr": "Les compteurs de durée de vie et l'événement du tiroir à produit de l'accès étendu Home Connect ont un nom et une explication dans votre langue.",
-        "it": "I contatori a vita e l'evento del cassetto del detersivo dell'accesso esteso Home Connect hanno nome e spiegazione nella tua lingua.",
-        "es": "Los contadores de vida útil y el evento del cajón del detergente del acceso ampliado de Home Connect tienen nombre y explicación en tu idioma.",
-        "pl": "Liczniki czasu życia i zdarzenie szuflady na detergent rozszerzonego dostępu Home Connect mają nazwę i opis w Twoim języku.",
-        "uk": "Лічильники за весь строк служби та подія лотка для засобу розширеного доступу Home Connect мають назву й пояснення вашою мовою.",
-        "zh-cn": "扩展 Home Connect 数据访问的累计计数器和洗涤剂抽屉事件现在有了您语言的名称和说明。"
       }
     },
     "titleLang": {

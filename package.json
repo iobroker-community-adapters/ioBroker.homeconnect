@@ -1,6 +1,6 @@
 {
   "name": "iobroker.homeconnect",
-  "version": "1.23.0",
+  "version": "1.24.0",
   "description": "Home Connect / BSH home appliances (Bosch, Siemens, NEFF, Gaggenau) via the Home Connect cloud API, with clean typed data points",
   "author": {
     "name": "krobi",

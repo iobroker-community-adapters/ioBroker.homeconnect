@@ -1,5 +1,9 @@
 # Older changes
 
+## 1.19.1 (2026-09-14)
+
+- Fixed: the appliance pictograms of 1.19.0 were invisible in the dark Admin themes. They now follow the theme and read everywhere; existing devices get the corrected icon on the first sync.
+
 ## 1.19.0 (2026-09-12)
 
 - New: every appliance now carries a pictogram of its type in the object tree - dishwasher, oven, washing machine and fourteen more, drawn to read in the light and the dark theme.
