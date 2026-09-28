@@ -121,6 +121,19 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- Changed: value lists speak the system language — programs, phases and settings show names like "Cotton" or "Running" instead of short values or English labels.
+- Changed: the encoded program history, program details and run summary become readable datapoints: the last programs with their duration, counters per program and the last run.
+- Changed: programs chosen at the appliance appear in both program lists by name; choosing one remotely is refused with a message, because Home Connect does not allow it.
+- New: program numbers in the history and statistics are named from the appliances' own descriptions; numbers they lack are learned from the runs the adapter sees.
+- New: the last run shows its water, energy, detergent and softener use and whether it finished or was aborted, decoded from the appliance's run summary.
+- New: `status.faultActive` tells whether the appliance reports a fault, next to the fault codes as readable text; the raw code list and the other raw datapoints are removed.
+- Fixed: the water counters showed millilitres as litres — 12 million litres on a washer-dryer; they now show litres, as their unit says.
+- Fixed: the system language was never read, so the cloud answered in English and every value label was English, whatever language the installation uses.
+- Fixed: an option an appliance defines under two names was rewritten for every program definition — up to several hundred object writes on each start.
+- Fixed: a value that its list did not name (a process phase, a drying target) is added to the list once, so it is always shown by its name.
+
 ### 1.24.0 (2026-09-26)
 
 - Changed: every appliance gets a new object ID once — its model and the end of its own number, e.g. `sx87tx02ce-5775`; scripts and visualizations need the new IDs.

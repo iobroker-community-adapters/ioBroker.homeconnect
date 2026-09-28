@@ -196,6 +196,15 @@ jobs:
             echo "::error ::test/objects.inventory.json differs from what the adapter produces — regenerate it (npm run test:inventory) and commit it with the code"
             exit 1
           fi
+      - name: Judge the values a user sees
+        # Every value in its list, labels that say more than the raw value and follow the system
+        # language, enum values with a list, no coded raw values — from the dumps the run above wrote.
+        run: >-
+          npx iobroker-adapter-checks values
+          --objects test/objects.inventory.json
+          --states test/states.inventory.json
+          --objects-other-language test/objects.inventory.de.json
+          --declarations test/readable-values.json
 
   admin-component:
     # The build does not type-check: `tasks.js` calls vite directly, so the

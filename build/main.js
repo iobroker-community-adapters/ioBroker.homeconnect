@@ -83,6 +83,13 @@ class Homeconnect extends utils.Adapter {
   sync;
   /** Epoch-ms until which REST calls are paused after a 429 (honours Retry-After). */
   restBlockedUntil = 0;
+  /**
+   * The ioBroker system language (`system.config.language`), read once in onReady.
+   * `this.language` stays empty for an adapter that does not declare
+   * `useFormatDate` (js-controller 7.2.2) — reading it left every value label
+   * English and never sent an Accept-Language to the cloud.
+   */
+  systemLanguage;
   /** Epoch-ms of the next REST request slot (see {@link MIN_REQUEST_GAP_MS}). */
   nextRequestAt = 0;
   /**
@@ -134,6 +141,7 @@ class Homeconnect extends utils.Adapter {
       await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });
       await import_adapter_core.I18n.init((0, import_node_path.join)(this.adapterDir, "admin"), this);
       await this.refreshManifestObjects();
+      this.systemLanguage = await this.readSystemLanguage();
       const sync = this.makeSync(this.makePort());
       this.sync = sync;
       const steps = [
@@ -232,6 +240,7 @@ class Homeconnect extends utils.Adapter {
     return {
       namespace: this.namespace,
       log: this.log,
+      language: this.systemLanguage,
       extendObject: (id, obj) => this.extendObject(id, obj),
       setState: (id, state) => this.setState(id, state),
       setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
@@ -833,7 +842,25 @@ class Homeconnect extends utils.Adapter {
    * @returns a BSH locale like "de-DE", or undefined to let the API default
    */
   acceptLanguage() {
-    return this.language ? SYSTEM_TO_BSH_LOCALE[this.language] : void 0;
+    return this.systemLanguage ? SYSTEM_TO_BSH_LOCALE[this.systemLanguage] : void 0;
+  }
+  /**
+   * The system language from `system.config` — the fleet pattern (CLAUDE_PATTERNS.md,
+   * "User-Texte lokalisieren"). Unreadable: none — the labels fall back to English
+   * and the cloud picks its language itself.
+   *
+   * @returns an ioBroker language code, or undefined
+   */
+  async readSystemLanguage() {
+    var _a;
+    try {
+      const config = await this.getForeignObjectAsync("system.config");
+      const language = (_a = config == null ? void 0 : config.common) == null ? void 0 : _a.language;
+      return typeof language === "string" && language.length > 0 ? language : void 0;
+    } catch (e) {
+      this.log.debug(`reading the system language failed: ${(0, import_pure_helpers.errMessage)(e)} \u2014 labels in English`);
+      return void 0;
+    }
   }
   /**
    * Raise a persistent user-actionable notification (best effort — a missing

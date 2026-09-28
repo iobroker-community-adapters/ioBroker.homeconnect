@@ -32,6 +32,8 @@ module.exports = __toCommonJS(value_transformer_exports);
 var import_pure_helpers = require("./pure-helpers");
 var import_i18n = require("./i18n");
 var import_state_texts = require("./state-texts");
+var import_value_labels = require("./value-labels");
+var import_program_records = require("./program-records");
 const EVENT_PRESENT = "BSH.Common.EnumType.EventPresentState.Present";
 const UNNAMED_EVENT_KEY = "BSH.Common.EnumType.EventPresentState";
 const KIND_TO_CHANNEL = {
@@ -41,20 +43,6 @@ const KIND_TO_CHANNEL = {
   Option: "options",
   Command: "commands",
   Root: "programs"
-};
-const ENUM_STATES = {
-  OperationState: {
-    inactive: "Inactive",
-    ready: "Ready",
-    delayedstart: "Delayed start",
-    run: "Running",
-    pause: "Paused",
-    actionrequired: "Action required",
-    finished: "Finished",
-    error: "Error",
-    aborting: "Aborting"
-  },
-  PowerState: { mainsoff: "Mains off", off: "Off", on: "On", standby: "Standby", undefined: "Undefined" }
 };
 function shortEnum(bshValue) {
   var _a;
@@ -105,20 +93,18 @@ function camelJoin(segments) {
 }
 function transformItem(item) {
   const { channel, id } = stateIdForKey(item.key);
-  const { common, value, bshValues, nameSource } = transformValue(item);
-  return { channel, id, common, nameSource, value, bshValues };
+  const { common, value, bshValues, nameSource, seenValues } = transformValue(item);
+  return { channel, id, common, nameSource, value, bshValues, ...seenValues ? { seenValues } : {} };
 }
 const PROGRAM_ITEM_NAMES = {
   "BSH.Common.Root.SelectedProgram": "selectedProgram",
   "BSH.Common.Root.ActiveProgram": "activeProgram"
 };
 function itemLabel(key, apiName, id) {
-  var _a;
   const texts = (0, import_state_texts.stateText)(key);
-  const args = (_a = texts == null ? void 0 : texts.args) != null ? _a : [];
-  const desc = (texts == null ? void 0 : texts.desc) ? (0, import_i18n.tName)(texts.desc, ...args) : void 0;
+  const desc = (texts == null ? void 0 : texts.desc) ? (0, import_i18n.tName)(texts.desc) : void 0;
   if (texts == null ? void 0 : texts.name) {
-    return { name: (0, import_i18n.tName)(texts.name, ...args), nameSource: "i18n", desc };
+    return { name: (0, import_i18n.tName)(texts.name), nameSource: "i18n", desc };
   }
   const own = PROGRAM_ITEM_NAMES[key];
   if (own) {
@@ -137,6 +123,9 @@ function isDoorStatusKey(key) {
 }
 function expandBshItem(item, lockableDoor) {
   var _a;
+  if ((0, import_program_records.isProgramRecordKey)(item.key)) {
+    return [];
+  }
   if (isDoorStatusKey(item.key)) {
     const short = typeof item.value === "string" ? shortEnum(item.value) : void 0;
     if (item.key === DOOR_STATE_KEY) {
@@ -195,7 +184,7 @@ function expandBshItem(item, lockableDoor) {
   return [t];
 }
 function transformOptionDefinition(opt) {
-  var _a;
+  var _a, _b;
   const { channel, id } = stateIdForKey(opt.key);
   const { name, nameSource, desc } = itemLabel(opt.key, opt.name, id);
   const c = opt.constraints;
@@ -239,17 +228,17 @@ function transformOptionDefinition(opt) {
   const common = { name, desc, type: "string", role: "text", read: true, write: writable };
   let bshValues;
   if (allowed && allowed.length > 0) {
-    common.states = allowedStates(allowed, c == null ? void 0 : c.displayvalues);
+    common.states = allowedStates(allowed, c == null ? void 0 : c.displayvalues, shortEnum, (_b = opt.lang) != null ? _b : import_value_labels.DEFAULT_LABEL_LANGUAGE, opt.key);
     bshValues = allowed;
   }
   const value = typeof (c == null ? void 0 : c.default) === "string" ? shortEnum(c.default) : void 0;
   return { channel, id, common, nameSource, value, bshValues };
 }
-function allowedStates(allowed, displayvalues, shortOf = shortEnum) {
+function allowedStates(allowed, displayvalues, shortOf, lang, key) {
+  const cloud = displayvalues && displayvalues.length === allowed.length ? displayvalues : void 0;
   const states = {};
   allowed.forEach((v, i) => {
-    const label = displayvalues == null ? void 0 : displayvalues[i];
-    states[shortOf(v)] = typeof label === "string" && label.length > 0 ? label : shortOf(v);
+    states[shortOf(v)] = (0, import_value_labels.valueLabel)(v, lang, cloud == null ? void 0 : cloud[i], key);
   });
   return states;
 }
@@ -258,7 +247,7 @@ function isWritable(key) {
   return channel === "settings" || channel === "programs" && id === "selectedProgram";
 }
 function transformValue(item) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
   const { key, value } = item;
   const { name, nameSource, desc } = itemLabel(key, item.name, stateIdForKey(key).id);
   const writable = isWritable(key) && ((_a = item.constraints) == null ? void 0 : _a.access) !== "read";
@@ -271,6 +260,7 @@ function transformValue(item) {
     };
   }
   if (typeof value === "number") {
+    const shown = /\.Water\.Consumed$/.test(key) && item.unit === "l" ? value / 1e3 : value;
     const common = {
       name,
       desc,
@@ -291,7 +281,7 @@ function transformValue(item) {
     if (typeof ((_f = item.constraints) == null ? void 0 : _f.stepsize) === "number") {
       common.step = item.constraints.stepsize;
     }
-    return { common, nameSource, value };
+    return { common, nameSource, value: shown };
   }
   if (typeof value === "boolean") {
     return {
@@ -301,26 +291,40 @@ function transformValue(item) {
     };
   }
   const isEnumString = typeof value === "string" && (value.includes(".EnumType.") || value.includes(".Program."));
-  if (isEnumString || allowed && allowed.length > 0) {
-    const inList = allowed && allowed.length > 0 && stateIdForKey(item.key).channel !== "options" ? allowed : void 0;
+  const catalogue = allowed && allowed.length > 0 ? void 0 : (0, import_value_labels.catalogValues)(key, value);
+  if (isEnumString || allowed && allowed.length > 0 || catalogue !== void 0) {
+    const base = allowed && allowed.length > 0 ? allowed : [...catalogue != null ? catalogue : []];
+    const seenValues = [...(_g = item.seen) != null ? _g : []];
+    if (typeof value === "string" && value.length > 0 && !base.includes(value) && !seenValues.includes(value)) {
+      seenValues.push(value);
+    }
+    const full = [...base, ...seenValues.filter((v) => !base.includes(v))];
+    const inList = stateIdForKey(item.key).channel !== "options" ? full : void 0;
     const shortOf = (v) => inList ? shortEnumIn(v, inList) : shortEnum(v);
     const short = typeof value === "string" ? value.length > 0 ? shortOf(value) : "" : void 0;
     const common = { name, desc, type: "string", role: "text", read: true, write: writable };
-    const enumType = typeof value === "string" ? (_g = value.split(".EnumType.")[1]) == null ? void 0 : _g.split(".")[0] : void 0;
-    const display = (_h = item.constraints) == null ? void 0 : _h.displayvalues;
-    if (allowed && allowed.length > 0 && display && display.length === allowed.length) {
-      common.states = allowedStates(allowed, display, shortOf);
-    } else if (enumType && ENUM_STATES[enumType]) {
-      const curated = ENUM_STATES[enumType];
-      common.states = allowed && allowed.length > 0 ? Object.fromEntries(allowed.map((v) => {
-        var _a2;
-        return [shortOf(v), (_a2 = curated[shortEnum(v)]) != null ? _a2 : shortOf(v)];
-      })) : curated;
-    } else if (allowed && allowed.length > 0) {
-      common.states = Object.fromEntries(allowed.map((v) => [shortOf(v), shortOf(v)]));
+    const lang = (_h = item.lang) != null ? _h : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+    const display = (_i = item.constraints) == null ? void 0 : _i.displayvalues;
+    const cloudLabels = allowed && display && display.length === allowed.length ? display : void 0;
+    const states = {};
+    if (PROGRAM_ITEM_NAMES[key]) {
+      states[""] = (0, import_value_labels.noProgramLabel)(lang);
     }
-    const bshValues = writable ? allowed && allowed.length > 0 ? allowed : short !== void 0 && short.length > 0 ? [value] : void 0 : void 0;
-    return { common, nameSource, value: short, bshValues };
+    for (const v of full) {
+      const i = allowed ? allowed.indexOf(v) : -1;
+      states[shortOf(v)] = (0, import_value_labels.valueLabel)(v, lang, i >= 0 ? cloudLabels == null ? void 0 : cloudLabels[i] : void 0, key);
+    }
+    if (full.length > 0) {
+      common.states = states;
+    }
+    const bshValues = allowed && allowed.length > 0 ? allowed : writable ? catalogue && catalogue.length > 0 ? [...catalogue] : short !== void 0 && short.length > 0 ? [value] : void 0 : void 0;
+    return {
+      common,
+      nameSource,
+      value: short,
+      bshValues,
+      ...seenValues.length > 0 ? { seenValues } : {}
+    };
   }
   return {
     common: { name, desc, type: "string", role: "text", read: true, write: writable },

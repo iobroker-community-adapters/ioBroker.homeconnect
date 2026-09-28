@@ -152,10 +152,65 @@ describe("transformItem", () => {
     expect(nulled.value).toBeUndefined();
   });
 
-  it("shortens an enum without a curated states map (still lossless)", () => {
+  it("gives an enum the cloud sends without a list its catalogue list, labelled", () => {
     const door = transformItem({ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Open" });
     expect(door.value).toBe("open");
-    expect(door.common.states).toBeUndefined();
+    expect(door.common.states).toEqual({ open: "Open", closed: "Closed", locked: "Locked" });
+    const de = transformItem({
+      key: "BSH.Common.Status.DoorState",
+      value: "BSH.Common.EnumType.DoorState.Open",
+      lang: "de",
+    });
+    expect(de.common.states).toEqual({ open: "Offen", closed: "Geschlossen", locked: "Verriegelt" });
+  });
+
+  it("keeps a value outside every list in the list, and reports it as seen", () => {
+    // A process phase no source names (live on a washer-dryer 2026-09-27): the
+    // datapoint must not carry a value its own list does not know.
+    const t = transformItem({
+      key: "LaundryCare.Common.Option.ProcessPhase",
+      value: "LaundryCare.Common.EnumType.ProcessPhase.Spinning",
+      lang: "de",
+    });
+    expect(t.value).toBe("spinning");
+    expect(t.common.states).toMatchObject({ spinning: "Schleudern", fluffing: "Auflockern" });
+    expect(t.seenValues).toEqual(["LaundryCare.Common.EnumType.ProcessPhase.Spinning"]);
+    // Handed back in, a seen value stays even when the next value is a listed one.
+    const next = transformItem({
+      key: "LaundryCare.Common.Option.ProcessPhase",
+      value: "LaundryCare.Common.EnumType.ProcessPhase.Fluffing",
+      seen: t.seenValues,
+    });
+    expect(next.common.states).toMatchObject({ spinning: "Spinning" });
+    expect(next.seenValues).toEqual(["LaundryCare.Common.EnumType.ProcessPhase.Spinning"]);
+  });
+
+  it("builds the list of a key only the appliance descriptions know from the prefix that arrives", () => {
+    const t = transformItem({
+      key: "Dishcare.Dishwasher.Status.ProgramPhase",
+      value: "Dishcare.Dishwasher.EnumType.ProgramPhase.Drying",
+      lang: "de",
+    });
+    expect(t.value).toBe("drying");
+    expect(t.common.states).toEqual({
+      none: "Keine",
+      prerinse: "Vorspülen",
+      mainwash: "Hauptspülen",
+      finalrinse: "Klarspülen",
+      drying: "Trocknen",
+    });
+    expect(t.seenValues).toBeUndefined();
+  });
+
+  it("lists the idle program as a readable value of both program datapoints", () => {
+    const t = transformItem({
+      key: "BSH.Common.Root.ActiveProgram",
+      value: "",
+      lang: "de",
+      constraints: { allowedvalues: ["Dishcare.Dishwasher.Program.Auto2"] },
+    });
+    expect(t.value).toBe("");
+    expect(t.common.states).toEqual({ "": "Kein Programm", auto2: "Auto 45-65 °C" });
   });
 
   it("keeps a number and carries unit + constraints", () => {
@@ -167,6 +222,16 @@ describe("transformItem", () => {
     });
     expect(t).toMatchObject({ channel: "options", id: "remainingProgramTime", value: 3600 });
     expect(t.common).toMatchObject({ type: "number", role: "value", unit: "seconds", min: 0, max: 86400 });
+  });
+
+  it("shows the water counters in litres although the cloud sends millilitres labelled l", () => {
+    // 12,171,000 "l" after 339 runs on a washer-dryer — 36 litres a run.
+    const t = transformItem({ key: "BSH.Common.Status.Program.All.Water.Consumed", value: 12171000, unit: "l" });
+    expect(t.value).toBe(12171);
+    expect(t.common.unit).toBe("l");
+    // Any other unit is taken as it comes.
+    const ml = transformItem({ key: "BSH.Common.Status.Program.All.Water.Consumed", value: 5000, unit: "ml" });
+    expect(ml.value).toBe(5000);
   });
 
   it("keeps a native boolean", () => {
@@ -316,13 +381,23 @@ describe("transformOptionDefinition", () => {
     ]);
   });
 
-  it("falls back to the short value as its own label when no displayvalues are given", () => {
+  it("labels an option's values from the adapter's table, in the system language", () => {
     const t = transformOptionDefinition({
       key: "Cooking.Oven.Option.WarmingLevel",
       type: "Cooking.Oven.EnumType.WarmingLevel",
       constraints: { allowedvalues: ["Cooking.Oven.EnumType.WarmingLevel.Low"] },
+      lang: "de",
     });
-    expect(t.common.states).toEqual({ low: "low" });
+    expect(t.common.states).toEqual({ low: "Niedrig" });
+  });
+
+  it("never labels a value with its bare short value — a value the table lacks reads as words", () => {
+    const t = transformOptionDefinition({
+      key: "Cooking.Oven.Option.Something",
+      type: "Cooking.Oven.EnumType.Something",
+      constraints: { allowedvalues: ["Cooking.Oven.EnumType.Something.VeryNewValue"] },
+    });
+    expect(t.common.states).toEqual({ verynewvalue: "Very new value" });
   });
 });
 
@@ -355,9 +430,13 @@ describe("value-transformer edge inputs", () => {
   it("gives a writable enum its candidates even without an allowed list", () => {
     // A settings enum whose constraints the API omitted still has to resolve a
     // short write back to its full BSH value.
+    // The catalogue knows the key's values; without it, the value itself.
     const t = transformItem({ key: "BSH.Common.Setting.PowerState", value: "BSH.Common.EnumType.PowerState.On" });
     expect(t.value).toBe("on");
-    expect(t.bshValues).toEqual(["BSH.Common.EnumType.PowerState.On"]);
+    expect(t.bshValues).toContain("BSH.Common.EnumType.PowerState.On");
+    expect(t.bshValues).toContain("BSH.Common.EnumType.PowerState.Standby");
+    const unknown = transformItem({ key: "X.Y.Setting.Z", value: "X.Y.EnumType.Z.On" });
+    expect(unknown.bshValues).toEqual(["X.Y.EnumType.Z.On"]);
   });
 
   it("gives a read-only enum no candidates", () => {
@@ -600,11 +679,23 @@ describe("display names and descriptions", () => {
         displayvalues: ["Ein", "Bereitschaft"],
       },
     });
-    // Localized labels from the API beat the curated English list.
-    expect(t.common.states).toEqual({ on: "Ein", standby: "Bereitschaft" });
+    // The adapter's own labels beat the cloud's: the cloud answers in the language
+    // it picks ("1400 rpm" on a German installation), the table in the system one.
+    expect(t.common.states).toEqual({ on: "On", standby: "Standby" });
+    const de = transformItem({
+      key: "BSH.Common.Setting.PowerState",
+      value: "BSH.Common.EnumType.PowerState.On",
+      lang: "de",
+      constraints: {
+        allowedvalues: ["BSH.Common.EnumType.PowerState.On", "X.Y.EnumType.PowerState.Brandnew"],
+        displayvalues: ["Einschalten", "Ganz neu"],
+      },
+    });
+    // The cloud's label only fills a value the table does not know.
+    expect(de.common.states).toEqual({ on: "Ein", brandnew: "Ganz neu" });
   });
 
-  it("keeps the curated labels when the display values do not line up", () => {
+  it("keeps the table's labels when the display values do not line up", () => {
     const t = transformItem({
       key: "BSH.Common.Setting.PowerState",
       value: "BSH.Common.EnumType.PowerState.On",
@@ -711,10 +802,15 @@ describe("keys the extra-data opt-in delivers", () => {
   const OPT_IN_KEYS = [
     "Dishcare.Dishwasher.Status.ProgramPhase",
     "Dishcare.Dishwasher.Status.EcoDryActive",
-    "BSH.Common.Status.ProgramSessionSummary.Latest",
     "BSH.Common.Status.Program.All.Energy.Consumed",
     "BSH.Common.Status.Program.All.Water.Consumed",
     "LaundryCare.Washer.Status.Detergent.All.Consumed",
+  ];
+  // The encoded ones (history, per-program details, the last run's summary, the
+  // fault list) are decoded into readable datapoints instead (program-records.ts).
+  const ENCODED_KEYS = [
+    "BSH.Common.Status.ProgramSessionSummary.Latest",
+    "BSH.Common.Status.ErrorCodesList",
     "LaundryCare.Common.Status.Program.History.Uid",
     "LaundryCare.Common.Status.Program.History.EffectiveTime",
     "LaundryCare.Common.Status.Program.Details.Program02",
@@ -737,18 +833,9 @@ describe("keys the extra-data opt-in delivers", () => {
     }
   });
 
-  it("fills the number of a numbered family into name and description", () => {
-    const nine = transformItem({ key: "LaundryCare.Common.Status.Program.Details.Program09", value: "D3sDAFwA" });
-    const two = transformItem({ key: "LaundryCare.Common.Status.Program.Details.Program02", value: "D3sHAFkA" });
-    expect((nine.common.name as Record<string, string>).en).toBe("Program details 9");
-    expect((nine.common.name as Record<string, string>).de).toBe("Programmdetails 9");
-    expect((two.common.name as Record<string, string>).de).toBe("Programmdetails 2");
-    // The placeholder must not survive into the tree.
-    expect((nine.common.desc as Record<string, string>).de).toContain("9");
-    for (const lang of Object.keys(nine.common.name as Record<string, string>)) {
-      expect((nine.common.name as Record<string, string>)[lang]).not.toContain("%s");
-      expect((nine.common.desc as Record<string, string>)[lang]).not.toContain("%s");
-    }
+  it.each(ENCODED_KEYS)("never gives the encoded record %s a datapoint of its own", key => {
+    expect(expandBshItem({ key, value: "ewN7B3u2e7Y" }, true)).toEqual([]);
+    expect(expandBshItem({ key, value: undefined }, true)).toEqual([]);
   });
 
   it("names the opt-in keys itself, even when the cloud sends a name", () => {

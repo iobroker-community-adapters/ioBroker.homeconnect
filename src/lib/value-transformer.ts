@@ -9,6 +9,8 @@
 import { cleanLabel, humanizeId, isRecord, numberOrUndef, stringArrayOrUndef } from "./pure-helpers";
 import { tName } from "./i18n";
 import { stateText, DOOR_COMPARTMENT_NAMES } from "./state-texts";
+import { catalogValues, DEFAULT_LABEL_LANGUAGE, noProgramLabel, valueLabel } from "./value-labels";
+import { isProgramRecordKey } from "./program-records";
 
 /**
  * Where a state's display name came from — decides whether a later label may
@@ -30,6 +32,14 @@ export interface BshItem {
   unit?: string;
   /** Optional constraints from the API (numeric bounds, allowed enum values, access rights). */
   constraints?: ParsedConstraints;
+  /** The ioBroker system language the value labels are written in (default English). */
+  lang?: string;
+  /**
+   * Full values this datapoint carried before that its list does not name (stored in
+   * the object's `native.seenValues`) — they stay in the list, so a value the
+   * appliance really had is never outside it.
+   */
+  seen?: readonly string[];
 }
 
 /** A program option as `GET /programs/available/{programKey}` defines it (type + constraints). */
@@ -44,6 +54,8 @@ export interface BshOptionDefinition {
   unit?: string;
   /** Constraints: numeric bounds, allowed enum values + their display labels, default. */
   constraints?: ParsedConstraints;
+  /** The ioBroker system language the value labels are written in (default English). */
+  lang?: string;
 }
 
 /** The transformed state: the `common` fragment to create it with, and the value. */
@@ -68,6 +80,12 @@ export interface TransformedState {
    * stored in the state's `native` to resolve a short value back on write.
    */
   bshValues?: string[];
+  /**
+   * Full values in the selection list that neither the cloud's list nor the
+   * catalogue named — values the appliance really had. Kept in the object's
+   * `native.seenValues` and handed back in {@link BshItem.seen} on every transform.
+   */
+  seenValues?: string[];
 }
 
 const EVENT_PRESENT = "BSH.Common.EnumType.EventPresentState.Present";
@@ -87,22 +105,6 @@ const KIND_TO_CHANNEL: Record<string, string> = {
   Option: "options",
   Command: "commands",
   Root: "programs",
-};
-
-/** Curated `common.states` for the well-known Common enums (short value → label). */
-const ENUM_STATES: Record<string, Record<string, string>> = {
-  OperationState: {
-    inactive: "Inactive",
-    ready: "Ready",
-    delayedstart: "Delayed start",
-    run: "Running",
-    pause: "Paused",
-    actionrequired: "Action required",
-    finished: "Finished",
-    error: "Error",
-    aborting: "Aborting",
-  },
-  PowerState: { mainsoff: "Mains off", off: "Off", on: "On", standby: "Standby", undefined: "Undefined" },
 };
 
 /**
@@ -238,8 +240,8 @@ function camelJoin(segments: string[]): string {
  */
 export function transformItem(item: BshItem): TransformedState {
   const { channel, id } = stateIdForKey(item.key);
-  const { common, value, bshValues, nameSource } = transformValue(item);
-  return { channel, id, common, nameSource, value, bshValues };
+  const { common, value, bshValues, nameSource, seenValues } = transformValue(item);
+  return { channel, id, common, nameSource, value, bshValues, ...(seenValues ? { seenValues } : {}) };
 }
 
 /** The two synthetic program items — the adapter names them itself (translated). */
@@ -266,15 +268,13 @@ function itemLabel(
   id: string,
 ): { name: ioBroker.StringOrTranslated; nameSource: NameSource; desc: ioBroker.StringOrTranslated | undefined } {
   const texts = stateText(key);
-  // A numbered family fills the `%s` of its texts from the key's index.
-  const args = texts?.args ?? [];
   // Our own explanation, in every language — never the manufacturer's key
   // (krobi 2026-09-02: that is exactly what makes a tree unreadable).
-  const desc = texts?.desc ? tName(texts.desc, ...args) : undefined;
+  const desc = texts?.desc ? tName(texts.desc) : undefined;
   if (texts?.name) {
     // The adapter names it itself: events never come with a name over REST, and
     // a name of ours reaches every language, a cloud name only one.
-    return { name: tName(texts.name, ...args), nameSource: "i18n", desc };
+    return { name: tName(texts.name), nameSource: "i18n", desc };
   }
   const own = PROGRAM_ITEM_NAMES[key];
   if (own) {
@@ -320,6 +320,11 @@ export function isDoorStatusKey(key: string): boolean {
  * @returns the transformed states ready to create and set
  */
 export function expandBshItem(item: BshItem, lockableDoor: boolean): TransformedState[] {
+  // An encoded program record has no datapoint of its own (see program-records.ts):
+  // its readable datapoints come from the decoder, and an old raw one is migrated away.
+  if (isProgramRecordKey(item.key)) {
+    return [];
+  }
   // No value in, no value out — at EVERY expansion. A key-only item (the cloud
   // sends them: a response carries only what the appliance reports right now)
   // must not become `false` for a door, the running flag or an event; the
@@ -446,7 +451,7 @@ export function transformOptionDefinition(opt: BshOptionDefinition): Transformed
   const common: ioBroker.StateCommon = { name, desc, type: "string", role: "text", read: true, write: writable };
   let bshValues: string[] | undefined;
   if (allowed && allowed.length > 0) {
-    common.states = allowedStates(allowed, c?.displayvalues);
+    common.states = allowedStates(allowed, c?.displayvalues, shortEnum, opt.lang ?? DEFAULT_LABEL_LANGUAGE, opt.key);
     bshValues = allowed;
   }
   const value = typeof c?.default === "string" ? shortEnum(c.default) : undefined;
@@ -454,23 +459,28 @@ export function transformOptionDefinition(opt: BshOptionDefinition): Transformed
 }
 
 /**
- * Build a `common.states` map from allowed enum values and their parallel display
- * labels (falling back to the short value when no label is given).
+ * Build a `common.states` map from allowed enum values: each labelled in the
+ * system language from the adapter's table, else by the cloud's parallel display
+ * label, else by a readable English label from the value (never the bare short value).
  *
  * @param allowed the full allowed BSH values
- * @param displayvalues the parallel human-readable labels
- * @param shortOf how a full value becomes its short value (list-unique for program lists)
+ * @param displayvalues the cloud's parallel labels
+ * @param shortOf how a full value becomes its short value
+ * @param lang the ioBroker system language
+ * @param key the BSH key the values belong to
  * @returns the short-value → label map
  */
 function allowedStates(
   allowed: string[],
-  displayvalues?: string[],
-  shortOf: (v: string) => string = shortEnum,
+  displayvalues: string[] | undefined,
+  shortOf: (v: string) => string,
+  lang: string,
+  key: string,
 ): Record<string, string> {
+  const cloud = displayvalues && displayvalues.length === allowed.length ? displayvalues : undefined;
   const states: Record<string, string> = {};
   allowed.forEach((v, i) => {
-    const label = displayvalues?.[i];
-    states[shortOf(v)] = typeof label === "string" && label.length > 0 ? label : shortOf(v);
+    states[shortOf(v)] = valueLabel(v, lang, cloud?.[i], key);
   });
   return states;
 }
@@ -500,6 +510,7 @@ function transformValue(item: BshItem): {
   /** `undefined` when the item carried no value — see {@link TransformedState.value}. */
   value: ioBroker.StateValue | undefined;
   bshValues?: string[];
+  seenValues?: string[];
 } {
   const { key, value } = item;
   const { name, nameSource, desc } = itemLabel(key, item.name, stateIdForKey(key).id);
@@ -518,6 +529,11 @@ function transformValue(item: BshItem): {
 
   // Numeric values → number, carrying unit + min/max when the API supplied them.
   if (typeof value === "number") {
+    // The water counters come in millilitres although the cloud calls them "l"
+    // (12,171,000 "l" after 339 runs on a washer-dryer, 786,000 after 20 on
+    // another — 36 and 39 litres a run; the appliances' own descriptions declare
+    // them `liquidVolume`, millilitres). Shown as what the unit says: litres.
+    const shown = /\.Water\.Consumed$/.test(key) && item.unit === "l" ? value / 1000 : value;
     const common: ioBroker.StateCommon = {
       name,
       desc,
@@ -538,7 +554,7 @@ function transformValue(item: BshItem): {
     if (typeof item.constraints?.stepsize === "number") {
       common.step = item.constraints.stepsize;
     }
-    return { common, nameSource, value };
+    return { common, nameSource, value: shown };
   }
 
   // Native booleans (RemoteControlActive, ChildLock, …).
@@ -550,49 +566,71 @@ function transformValue(item: BshItem): {
     };
   }
 
-  // Enum strings, or any value that came with an allowed-values list → short value,
-  // with curated states for the well-known enums (else derived from the allowed values),
-  // and the full candidate values for resolving a write back to its BSH value.
+  // Enum strings, any value that came with an allowed-values list, and any key the
+  // catalogue knows a value set for → short value with a labelled selection list.
+  // The list is everything the value can be: the cloud's list (or, without one,
+  // the catalogue's), plus every value this datapoint carried that neither names
+  // (`seen`), plus the value itself — a value outside its own list is a value the
+  // user cannot read (objectsschema: "Only these values are allowed").
   const isEnumString = typeof value === "string" && (value.includes(".EnumType.") || value.includes(".Program."));
-  if (isEnumString || (allowed && allowed.length > 0)) {
+  const catalogue = allowed && allowed.length > 0 ? undefined : catalogValues(key, value);
+  if (isEnumString || (allowed && allowed.length > 0) || catalogue !== undefined) {
+    const base = allowed && allowed.length > 0 ? allowed : [...(catalogue ?? [])];
+    const seenValues = [...(item.seen ?? [])];
+    if (typeof value === "string" && value.length > 0 && !base.includes(value) && !seenValues.includes(value)) {
+      seenValues.push(value);
+    }
+    const full = [...base, ...seenValues.filter(v => !base.includes(v))];
     // A value list (program lists, enum settings) gets list-unique short values
-    // (see shortEnumIn). Options stay on the plain tail: their union across
-    // programs can hold the same option of two appliance families under one id,
-    // and those mean the same thing — one short value each (the write path picks
-    // the family).
-    const inList = allowed && allowed.length > 0 && stateIdForKey(item.key).channel !== "options" ? allowed : undefined;
+    // (see shortEnumIn), unique within the WHOLE list the dropdown shows. Options
+    // stay on the plain tail: their union across programs can hold the same
+    // option of two appliance families under one id, and those mean the same
+    // thing — one short value each (the write path picks the family).
+    const inList = stateIdForKey(item.key).channel !== "options" ? full : undefined;
     const shortOf = (v: string): string => (inList ? shortEnumIn(v, inList) : shortEnum(v));
     // No value in, no value out: an absent value stays absent here too — "" is
     // the idle program only when the item says "" (a key-only enum setting wrote
     // an empty string over the reading).
     const short = typeof value === "string" ? (value.length > 0 ? shortOf(value) : "") : undefined;
     const common: ioBroker.StateCommon = { name, desc, type: "string", role: "text", read: true, write: writable };
-    const enumType = typeof value === "string" ? value.split(".EnumType.")[1]?.split(".")[0] : undefined;
+    const lang = item.lang ?? DEFAULT_LABEL_LANGUAGE;
     const display = item.constraints?.displayvalues;
-    if (allowed && allowed.length > 0 && display && display.length === allowed.length) {
-      // The cloud's own localized labels beat any curated English list.
-      common.states = allowedStates(allowed, display, shortOf);
-    } else if (enumType && ENUM_STATES[enumType]) {
-      // The curated table supplies the LABELS, never the value SET. Using it
-      // whole offered values the appliance does not allow (a dishwasher has no
-      // `standby`), and Admin then showed entries that silently do nothing.
-      const curated = ENUM_STATES[enumType];
-      common.states =
-        allowed && allowed.length > 0
-          ? Object.fromEntries(allowed.map(v => [shortOf(v), curated[shortEnum(v)] ?? shortOf(v)]))
-          : curated;
-    } else if (allowed && allowed.length > 0) {
-      common.states = Object.fromEntries(allowed.map(v => [shortOf(v), shortOf(v)]));
+    const cloudLabels = allowed && display && display.length === allowed.length ? display : undefined;
+    const states: Record<string, string> = {};
+    if (PROGRAM_ITEM_NAMES[key]) {
+      // The idle program is a value of its own ("" = no program), and it reads as one.
+      states[""] = noProgramLabel(lang);
     }
-    // Only writable enums need the candidate values (to resolve a short write back).
-    const bshValues = writable
-      ? allowed && allowed.length > 0
+    for (const v of full) {
+      const i = allowed ? allowed.indexOf(v) : -1;
+      states[shortOf(v)] = valueLabel(v, lang, i >= 0 ? cloudLabels?.[i] : undefined, key);
+    }
+    if (full.length > 0) {
+      common.states = states;
+    }
+    // The cloud's list is kept on the object whenever it comes (it is the list a
+    // later answer WITHOUT constraints falls back to — the catalogue never
+    // replaces what the cloud said). A writable enum without one resolves a write
+    // against the catalogue's list, else the value itself. A value only SEEN (a
+    // program chosen at the appliance that the cloud does not offer) is in the
+    // list, but not a write candidate — the cloud would refuse it.
+    const bshValues =
+      allowed && allowed.length > 0
         ? allowed
-        : short !== undefined && short.length > 0
-          ? [value as string]
-          : undefined
-      : undefined;
-    return { common, nameSource, value: short, bshValues };
+        : writable
+          ? catalogue && catalogue.length > 0
+            ? [...catalogue]
+            : short !== undefined && short.length > 0
+              ? [value as string]
+              : undefined
+          : undefined;
+    return {
+      common,
+      nameSource,
+      value: short,
+      bshValues,
+      ...(seenValues.length > 0 ? { seenValues } : {}),
+    };
   }
 
   // Fallback: keep the raw value as a string, so nothing is lost. An absent value

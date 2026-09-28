@@ -29,3 +29,7 @@ admin/i18n/*/flat.txt
 
 # Coverage report (npm run coverage) — generated, never committed
 coverage
+
+# Value dumps of the inventory run (readable-values judge) — generated on every run, never committed
+test/states.inventory.json
+test/objects.inventory.de.json

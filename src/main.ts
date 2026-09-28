@@ -125,6 +125,13 @@ export class Homeconnect extends utils.Adapter {
   private sync: ApplianceSync | undefined;
   /** Epoch-ms until which REST calls are paused after a 429 (honours Retry-After). */
   private restBlockedUntil = 0;
+  /**
+   * The ioBroker system language (`system.config.language`), read once in onReady.
+   * `this.language` stays empty for an adapter that does not declare
+   * `useFormatDate` (js-controller 7.2.2) — reading it left every value label
+   * English and never sent an Accept-Language to the cloud.
+   */
+  private systemLanguage: string | undefined;
   /** Epoch-ms of the next REST request slot (see {@link MIN_REQUEST_GAP_MS}). */
   private nextRequestAt = 0;
   /**
@@ -203,6 +210,7 @@ export class Homeconnect extends utils.Adapter {
       // all BEFORE priming, so the in-memory maps only ever see current ids; the
       // unreachable stamp comes last: the previous run's values survive in the
       // database, and nothing else corrects a stale "reachable".
+      this.systemLanguage = await this.readSystemLanguage();
       const sync = this.makeSync(this.makePort());
       this.sync = sync;
       const steps: Array<[string, () => Promise<unknown>]> = [
@@ -307,6 +315,7 @@ export class Homeconnect extends utils.Adapter {
     return {
       namespace: this.namespace,
       log: this.log,
+      language: this.systemLanguage,
       extendObject: (id, obj) => this.extendObject(id, obj),
       setState: (id, state) => this.setState(id, state),
       setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
@@ -983,9 +992,25 @@ export class Homeconnect extends utils.Adapter {
    * @returns a BSH locale like "de-DE", or undefined to let the API default
    */
   private acceptLanguage(): string | undefined {
-    // The guard is for the type (`language` is optional); an unset language would
-    // miss the table anyway and yield undefined either way.
-    return this.language ? SYSTEM_TO_BSH_LOCALE[this.language] : undefined;
+    return this.systemLanguage ? SYSTEM_TO_BSH_LOCALE[this.systemLanguage] : undefined;
+  }
+
+  /**
+   * The system language from `system.config` — the fleet pattern (CLAUDE_PATTERNS.md,
+   * "User-Texte lokalisieren"). Unreadable: none — the labels fall back to English
+   * and the cloud picks its language itself.
+   *
+   * @returns an ioBroker language code, or undefined
+   */
+  private async readSystemLanguage(): Promise<string | undefined> {
+    try {
+      const config = await this.getForeignObjectAsync("system.config");
+      const language = (config?.common as { language?: unknown } | undefined)?.language;
+      return typeof language === "string" && language.length > 0 ? language : undefined;
+    } catch (e) {
+      this.log.debug(`reading the system language failed: ${errMessage(e)} — labels in English`);
+      return undefined;
+    }
   }
 
   /**

@@ -35,12 +35,6 @@ const DOOR_COMPARTMENT_NAMES = {
   FlexCompartment: "doorOpenFlexCompartment",
   WineCompartment: "doorOpenWineCompartment"
 };
-const NUMBERED_FAMILIES = [
-  [
-    /^LaundryCare\.Common\.Status\.Program\.Details\.Program(\d+)$/,
-    { name: "stProgramDetails", desc: "programDetailsDesc" }
-  ]
-];
 const DESCALING_ADVANCE = "evDescalingAdvanceDesc";
 const CALC_N_CLEAN_ADVANCE = "evCalcNCleanAdvanceDesc";
 const STATE_TEXTS = {
@@ -196,12 +190,6 @@ const STATE_TEXTS = {
     name: "stInteriorIlluminationActive",
     desc: "interiorIlluminationActiveDesc"
   },
-  // Undocumented: neither the official state docs nor the 1020-key reference of
-  // homebridge-homeconnect carry this one, yet a dishwasher reports it over REST
-  // (measured on a live tree 2026-09-16). A status never carries a name over
-  // REST, so without this entry the datapoint kept the label derived from its id
-  // — an English string in every language.
-  "BSH.Common.Status.ErrorCodesList": { name: "stErrorCodesList", desc: "errorCodesListDesc" },
   "BSH.Common.Setting.PowerState": { name: "setPowerState", desc: "powerStateDesc" },
   "BSH.Common.Setting.ChildLock": { name: "setChildLock", desc: "childLockDesc" },
   "BSH.Common.Option.RemainingProgramTime": {
@@ -701,10 +689,9 @@ const STATE_TEXTS = {
     desc: "dishwasherProgramPhaseDesc"
   },
   "Dishcare.Dishwasher.Status.EcoDryActive": { name: "stEcoDryActive", desc: "ecoDryActiveDesc" },
-  "BSH.Common.Status.ProgramSessionSummary.Latest": {
-    name: "stProgramSessionSummary",
-    desc: "programSessionSummaryDesc"
-  },
+  // Opt-in key of a dishwasher (live 2026-09-27); its values (On/Off) come from the
+  // appliance's own description (device-dumps-2026-09-07).
+  "Dishcare.Dishwasher.Setting.TimeLight": { name: "setTimeLight", desc: "timeLightDesc" },
   "BSH.Common.Status.Program.All.Energy.Consumed": {
     name: "stProgramAllEnergy",
     desc: "programAllEnergyDesc"
@@ -744,32 +731,13 @@ const STATE_TEXTS = {
   "LaundryCare.Washer.Event.IDos.IDosOpenTray": {
     name: "evIDosOpenTray",
     desc: "evIDosOpenTrayDesc"
-  },
-  // The three below carry an encoded raw value ("ewN7e3sDewc", "AEQAGABFAAA"),
-  // and no source explains the encoding. The description says exactly that
-  // instead of inventing a meaning — and it says it in every language.
-  "LaundryCare.Common.Status.Program.History.Uid": {
-    name: "stProgramHistoryUid",
-    desc: "programHistoryUidDesc"
-  },
-  "LaundryCare.Common.Status.Program.History.EffectiveTime": {
-    name: "stProgramHistoryEffectiveTime",
-    desc: "programHistoryEffectiveTimeDesc"
   }
-  // `…Program.Details.ProgramNN` is a numbered family — see NUMBERED_FAMILIES.
+  // The encoded program records (history, per-program details, the last run's
+  // summary, the fault code list) never become datapoints of their own — they are
+  // decoded into readable ones (program-records.ts), which carry their own texts.
 };
 function stateText(key) {
-  const exact = STATE_TEXTS[key];
-  if (exact) {
-    return exact;
-  }
-  for (const [re, text] of NUMBERED_FAMILIES) {
-    const m = re.exec(key);
-    if (m) {
-      return { ...text, args: [Number(m[1])] };
-    }
-  }
-  return void 0;
+  return STATE_TEXTS[key];
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

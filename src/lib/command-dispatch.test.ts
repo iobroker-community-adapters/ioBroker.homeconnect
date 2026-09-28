@@ -232,6 +232,13 @@ describe("resolveEnum (audit 2026-09-24, F6/F7)", () => {
     expect(resolveEnum("PizzaSetting", [heat, steam, bake])).toBe(bake);
   });
 
+  it("resolves the two-segment form the dropdown shows when only the offered list is at hand", () => {
+    // The dropdown makes short values unique across the offer PLUS the programs
+    // the appliance only ran; the write candidates are the offer alone — there the
+    // program has no collision, yet the dropdown value is its two-segment form.
+    expect(resolveEnum("heatingmode.doughproving", [heat, bake])).toBe(heat);
+  });
+
   it("refuses a bare word that names two different programs", () => {
     expect(resolveEnum("doughproving", [heat, steam])).toBeUndefined();
     expect(ambiguousCandidates("DoughProving", [heat, steam, bake])).toEqual([heat, steam]);

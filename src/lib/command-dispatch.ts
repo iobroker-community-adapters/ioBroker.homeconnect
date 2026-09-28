@@ -159,6 +159,13 @@ export function resolveEnum(value: ioBroker.StateValue, bshValues?: string[], co
   if (listed) {
     return listed;
   }
+  // The two-segment form a program has in a list that also holds programs the
+  // appliance only ran (the dropdown makes its short values unique across that
+  // whole list, the write candidates are the cloud's offer alone).
+  const twoSegments = bshValues.filter(v => v.split(".").slice(-2).join(".").toLowerCase() === wanted);
+  if (twoSegments.length === 1) {
+    return twoSegments[0];
+  }
   const bySegment = bshValues.filter(v => shortEnum(v) === wanted);
   return bySegment.length === 1 || (collapse && bySegment.length > 1) ? bySegment[0] : undefined;
 }

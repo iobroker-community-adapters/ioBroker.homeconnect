@@ -3,7 +3,7 @@
   "status": [
     {
       "key": "BSH.Common.Status.DoorState",
-      "value": "",
+      "value": "BSH.Common.EnumType.DoorState.Open",
       "constraints": {
         "access": "read"
       }
@@ -24,7 +24,7 @@
     },
     {
       "key": "BSH.Common.Status.OperationState",
-      "value": "",
+      "value": "BSH.Common.EnumType.OperationState.Inactive",
       "constraints": {
         "access": "read"
       }
@@ -67,21 +67,9 @@
       "unit": "l"
     },
     {
-      "key": "BSH.Common.Status.ProgramSessionSummary.Latest",
-      "value": "ewN7e3sDewc"
-    },
-    {
       "key": "BSH.Common.Status.RemoteControlStartAllowedSince",
       "value": 0,
       "unit": "seconds"
-    },
-    {
-      "key": "LaundryCare.Common.Status.Program.History.Uid",
-      "value": "AEQAGABFAAA"
-    },
-    {
-      "key": "LaundryCare.Common.Status.Program.History.EffectiveTime",
-      "value": "AEQAGABFAAA"
     },
     {
       "key": "LaundryCare.Washer.Status.Detergent.All.Consumed",
@@ -92,6 +80,50 @@
       "key": "LaundryCare.Washer.Status.Softener.All.Consumed",
       "value": 9100,
       "unit": "ml"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.History.Uid",
+      "value": "ewN7B3u2e7Y"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.History.EffectiveTime",
+      "value": "AL0A-QAMAAw"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program01",
+      "value": "D3uFAAIACwAAudw"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program02",
+      "value": "D3sHAF0AXwANqOA"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program06",
+      "value": "D3vOAAwADAAAgHA"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program08",
+      "value": "D3u2AAYABgAAEkg"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program09",
+      "value": "D3sDAGUAZgAHOxg"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program10",
+      "value": "D3uqAAwADgAAj3A"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program11",
+      "value": "D3t7ACQAJgAA4mg"
+    },
+    {
+      "key": "LaundryCare.Common.Status.Program.Details.Program20",
+      "value": "D3u5AAEAAQAAFGQ"
+    },
+    {
+      "key": "BSH.Common.Status.ProgramSessionSummary.Latest",
+      "value": "{\"counter\":359,\"end\":\"2026-09-27T14:47:59.859Z\",\"sequence\":[{\"configuration\":{\"options\":[{\"uid\":24585,\"value\":false},{\"uid\":24578,\"value\":140},{\"uid\":27395,\"value\":0},{\"uid\":531,\"value\":780},{\"uid\":551,\"value\":780}],\"program\":31670},\"details\":[{\"uid\":616,\"value\":339},{\"uid\":627,\"value\":139193},{\"uid\":617,\"value\":1998540},{\"uid\":622,\"value\":12171000},{\"uid\":628,\"value\":40},{\"uid\":630,\"value\":720},{\"uid\":623,\"value\":0},{\"uid\":626,\"value\":0},{\"uid\":8197,\"value\":7258},{\"uid\":8198,\"value\":0},{\"uid\":8199,\"value\":5546},{\"uid\":8200,\"value\":0}]}],\"start\":\"2026-09-27T14:35:55.271Z\"}"
     }
   ],
   "settings": [
@@ -108,14 +140,116 @@
     },
     {
       "key": "BSH.Common.Setting.AmbientLightColor",
-      "value": "",
+      "value": "BSH.Common.EnumType.AmbientLightColor.CustomColor",
       "constraints": {
-        "access": "readWrite"
+        "access": "readWrite",
+        "allowedvalues": [
+          "BSH.Common.EnumType.AmbientLightColor.CustomColor",
+          "BSH.Common.EnumType.AmbientLightColor.Color1",
+          "BSH.Common.EnumType.AmbientLightColor.Color2",
+          "BSH.Common.EnumType.AmbientLightColor.Color3",
+          "BSH.Common.EnumType.AmbientLightColor.Color4",
+          "BSH.Common.EnumType.AmbientLightColor.Color5",
+          "BSH.Common.EnumType.AmbientLightColor.Color6",
+          "BSH.Common.EnumType.AmbientLightColor.Color7",
+          "BSH.Common.EnumType.AmbientLightColor.Color8",
+          "BSH.Common.EnumType.AmbientLightColor.Color9",
+          "BSH.Common.EnumType.AmbientLightColor.Color10",
+          "BSH.Common.EnumType.AmbientLightColor.Color11",
+          "BSH.Common.EnumType.AmbientLightColor.Color12",
+          "BSH.Common.EnumType.AmbientLightColor.Color13",
+          "BSH.Common.EnumType.AmbientLightColor.Color14",
+          "BSH.Common.EnumType.AmbientLightColor.Color15",
+          "BSH.Common.EnumType.AmbientLightColor.Color16",
+          "BSH.Common.EnumType.AmbientLightColor.Color17",
+          "BSH.Common.EnumType.AmbientLightColor.Color18",
+          "BSH.Common.EnumType.AmbientLightColor.Color19",
+          "BSH.Common.EnumType.AmbientLightColor.Color20",
+          "BSH.Common.EnumType.AmbientLightColor.Color21",
+          "BSH.Common.EnumType.AmbientLightColor.Color22",
+          "BSH.Common.EnumType.AmbientLightColor.Color23",
+          "BSH.Common.EnumType.AmbientLightColor.Color24",
+          "BSH.Common.EnumType.AmbientLightColor.Color25",
+          "BSH.Common.EnumType.AmbientLightColor.Color26",
+          "BSH.Common.EnumType.AmbientLightColor.Color27",
+          "BSH.Common.EnumType.AmbientLightColor.Color28",
+          "BSH.Common.EnumType.AmbientLightColor.Color29",
+          "BSH.Common.EnumType.AmbientLightColor.Color30",
+          "BSH.Common.EnumType.AmbientLightColor.Color31",
+          "BSH.Common.EnumType.AmbientLightColor.Color32",
+          "BSH.Common.EnumType.AmbientLightColor.Color33",
+          "BSH.Common.EnumType.AmbientLightColor.Color34",
+          "BSH.Common.EnumType.AmbientLightColor.Color35",
+          "BSH.Common.EnumType.AmbientLightColor.Color36",
+          "BSH.Common.EnumType.AmbientLightColor.Color37",
+          "BSH.Common.EnumType.AmbientLightColor.Color38",
+          "BSH.Common.EnumType.AmbientLightColor.Color39",
+          "BSH.Common.EnumType.AmbientLightColor.Color40",
+          "BSH.Common.EnumType.AmbientLightColor.Color41",
+          "BSH.Common.EnumType.AmbientLightColor.Color42",
+          "BSH.Common.EnumType.AmbientLightColor.Color43",
+          "BSH.Common.EnumType.AmbientLightColor.Color44",
+          "BSH.Common.EnumType.AmbientLightColor.Color45",
+          "BSH.Common.EnumType.AmbientLightColor.Color46",
+          "BSH.Common.EnumType.AmbientLightColor.Color47",
+          "BSH.Common.EnumType.AmbientLightColor.Color48",
+          "BSH.Common.EnumType.AmbientLightColor.Color49",
+          "BSH.Common.EnumType.AmbientLightColor.Color50",
+          "BSH.Common.EnumType.AmbientLightColor.Color51",
+          "BSH.Common.EnumType.AmbientLightColor.Color52",
+          "BSH.Common.EnumType.AmbientLightColor.Color53",
+          "BSH.Common.EnumType.AmbientLightColor.Color54",
+          "BSH.Common.EnumType.AmbientLightColor.Color55",
+          "BSH.Common.EnumType.AmbientLightColor.Color56",
+          "BSH.Common.EnumType.AmbientLightColor.Color57",
+          "BSH.Common.EnumType.AmbientLightColor.Color58",
+          "BSH.Common.EnumType.AmbientLightColor.Color59",
+          "BSH.Common.EnumType.AmbientLightColor.Color60",
+          "BSH.Common.EnumType.AmbientLightColor.Color61",
+          "BSH.Common.EnumType.AmbientLightColor.Color62",
+          "BSH.Common.EnumType.AmbientLightColor.Color63",
+          "BSH.Common.EnumType.AmbientLightColor.Color64",
+          "BSH.Common.EnumType.AmbientLightColor.Color65",
+          "BSH.Common.EnumType.AmbientLightColor.Color66",
+          "BSH.Common.EnumType.AmbientLightColor.Color67",
+          "BSH.Common.EnumType.AmbientLightColor.Color68",
+          "BSH.Common.EnumType.AmbientLightColor.Color69",
+          "BSH.Common.EnumType.AmbientLightColor.Color70",
+          "BSH.Common.EnumType.AmbientLightColor.Color71",
+          "BSH.Common.EnumType.AmbientLightColor.Color72",
+          "BSH.Common.EnumType.AmbientLightColor.Color73",
+          "BSH.Common.EnumType.AmbientLightColor.Color74",
+          "BSH.Common.EnumType.AmbientLightColor.Color75",
+          "BSH.Common.EnumType.AmbientLightColor.Color76",
+          "BSH.Common.EnumType.AmbientLightColor.Color77",
+          "BSH.Common.EnumType.AmbientLightColor.Color78",
+          "BSH.Common.EnumType.AmbientLightColor.Color79",
+          "BSH.Common.EnumType.AmbientLightColor.Color80",
+          "BSH.Common.EnumType.AmbientLightColor.Color81",
+          "BSH.Common.EnumType.AmbientLightColor.Color82",
+          "BSH.Common.EnumType.AmbientLightColor.Color83",
+          "BSH.Common.EnumType.AmbientLightColor.Color84",
+          "BSH.Common.EnumType.AmbientLightColor.Color85",
+          "BSH.Common.EnumType.AmbientLightColor.Color86",
+          "BSH.Common.EnumType.AmbientLightColor.Color87",
+          "BSH.Common.EnumType.AmbientLightColor.Color88",
+          "BSH.Common.EnumType.AmbientLightColor.Color89",
+          "BSH.Common.EnumType.AmbientLightColor.Color90",
+          "BSH.Common.EnumType.AmbientLightColor.Color91",
+          "BSH.Common.EnumType.AmbientLightColor.Color92",
+          "BSH.Common.EnumType.AmbientLightColor.Color93",
+          "BSH.Common.EnumType.AmbientLightColor.Color94",
+          "BSH.Common.EnumType.AmbientLightColor.Color95",
+          "BSH.Common.EnumType.AmbientLightColor.Color96",
+          "BSH.Common.EnumType.AmbientLightColor.Color97",
+          "BSH.Common.EnumType.AmbientLightColor.Color98",
+          "BSH.Common.EnumType.AmbientLightColor.Color99"
+        ]
       }
     },
     {
       "key": "BSH.Common.Setting.AmbientLightCustomColor",
-      "value": "",
+      "value": "#ff8800",
       "constraints": {
         "access": "readWrite"
       }
@@ -136,28 +270,38 @@
     },
     {
       "key": "BSH.Common.Setting.LiquidVolumeUnit",
-      "value": "",
+      "value": "BSH.Common.EnumType.LiquidVolumeUnit.FluidOunces",
       "constraints": {
-        "access": "readWrite"
+        "access": "readWrite",
+        "allowedvalues": [
+          "BSH.Common.EnumType.LiquidVolumeUnit.FluidOunces",
+          "BSH.Common.EnumType.LiquidVolumeUnit.MilliLiter"
+        ]
       }
     },
     {
       "key": "BSH.Common.Setting.PowerState",
-      "value": "",
+      "value": "BSH.Common.EnumType.PowerState.MainsOff",
       "constraints": {
         "allowedvalues": [
+          "BSH.Common.EnumType.PowerState.MainsOff",
           "BSH.Common.EnumType.PowerState.Off",
           "BSH.Common.EnumType.PowerState.On",
-          "BSH.Common.EnumType.PowerState.Standby"
+          "BSH.Common.EnumType.PowerState.Standby",
+          "BSH.Common.EnumType.PowerState.Undefined"
         ],
         "access": "readWrite"
       }
     },
     {
       "key": "BSH.Common.Setting.TemperatureUnit",
-      "value": "",
+      "value": "BSH.Common.EnumType.TemperatureUnit.Celsius",
       "constraints": {
-        "access": "readWrite"
+        "access": "readWrite",
+        "allowedvalues": [
+          "BSH.Common.EnumType.TemperatureUnit.Celsius",
+          "BSH.Common.EnumType.TemperatureUnit.Fahrenheit"
+        ]
       }
     },
     {
@@ -740,7 +884,9 @@
       "key": "BSH.Common.Option.RemainingProgramTimeEstimationState",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": ["BSH.Common.EnumType.EstimationState.Inactive"],
+        "allowedvalues": [
+          "BSH.Common.EnumType.EstimationState.Inactive"
+        ],
         "access": "readWrite"
       }
     },
@@ -972,7 +1118,9 @@
       "key": "LaundryCare.Dryer.Option.Refresher",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": ["LaundryCare.Dryer.EnumType.Refresher.Shirt1"],
+        "allowedvalues": [
+          "LaundryCare.Dryer.EnumType.Refresher.Shirt1"
+        ],
         "access": "readWrite"
       }
     },

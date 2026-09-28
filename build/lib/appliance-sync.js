@@ -32,6 +32,34 @@ var import_device_move = require("./device-move");
 var import_legacy_cleanup = require("./legacy-cleanup");
 var import_i18n = require("./i18n");
 var import_state_texts = require("./state-texts");
+var import_program_uids = require("./program-uids");
+var import_value_labels = require("./value-labels");
+var import_program_records = require("./program-records");
+const HISTORY_PROGRAM_NAMES = ["histProgram1", "histProgram2", "histProgram3", "histProgram4"];
+const HISTORY_DURATION_NAMES = ["histDuration1", "histDuration2", "histDuration3", "histDuration4"];
+function joinNames(first, second) {
+  const pick = (n, lang) => {
+    var _a;
+    return typeof n === "string" ? n : (_a = n[lang]) != null ? _a : n.en;
+  };
+  const langs = /* @__PURE__ */ new Set([
+    "en",
+    ...typeof first === "string" ? [] : Object.keys(first),
+    ...typeof second === "string" ? [] : Object.keys(second)
+  ]);
+  const out = {};
+  for (const lang of langs) {
+    out[lang] = `${pick(first, lang)} \xB7 ${pick(second, lang)}`;
+  }
+  return out;
+}
+const END_TRIGGERS = [
+  "ProgramFinished",
+  "ProgramAbortedByUser",
+  "ProgramAbortedByAppliance",
+  "ProgramAbortedByApplianceCriticalError"
+];
+const RUN_PAIRING_TOLERANCE_MS = 6e4;
 const FAILED_DEF_RETRY_MS = 6 * 60 * 6e4;
 const PROGRAM_DEF_GENERATION = 3;
 function familyOf(values, key) {
@@ -70,7 +98,9 @@ const CHANNEL_KEYS = {
   events: "channelEvents",
   programs: "channelPrograms",
   options: "channelOptions",
-  commands: "channelCommands"
+  commands: "channelCommands",
+  history: "channelHistory",
+  lastRun: "channelLastRun"
 };
 function channelName(channel) {
   const key = CHANNEL_KEYS[channel];
@@ -211,6 +241,21 @@ class ApplianceSync {
    * transform change ever needs a forced refresh, with the reason.
    */
   settingDefs = /* @__PURE__ */ new Map();
+  /**
+   * device id → the appliance's program number → the full program key. The
+   * numbers are the appliance family's own (cotton is 28673 on a washer and 31495
+   * on a washer-dryer), so they are learned per appliance and kept in the device
+   * object's `native.programUids`.
+   */
+  programUids = /* @__PURE__ */ new Map();
+  /** device id → the program seen running, and since when (epoch ms) — what a run summary is paired with. */
+  runningProgram = /* @__PURE__ */ new Map();
+  /** device id → the last decoded program records, drawn again when a program number is learned. */
+  records = /* @__PURE__ */ new Map();
+  /** `deviceId|key` of every record that arrived in a shape the adapter cannot read — reported once a run. */
+  unreadableRecords = /* @__PURE__ */ new Set();
+  /** device ids whose `statistics` folder was written this run — once, not per record. */
+  statisticsFolders = /* @__PURE__ */ new Set();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
   settingDefsDirty = /* @__PURE__ */ new Set();
   /**
@@ -437,6 +482,14 @@ class ApplianceSync {
             }
             this.programDefs.set(deviceId, defs);
           }
+          if ((0, import_pure_helpers.isRecord)(native.programUids)) {
+            this.programUids.set(
+              deviceId,
+              Object.fromEntries(
+                Object.entries(native.programUids).filter((kv) => typeof kv[1] === "string")
+              )
+            );
+          }
           if ((0, import_pure_helpers.isRecord)(native.settingDefs)) {
             const defs = {};
             for (const [key, entry] of Object.entries(native.settingDefs)) {
@@ -464,6 +517,7 @@ class ApplianceSync {
         const native = (_d = obj.native) != null ? _d : {};
         const bshKey = typeof native.bshKey === "string" ? native.bshKey : void 0;
         const bshValues = Array.isArray(native.bshValues) ? native.bshValues.filter((v) => typeof v === "string") : void 0;
+        const seenValues = Array.isArray(native.seenValues) ? native.seenValues.filter((v) => typeof v === "string") : void 0;
         const common = (_e = obj.common) != null ? _e : {};
         this.knownStates.set(rel, {
           bshKey,
@@ -474,6 +528,7 @@ class ApplianceSync {
           desc: common.desc,
           hasStates: common.states !== void 0,
           hasValues: bshValues !== void 0,
+          seenValues,
           nameSource: storedNameSource(native)
         });
         const parts = rel.split(".");
@@ -1349,16 +1404,17 @@ class ApplianceSync {
    * @param native.bshValues the full BSH candidate values of a writable enum
    * @param nameSource where `common.name` came from (remembered in native, so a
    *   later start can tell an auto-name from a rename by the user)
+   * @param channelLabel the channel's name when it is none of the fixed channels (a program's statistics)
    * @returns the namespace-relative state id
    */
-  async createState(deviceId, channel, id, common, native, nameSource) {
+  async createState(deviceId, channel, id, common, native, nameSource, channelLabel) {
     const fullId = `${deviceId}.${channel}.${id}`;
     if (this.stopped) {
       return fullId;
     }
     await this.port.extendObject(`${deviceId}.${channel}`, {
       type: "channel",
-      common: { name: channelName(channel) },
+      common: { name: channelLabel != null ? channelLabel : channelName(channel) },
       native: {}
     });
     await this.port.extendObject(fullId, {
@@ -1375,7 +1431,8 @@ class ApplianceSync {
       nameSource,
       desc: common.desc,
       hasStates: common.states !== void 0,
-      hasValues: native.bshValues !== void 0
+      hasValues: native.bshValues !== void 0,
+      seenValues: native.seenValues
     });
     return fullId;
   }
@@ -1606,6 +1663,10 @@ class ApplianceSync {
         () => this.syncItems(deviceId, haId, "/status", "status"),
         () => this.syncItems(deviceId, haId, "/settings", "settings"),
         () => this.syncPrograms(deviceId, haId),
+        // The status came before the program list: the datapoints that name a
+        // program by its number are drawn again against the list now complete, so
+        // the next pass finds nothing to change.
+        () => this.drawProgramNames(deviceId),
         () => this.ensureCommands(deviceId, haId)
       ];
       for (const step of steps) {
@@ -1797,20 +1858,44 @@ class ApplianceSync {
    *   object shape is owned by the option *definition*, not the value item)
    */
   async applyBshItem(deviceId, raw, source) {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
     if (this.stopped || typeof raw.key !== "string") {
       return;
     }
     const value = (raw.key === SELECTED_PROGRAM_KEY || raw.key === ACTIVE_PROGRAM_KEY) && raw.value === null ? "" : raw.value;
     const lockableDoor = import_device_catalog.LOCKABLE_DOOR_TYPES.has((_a = this.typeByDeviceId.get(deviceId)) != null ? _a : "");
     const staleRead = source === "sync" && ((_b = this.lastStreamAt.get(`${deviceId}|${raw.key}`)) != null ? _b : -1) >= ((_c = this.passStartedAt.get(deviceId)) != null ? _c : Infinity);
+    if ((0, import_program_records.isProgramRecordKey)(raw.key)) {
+      await this.applyProgramRecord(deviceId, raw.key, value);
+      return;
+    }
+    if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
+      this.noteRunningProgram(deviceId, value);
+    }
+    const { channel: itemChannel, id: itemId } = (0, import_value_transformer.stateIdForKey)(raw.key);
+    const programRoot = raw.key === SELECTED_PROGRAM_KEY || raw.key === ACTIVE_PROGRAM_KEY;
+    let constraints = (0, import_value_transformer.parseConstraints)(raw.constraints);
+    if (!programRoot && !(constraints == null ? void 0 : constraints.allowedvalues)) {
+      const kept = (_d = this.knownStates.get(`${deviceId}.${itemChannel}.${itemId}`)) == null ? void 0 : _d.bshValues;
+      if (kept && kept.length > 0) {
+        constraints = { ...constraints, allowedvalues: kept };
+      }
+    }
+    if (raw.key === ACTIVE_PROGRAM_KEY && !(constraints == null ? void 0 : constraints.allowedvalues)) {
+      const offered = (_e = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _e.bshValues;
+      if (offered && offered.length > 0) {
+        constraints = { ...constraints, allowedvalues: offered };
+      }
+    }
     const states = (0, import_value_transformer.expandBshItem)(
       {
         key: raw.key,
         name: typeof raw.name === "string" ? raw.name : void 0,
         value,
         unit: typeof raw.unit === "string" ? raw.unit : void 0,
-        constraints: (0, import_value_transformer.parseConstraints)(raw.constraints)
+        constraints,
+        lang: this.port.language,
+        seen: programRoot ? this.seenPrograms(deviceId) : (_f = this.knownStates.get(`${deviceId}.${itemChannel}.${itemId}`)) == null ? void 0 : _f.seenValues
       },
       lockableDoor
     );
@@ -1819,9 +1904,13 @@ class ApplianceSync {
         t.value = void 0;
       }
       if (t.channel !== "options" && typeof value === "string" && t.value === (0, import_value_transformer.shortEnum)(value) && value.includes(".")) {
-        const candidates = (_g = (_e = (_d = this.knownStates.get(`${deviceId}.${t.channel}.${t.id}`)) == null ? void 0 : _d.bshValues) != null ? _e : t.bshValues) != null ? _g : raw.key === ACTIVE_PROGRAM_KEY ? (_f = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _f.bshValues : void 0;
-        if (candidates) {
-          t.value = (0, import_value_transformer.shortEnumIn)(value, candidates);
+        const known = this.knownStates.get(`${deviceId}.${t.channel}.${t.id}`);
+        const candidates = [
+          ...(_j = (_i = (_g = known == null ? void 0 : known.bshValues) != null ? _g : t.bshValues) != null ? _i : raw.key === ACTIVE_PROGRAM_KEY ? (_h = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _h.bshValues : void 0) != null ? _j : [],
+          ...programRoot ? this.seenPrograms(deviceId) : (_k = known == null ? void 0 : known.seenValues) != null ? _k : []
+        ];
+        if (candidates.length > 0) {
+          t.value = (0, import_value_transformer.shortEnumIn)(value, [.../* @__PURE__ */ new Set([...candidates, value])]);
         }
       }
       const valueless = value === void 0 || value === null;
@@ -1840,6 +1929,592 @@ class ApplianceSync {
     }
   }
   /**
+   * Whether a written value names a program the appliance only RAN — one in the
+   * list, but not among the programs the cloud offers for selection.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the written value
+   * @returns whether it is such a program
+   */
+  isSeenOnlyProgram(deviceId, value) {
+    var _a, _b;
+    if (typeof value !== "string") {
+      return false;
+    }
+    const offered = (_b = (_a = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _a.bshValues) != null ? _b : [];
+    const seen = this.seenPrograms(deviceId).filter((v) => !offered.includes(v));
+    const full = [...offered, ...seen];
+    const wanted = value.toLowerCase();
+    return seen.some((v) => v.toLowerCase() === wanted || (0, import_value_transformer.shortEnumIn)(v, full) === wanted || (0, import_value_transformer.shortEnum)(v) === wanted);
+  }
+  // ─── encoded program records → readable datapoints (decision 40) ───────────
+  /**
+   * Remember the program that is running — the anchor a run summary is paired
+   * with to learn the appliance's number for it. "" (idle) keeps the last one:
+   * the summary of a run arrives when the run is over.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the full program key of the active program, "" when idle
+   */
+  noteRunningProgram(deviceId, value) {
+    var _a;
+    if (value.length === 0 || ((_a = this.runningProgram.get(deviceId)) == null ? void 0 : _a.key) === value) {
+      return;
+    }
+    this.runningProgram.set(deviceId, { key: value, since: Date.now() });
+  }
+  /**
+   * The decoded records of one appliance.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns its record store
+   */
+  recordsOf(deviceId) {
+    let rec = this.records.get(deviceId);
+    if (!rec) {
+      rec = { details: /* @__PURE__ */ new Map() };
+      this.records.set(deviceId, rec);
+    }
+    return rec;
+  }
+  /**
+   * Decode one encoded record and draw the readable datapoints it feeds. A value
+   * of a shape the decoder does not know writes nothing — never the raw text —
+   * and is reported once a run, so the format can be added.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the record's BSH key
+   * @param value the raw value
+   */
+  async applyProgramRecord(deviceId, key, value) {
+    var _a, _b;
+    if (value === void 0 || value === null) {
+      return;
+    }
+    const rec = this.recordsOf(deviceId);
+    if (key === import_program_records.HISTORY_UID_KEY) {
+      const uids = (0, import_program_records.decodeHistoryUids)(value);
+      if (!uids) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.uids = uids;
+      if (!this.syncing.has(deviceId)) {
+        await this.drawHistoryPrograms(deviceId);
+      }
+    } else if (key === import_program_records.HISTORY_TIME_KEY) {
+      const minutes = (0, import_program_records.decodeHistoryMinutes)(value);
+      if (!minutes) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.minutes = minutes;
+      await this.drawHistoryDurations(deviceId);
+    } else if (import_program_records.PROGRAM_DETAILS_RE.test(key)) {
+      const details = (0, import_program_records.decodeProgramDetails)(value);
+      if (!details) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.details.set(details.uid, details);
+      await this.drawStatistics(deviceId, details);
+    } else if (key === import_program_records.SESSION_SUMMARY_KEY) {
+      const summary = (0, import_program_records.decodeSessionSummary)(value);
+      if (!summary) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.summary = summary;
+      await this.learnProgramUid(deviceId, summary);
+      if (!this.syncing.has(deviceId)) {
+        await this.drawLastRun(deviceId);
+      }
+    } else if (import_program_records.FAVORITE_PROGRAM_RE.test(key)) {
+      const uid = (0, import_program_records.decodeFavoriteProgram)(value);
+      if (uid === void 0) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      const slot = (_b = (_a = import_program_records.FAVORITE_PROGRAM_RE.exec(key)) == null ? void 0 : _a[1]) != null ? _b : "";
+      await this.applyRecordState(
+        deviceId,
+        "settings",
+        `favorite${slot}Program`,
+        {
+          name: (0, import_i18n.tName)("favProgram", slot),
+          desc: (0, import_i18n.tName)("favProgramDesc"),
+          type: "string",
+          role: "text",
+          states: this.programStates(deviceId, [uid])
+        },
+        this.programValue(deviceId, uid)
+      );
+    } else if (key === import_program_records.ERROR_CODES_KEY) {
+      const codes = (0, import_program_records.decodeErrorCodes)(value);
+      if (codes === void 0) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      await this.applyRecordState(
+        deviceId,
+        "status",
+        "errorCodes",
+        { name: (0, import_i18n.tName)("stErrorCodes"), desc: (0, import_i18n.tName)("errorCodesDesc"), type: "string", role: "text" },
+        codes
+      );
+      await this.applyRecordState(
+        deviceId,
+        "status",
+        "faultActive",
+        { name: (0, import_i18n.tName)("stFaultActive"), desc: (0, import_i18n.tName)("faultActiveDesc"), type: "boolean", role: "indicator.error" },
+        codes.length > 0
+      );
+    }
+  }
+  /**
+   * One line, once a run and record, for a value the adapter cannot read — the
+   * datapoint stays away rather than showing the raw text.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the record's BSH key
+   * @param value the raw value
+   */
+  reportUnreadable(deviceId, key, value) {
+    const family = import_program_records.PROGRAM_DETAILS_RE.test(key) ? "LaundryCare.Common.Status.Program.Details.*" : key;
+    if (this.unreadableRecords.has(`${deviceId}|${family}`)) {
+      return;
+    }
+    this.unreadableRecords.add(`${deviceId}|${family}`);
+    const shown = typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value);
+    this.port.log.info(
+      `${deviceId}: ${key} came in a form the adapter cannot read yet, so it is not shown: ${shown} \u2014 please report it at https://github.com/krobipd/ioBroker.homeconnect/issues`
+    );
+  }
+  /**
+   * Create/refresh one datapoint the adapter derives itself (no BSH key of its
+   * own — a decoded record must never look like a mapped key to the start-up
+   * repairs) and set its value.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param channel the channel path (may be nested: `statistics.cotton`)
+   * @param id the within-channel id
+   * @param shape the name, desc, type, role and optional unit / list
+   * @param value the value to set
+   * @param channelLabel the channel's name, when it is not one of the fixed channels
+   */
+  async applyRecordState(deviceId, channel, id, shape, value, channelLabel) {
+    const common = { read: true, write: false, ...shape };
+    for (const k of ["unit", "states", "desc"]) {
+      if (common[k] === void 0) {
+        delete common[k];
+      }
+    }
+    await this.applyTransformedState(
+      deviceId,
+      void 0,
+      { channel, id, common, nameSource: "i18n", value },
+      "sync",
+      channelLabel
+    );
+  }
+  /**
+   * Every program this appliance can be named with: the cloud's offer, the
+   * programs it ran, and the ones learned from its program numbers.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns the full program keys
+   */
+  knownPrograms(deviceId) {
+    var _a, _b, _c;
+    const offered = (_b = (_a = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _a.bshValues) != null ? _b : [];
+    return [
+      .../* @__PURE__ */ new Set([...offered, ...this.seenPrograms(deviceId), ...Object.values((_c = this.programUids.get(deviceId)) != null ? _c : {})])
+    ];
+  }
+  /**
+   * The value a program number stands for in a datapoint: the program's short
+   * value once the number is learned, `program<number>` until then.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the short value
+   */
+  programValue(deviceId, uid) {
+    const key = this.programKeyFor(deviceId, uid);
+    if (!key) {
+      return `program${uid}`;
+    }
+    const all = this.knownPrograms(deviceId);
+    return (0, import_value_transformer.shortEnumIn)(key, all.includes(key) ? all : [...all, key]);
+  }
+  /**
+   * The program an appliance number stands for: the one learned on this appliance,
+   * else the one the appliances' own descriptions give for its type (program-uids.ts).
+   * A described program the cloud also names for this appliance by the same last
+   * segment IS that program — the cloud's key is taken, so the value matches the
+   * program lists ("…Spin.Spin.SpinDrain" is reported as "…Program.Spin").
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the full program key, or undefined while the number is unknown
+   */
+  programKeyFor(deviceId, uid) {
+    var _a, _b, _c;
+    const learned = (_a = this.programUids.get(deviceId)) == null ? void 0 : _a[String(uid)];
+    if (learned) {
+      return learned;
+    }
+    const described = (_c = import_program_uids.PROGRAM_UIDS[(_b = this.typeByDeviceId.get(deviceId)) != null ? _b : ""]) == null ? void 0 : _c[uid];
+    if (!described) {
+      return void 0;
+    }
+    const same = this.knownPrograms(deviceId).filter((k) => (0, import_value_transformer.shortEnum)(k) === (0, import_value_transformer.shortEnum)(described));
+    return same.length === 1 ? same[0] : described;
+  }
+  /**
+   * The selection list of a datapoint that names a program by its number.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uids the numbers the datapoints show right now
+   * @returns short value → label, in the system language
+   */
+  programStates(deviceId, uids) {
+    var _a;
+    const lang = (_a = this.port.language) != null ? _a : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+    const all = this.knownPrograms(deviceId);
+    const states = {};
+    for (const key of all) {
+      states[(0, import_value_transformer.shortEnumIn)(key, all)] = (0, import_value_labels.valueLabel)(key, lang);
+    }
+    for (const uid of uids) {
+      const key = this.programKeyFor(deviceId, uid);
+      const value = this.programValue(deviceId, uid);
+      if (states[value] === void 0) {
+        states[value] = key ? (0, import_value_labels.valueLabel)(key, lang) : (0, import_value_labels.unknownProgramLabel)(uid, lang);
+      }
+    }
+    return states;
+  }
+  /**
+   * `history.program1..n` — the programs of the last runs, newest first.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async drawHistoryPrograms(deviceId) {
+    var _a, _b;
+    const uids = (_b = (_a = this.records.get(deviceId)) == null ? void 0 : _a.uids) != null ? _b : [];
+    const states = this.programStates(deviceId, uids);
+    for (const [i, uid] of uids.entries()) {
+      const n = i + 1;
+      await this.applyRecordState(
+        deviceId,
+        "history",
+        `program${n}`,
+        {
+          name: n <= HISTORY_PROGRAM_NAMES.length ? (0, import_i18n.tName)(HISTORY_PROGRAM_NAMES[i]) : (0, import_i18n.tName)("histProgramN", n),
+          desc: (0, import_i18n.tName)("histProgramDesc"),
+          type: "string",
+          role: "text",
+          states
+        },
+        this.programValue(deviceId, uid)
+      );
+    }
+  }
+  /**
+   * Draw the datapoints that name a program by its number again (history, last run).
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async drawProgramNames(deviceId) {
+    if (!this.records.has(deviceId)) {
+      return;
+    }
+    await this.drawHistoryPrograms(deviceId);
+    await this.drawLastRun(deviceId);
+  }
+  /**
+   * `history.duration1..n` — how long the last runs took, newest first.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async drawHistoryDurations(deviceId) {
+    var _a, _b;
+    for (const [i, minutes] of ((_b = (_a = this.records.get(deviceId)) == null ? void 0 : _a.minutes) != null ? _b : []).entries()) {
+      const n = i + 1;
+      await this.applyRecordState(
+        deviceId,
+        "history",
+        `duration${n}`,
+        {
+          name: n <= HISTORY_DURATION_NAMES.length ? (0, import_i18n.tName)(HISTORY_DURATION_NAMES[i]) : (0, import_i18n.tName)("histDurationN", n),
+          desc: (0, import_i18n.tName)("histDurationDesc"),
+          type: "number",
+          role: "value",
+          unit: "min"
+        },
+        minutes
+      );
+    }
+  }
+  /**
+   * The id segment of a program's statistics channel: the program's short value
+   * (dots folded into camelCase), `program<number>` until the number is learned.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the channel segment
+   */
+  statisticsSegment(deviceId, uid) {
+    return this.programValue(deviceId, uid).replace(/\.(\w)/g, (_m, c) => c.toUpperCase());
+  }
+  /**
+   * `statistics.<program>.completed/started/runtime` — one program's lifetime counters.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param d the decoded counters
+   */
+  async drawStatistics(deviceId, d) {
+    const key = this.programKeyFor(deviceId, d.uid);
+    const channel = `statistics.${this.statisticsSegment(deviceId, d.uid)}`;
+    const label = key ? (0, import_value_labels.programLabels)(key) : (0, import_i18n.tName)("unknownProgram", d.uid);
+    if (!this.statisticsFolders.has(deviceId)) {
+      await this.port.extendObject(`${deviceId}.statistics`, {
+        type: "folder",
+        common: { name: (0, import_i18n.tName)("channelStatistics") },
+        native: {}
+      });
+      this.statisticsFolders.add(deviceId);
+    }
+    const counters = [
+      ["completed", "statCompleted", "statCompletedDesc", d.completed, void 0],
+      ["started", "statStarted", "statStartedDesc", d.started, void 0],
+      ["runtime", "statRuntime", "statRuntimeDesc", Math.round(d.seconds / 360) / 10, "h"]
+    ];
+    for (const [id, name, desc, value, unit] of counters) {
+      await this.applyRecordState(
+        deviceId,
+        channel,
+        id,
+        {
+          name: joinNames(label, (0, import_i18n.tName)(name)),
+          desc: (0, import_i18n.tName)(desc),
+          type: "number",
+          role: "value",
+          ...unit ? { unit } : {}
+        },
+        value,
+        label
+      );
+    }
+  }
+  /**
+   * `lastRun.*` — the last finished run: program, start, end, duration.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async drawLastRun(deviceId) {
+    var _a, _b;
+    const s = (_a = this.records.get(deviceId)) == null ? void 0 : _a.summary;
+    if (!s) {
+      return;
+    }
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "program",
+      {
+        name: (0, import_i18n.tName)("lrProgram"),
+        desc: (0, import_i18n.tName)("lrProgramDesc"),
+        type: "string",
+        role: "text",
+        states: this.programStates(deviceId, [s.programUid])
+      },
+      this.programValue(deviceId, s.programUid)
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "start",
+      { name: (0, import_i18n.tName)("lrStart"), desc: (0, import_i18n.tName)("lrStartDesc"), type: "number", role: "date.start" },
+      s.start
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "end",
+      { name: (0, import_i18n.tName)("lrEnd"), desc: (0, import_i18n.tName)("lrEndDesc"), type: "number", role: "date.end" },
+      s.end
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "duration",
+      { name: (0, import_i18n.tName)("lrDuration"), desc: (0, import_i18n.tName)("lrDurationDesc"), type: "number", role: "value", unit: "min" },
+      Math.round((s.end - s.start) / 6e4)
+    );
+    const figures = [
+      ["water", import_program_records.RUN_DETAIL.waterMl, "lrWater", "lrWaterDesc", "l", "value", (v) => v / 1e3],
+      ["energy", import_program_records.RUN_DETAIL.energyWh, "lrEnergy", "lrEnergyDesc", "Wh", "value.energy.consumed", (v) => v],
+      ["detergent", import_program_records.RUN_DETAIL.detergentMl, "lrDetergent", "lrDetergentDesc", "ml", "value", (v) => v],
+      ["softener", import_program_records.RUN_DETAIL.softenerMl, "lrSoftener", "lrSoftenerDesc", "ml", "value", (v) => v]
+    ];
+    for (const [id, uid, name, desc, unit, role, scale] of figures) {
+      const v = s.details[uid];
+      if (v !== void 0) {
+        await this.applyRecordState(
+          deviceId,
+          "lastRun",
+          id,
+          { name: (0, import_i18n.tName)(name), desc: (0, import_i18n.tName)(desc), type: "number", role, unit },
+          scale(v)
+        );
+      }
+    }
+    const trigger = s.details[import_program_records.RUN_DETAIL.endTrigger];
+    const triggerNames = END_TRIGGERS;
+    if (trigger !== void 0 && triggerNames[trigger] !== void 0) {
+      const lang = (_b = this.port.language) != null ? _b : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+      await this.applyRecordState(
+        deviceId,
+        "lastRun",
+        "endTrigger",
+        {
+          name: (0, import_i18n.tName)("lrEndTrigger"),
+          desc: (0, import_i18n.tName)("lrEndTriggerDesc"),
+          type: "string",
+          role: "text",
+          states: Object.fromEntries(triggerNames.map((n) => [n.toLowerCase(), (0, import_value_labels.valueLabel)(n, lang)]))
+        },
+        triggerNames[trigger].toLowerCase()
+      );
+    }
+  }
+  /**
+   * Learn which program an appliance number stands for: a run summary names the
+   * number of the run that just ended, and the program seen RUNNING inside that
+   * run's start and end is that program. Only that pairing counts — a summary read
+   * again later (every reconnect reads it) while another program runs must not
+   * teach anything, and a number keeps the program it was learned with.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param s the decoded summary
+   */
+  async learnProgramUid(deviceId, s) {
+    var _a;
+    const running = this.runningProgram.get(deviceId);
+    if (!running || running.since < s.start - RUN_PAIRING_TOLERANCE_MS || running.since > s.end + RUN_PAIRING_TOLERANCE_MS) {
+      return;
+    }
+    const learned = { ...(_a = this.programUids.get(deviceId)) != null ? _a : {} };
+    const uid = String(s.programUid);
+    if (learned[uid] !== void 0) {
+      if (learned[uid] !== running.key) {
+        this.port.log.debug(
+          `${deviceId}: program number ${uid} ran as ${running.key}, but is known as ${learned[uid]} \u2014 kept`
+        );
+      }
+      return;
+    }
+    if (Object.values(learned).includes(running.key)) {
+      this.port.log.debug(`${deviceId}: ${running.key} already has a program number \u2014 ${uid} not taken`);
+      return;
+    }
+    const before = this.statisticsSegment(deviceId, s.programUid);
+    learned[uid] = running.key;
+    this.programUids.set(deviceId, learned);
+    try {
+      await this.port.extendObject(deviceId, { native: { programUids: learned } });
+    } catch (e) {
+      this.port.log.debug(`storing the program numbers of ${deviceId} failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+    }
+    this.port.log.debug(`${deviceId}: program number ${uid} is ${running.key}`);
+    await this.moveStatistics(deviceId, s.programUid, before);
+    await this.drawHistoryPrograms(deviceId);
+  }
+  /**
+   * A program number just got its program: its statistics channel moves from
+   * where it stood (`program<number>`, or a described name the appliance reports
+   * differently) to the program's name, carrying recordings, aliases, rooms and
+   * functions (the tree-move helpers of decision 36), and is drawn again.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @param before the channel segment the statistics stood under until now
+   */
+  async moveStatistics(deviceId, uid, before) {
+    var _a;
+    const from = `${deviceId}.statistics.${before}`;
+    const to = `${deviceId}.statistics.${this.statisticsSegment(deviceId, uid)}`;
+    const details = (_a = this.records.get(deviceId)) == null ? void 0 : _a.details.get(uid);
+    const moving = [...this.knownStates.keys()].some((id) => id.startsWith(`${from}.`));
+    if (moving && from !== to) {
+      try {
+        await (0, import_device_move.copyDeviceTree)(this.moveDeps(), from, to);
+        const ns = this.port.namespace;
+        const carry = /* @__PURE__ */ new Map();
+        for (const id of [...this.knownStates.keys()].filter((k) => k === from || k.startsWith(`${from}.`))) {
+          const next = (0, import_device_move.movedId)(`${ns}.${id}`, `${ns}.${from}`, `${ns}.${to}`);
+          if (next) {
+            carry.set(`${ns}.${id}`, [next]);
+          }
+          this.knownStates.delete(id);
+        }
+        await this.port.deleteTreeCarryingEnums(from, carry);
+      } catch (e) {
+        this.port.log.warn(`moving ${from} to ${to} failed: ${(0, import_pure_helpers.errMessage)(e)} \u2014 tried again on the next start`);
+      }
+    }
+    if (details) {
+      await this.drawStatistics(deviceId, details);
+    }
+  }
+  /**
+   * The programs an appliance ran that its selection list did not name — kept by
+   * the selected AND the running program, and handed to both, so the two
+   * datapoints show one list.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns the full program keys, in the order they were first seen
+   */
+  seenPrograms(deviceId) {
+    var _a, _b, _c, _d;
+    const selected = (_b = (_a = this.knownStates.get(`${deviceId}.programs.selectedProgram`)) == null ? void 0 : _a.seenValues) != null ? _b : [];
+    const active = (_d = (_c = this.knownStates.get(`${deviceId}.programs.activeProgram`)) == null ? void 0 : _c.seenValues) != null ? _d : [];
+    return [.../* @__PURE__ */ new Set([...selected, ...active])];
+  }
+  /**
+   * A value arrived that the datapoint's list does not name (a program chosen at
+   * the appliance, a process phase no source lists). Its label is ADDED to the
+   * object once — a merge adds keys, so nothing is cleared and nothing else is
+   * touched — and the value joins `native.seenValues`, so every later transform
+   * keeps it in the list. This is the only object write a value item can cause,
+   * and it happens once per new value, never per event.
+   *
+   * @param fullId the namespace-relative state id
+   * @param known its in-memory record
+   * @param t the transformed state carrying the grown `seenValues`
+   */
+  async addSeenValue(fullId, known, t) {
+    var _a, _b;
+    const before = (_a = known.seenValues) != null ? _a : [];
+    const grown = (_b = t.seenValues) != null ? _b : [];
+    const added = grown.filter((v) => !before.includes(v));
+    const states = t.common.states;
+    if (added.length === 0 || typeof t.value !== "string" || !(0, import_pure_helpers.isRecord)(states)) {
+      return;
+    }
+    const label = states[t.value];
+    if (typeof label !== "string") {
+      return;
+    }
+    try {
+      await this.port.extendObject(fullId, {
+        common: { states: { [t.value]: label } },
+        native: { seenValues: [...before, ...added] }
+      });
+      known.seenValues = [...before, ...added];
+      known.hasStates = true;
+      this.port.log.debug(`${fullId}: added "${t.value}" to its list of values`);
+    } catch (e) {
+      this.port.log.debug(`adding "${t.value}" to the list of ${fullId} failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+    }
+  }
+  /**
    * Create/refresh one transformed state and set its value (the per-state half
    * of {@link applyBshItem}).
    *
@@ -1847,16 +2522,34 @@ class ApplianceSync {
    * @param bshKey the source BSH key (shared by all states of an expanded item)
    * @param t the transformed state
    * @param source "sync" (owns metadata) or "values" (value-only)
+   * @param channelLabel the channel's name when it is none of the fixed channels (a program's statistics)
    */
-  async applyTransformedState(deviceId, bshKey, t, source) {
+  async applyTransformedState(deviceId, bshKey, t, source, channelLabel) {
     const fullId = `${deviceId}.${t.channel}.${t.id}`;
     const known = this.knownStates.get(fullId);
     if (!known) {
-      await this.createState(deviceId, t.channel, t.id, t.common, { bshKey, bshValues: t.bshValues }, t.nameSource);
+      await this.createState(
+        deviceId,
+        t.channel,
+        t.id,
+        t.common,
+        { bshKey, bshValues: t.bshValues, ...t.seenValues ? { seenValues: t.seenValues } : {} },
+        t.nameSource,
+        channelLabel
+      );
     } else {
+      if (source === "values") {
+        await this.addSeenValue(fullId, known, t);
+      }
       if (source === "sync") {
         const sig = metaSignature(t.common, { bshKey, bshValues: t.bshValues });
-        if (known.metaSig !== sig && await this.refreshStateObject(fullId, t.common, { bshKey, bshValues: t.bshValues }, known, t.nameSource)) {
+        if (known.metaSig !== sig && await this.refreshStateObject(
+          fullId,
+          t.common,
+          { bshKey, bshValues: t.bshValues, ...t.seenValues ? { seenValues: t.seenValues } : {} },
+          known,
+          t.nameSource
+        )) {
           known.bshKey = bshKey;
           known.bshValues = t.bshValues;
           known.metaSig = sig;
@@ -1897,6 +2590,7 @@ class ApplianceSync {
    *   not remember the new signature for a refresh that failed halfway
    */
   async refreshStateObject(fullId, common, native, known, nameSource) {
+    var _a;
     const fresh = { ...common };
     let clearedStates = false;
     let clearedValues = false;
@@ -1921,6 +2615,7 @@ class ApplianceSync {
       known.desc = fresh.desc;
       known.hasStates = fresh.states !== void 0 || known.hasStates === true;
       known.hasValues = native.bshValues !== void 0 || known.hasValues === true;
+      known.seenValues = (_a = native.seenValues) != null ? _a : known.seenValues;
       this.port.log.debug(`refreshed object metadata of ${fullId}`);
       return true;
     } catch (e) {
@@ -2135,6 +2830,7 @@ class ApplianceSync {
    * @returns the option's state id, or undefined if it had no key
    */
   async applyOptionDefinition(deviceId, raw) {
+    var _a;
     if (this.stopped || typeof raw.key !== "string") {
       return void 0;
     }
@@ -2143,7 +2839,8 @@ class ApplianceSync {
       name: typeof raw.name === "string" ? raw.name : void 0,
       type: typeof raw.type === "string" ? raw.type : void 0,
       unit: typeof raw.unit === "string" ? raw.unit : void 0,
-      constraints: (0, import_value_transformer.parseConstraints)(raw.constraints)
+      constraints: (0, import_value_transformer.parseConstraints)(raw.constraints),
+      lang: this.port.language
     };
     const t = (0, import_value_transformer.transformOptionDefinition)(opt);
     const fullId = `${deviceId}.options.${t.id}`;
@@ -2163,16 +2860,17 @@ class ApplianceSync {
       return t.id;
     }
     const merged = await this.mergeOptionDefinition(fullId, known, t);
-    const sig = metaSignature(merged.common, { bshKey: opt.key, bshValues: merged.bshValues });
+    const objectKey = (_a = known.bshKey) != null ? _a : opt.key;
+    const sig = metaSignature(merged.common, { bshKey: objectKey, bshValues: merged.bshValues });
     const refreshed = known.metaSig === sig || await this.refreshStateObject(
       fullId,
       merged.common,
-      { bshKey: opt.key, bshValues: merged.bshValues },
+      { bshKey: objectKey, bshValues: merged.bshValues },
       known,
       t.nameSource
     );
     if (refreshed) {
-      known.bshKey = opt.key;
+      known.bshKey = objectKey;
       known.bshValues = merged.bshValues;
       known.metaSig = sig;
       known.type = merged.common.type;
@@ -2192,7 +2890,7 @@ class ApplianceSync {
    * @returns the merged common + allowed values
    */
   async mergeOptionDefinition(fullId, known, t) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
     const common = { ...t.common };
     let exCommon = {};
     try {
@@ -2211,10 +2909,12 @@ class ApplianceSync {
       bshValues = union;
       const exStates = (0, import_pure_helpers.isRecord)(exCommon.states) ? exCommon.states : {};
       const newStates = (0, import_pure_helpers.isRecord)(common.states) ? common.states : {};
+      const lang = (_i = this.port.language) != null ? _i : import_value_labels.DEFAULT_LABEL_LANGUAGE;
       const states = {};
       for (const v of union) {
         const short = (0, import_value_transformer.shortEnum)(v);
-        states[short] = (_j = (_i = exStates[short]) != null ? _i : newStates[short]) != null ? _j : short;
+        const stored = exStates[short];
+        states[short] = (_l = (_k = (_j = (0, import_value_labels.ownValueLabel)(v, lang)) != null ? _j : newStates[short]) != null ? _k : typeof stored === "string" && stored !== short ? stored : void 0) != null ? _l : (0, import_value_labels.valueLabel)(v, lang, void 0, known.bshKey);
       }
       common.states = states;
     }
@@ -2239,17 +2939,15 @@ class ApplianceSync {
    * @param haId the appliance's haId
    */
   async ensureCommands(deviceId, haId) {
-    var _a;
     const data = await this.port.apiGet(appliancePath(haId, "/commands"));
     const commands = (0, import_pure_helpers.isRecord)(data) && Array.isArray(data.commands) ? data.commands : [];
     for (const raw of commands) {
       if ((0, import_pure_helpers.isRecord)(raw) && typeof raw.key === "string") {
         const id = (0, import_value_transformer.stateIdForKey)(raw.key).id;
         const texts = (0, import_state_texts.stateText)(raw.key);
-        const args = (_a = texts == null ? void 0 : texts.args) != null ? _a : [];
-        const desc = (texts == null ? void 0 : texts.desc) ? (0, import_i18n.tName)(texts.desc, ...args) : void 0;
+        const desc = (texts == null ? void 0 : texts.desc) ? (0, import_i18n.tName)(texts.desc) : void 0;
         if (texts == null ? void 0 : texts.name) {
-          await this.ensureButton(deviceId, "commands", id, (0, import_i18n.tName)(texts.name, ...args), "i18n", raw.key, desc);
+          await this.ensureButton(deviceId, "commands", id, (0, import_i18n.tName)(texts.name), "i18n", raw.key, desc);
           continue;
         }
         const apiName = (0, import_pure_helpers.cleanLabel)(raw.name);
@@ -2350,6 +3048,11 @@ class ApplianceSync {
             await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta == null ? void 0 : meta.bshKey);
           }
         }
+      } else if (channel === "programs" && stateId === "selectedProgram" && this.isSeenOnlyProgram(deviceId, value)) {
+        this.port.log.info(
+          `Write to ${rel} not sent: "${String(value)}" can only be chosen at the appliance \u2014 Home Connect does not offer it for remote selection.`
+        );
+        await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta == null ? void 0 : meta.bshKey);
       } else {
         const both = (0, import_command_dispatch.ambiguousCandidates)(value, ctx.bshValues);
         if (both.length > 0 && channel !== "options") {

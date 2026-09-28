@@ -669,7 +669,9 @@ describe("Homeconnect sign-in wiring", () => {
 describe("Homeconnect REST reads", () => {
   it("sends the token and the system language, and unwraps the data", async () => {
     const ctx = setup();
-    ctx.i.language = "de";
+    // The system language comes from system.config — `this.language` stays empty
+    // for an adapter without `useFormatDate` (js-controller 7.2.2).
+    ctx.i.foreign.set("system.config", { common: { language: "de" } });
     await ctx.i.onReady();
     httpMock.getJson.mockResolvedValue(okResult({ status: [] }));
 
@@ -677,14 +679,28 @@ describe("Homeconnect REST reads", () => {
     expect(httpMock.getJson).toHaveBeenCalledWith("https://api.home-connect.com", "/api/x", "AT", "de-DE");
   });
 
+  it("hands the system language to the appliance sync — the language of every value label", async () => {
+    const ctx = setup();
+    ctx.i.foreign.set("system.config", { common: { language: "de" } });
+    await ctx.i.onReady();
+    expect((ctx.syncs[0].port as unknown as { language?: string }).language).toBe("de");
+    const none = setup();
+    await none.i.onReady();
+    expect((none.syncs[0].port as unknown as { language?: string }).language).toBeUndefined();
+  });
+
   it("asks the API to decide the language when the system language is unmapped", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     expect(ctx.i.acceptLanguage()).toBeUndefined();
-    ctx.i.language = "kl";
-    expect(ctx.i.acceptLanguage()).toBeUndefined();
-    ctx.i.language = "zh-cn";
-    expect(ctx.i.acceptLanguage()).toBe("zh-CN");
+    const other = setup();
+    other.i.foreign.set("system.config", { common: { language: "kl" } });
+    await other.i.onReady();
+    expect(other.i.acceptLanguage()).toBeUndefined();
+    const zh = setup();
+    zh.i.foreign.set("system.config", { common: { language: "zh-cn" } });
+    await zh.i.onReady();
+    expect(zh.i.acceptLanguage()).toBe("zh-CN");
   });
 
   it("does not call the API while there is no token", async () => {

@@ -24,6 +24,13 @@ const ADAPTER_DIR = path.join(__dirname, "..");
 const ADAPTER = require(path.join(ADAPTER_DIR, "io-package.json")).common.name;
 const NS = `${ADAPTER}.0.`;
 const INVENTORY = path.join(__dirname, "objects.inventory.json");
+// Value dumps for the readable-values judge (`iobroker-adapter-checks values`): the states after the
+// fixture run, and the objects once more after a restart in a second system language. Generated, not
+// committed — timestamps and counters would make a golden file drift on every run.
+const STATES_INVENTORY = path.join(__dirname, "states.inventory.json");
+const OBJECTS_SECOND_LANGUAGE = path.join(__dirname, "objects.inventory.de.json");
+const FIRST_LANGUAGE = "en";
+const SECOND_LANGUAGE = "de";
 const HOOK = path.join(__dirname, "inventory-fetch-hook.cjs");
 const FIXTURE_DIR = path.join(__dirname, "fixtures", "inventory");
 const APPLIANCE_COUNT = fs.readdirSync(FIXTURE_DIR).filter(f => f.endsWith(".json")).length;
@@ -121,6 +128,36 @@ async function dumpObjects(harness) {
   return out;
 }
 
+/**
+ * Set the throwaway controller's system language — what the adapter reads from `system.config`.
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
+ * @param {string} language an ioBroker language code
+ */
+async function setSystemLanguage(harness, language) {
+  const config = await harness.objects.getObject("system.config");
+  config.common.language = language;
+  await harness.objects.setObject("system.config", config);
+}
+
+/**
+ * Dump the value of every state of the instance: `{ "<id>": { val, ack } }`, sorted.
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
+ * @returns {Promise<Record<string, {val: unknown, ack: boolean}>>} id → value
+ */
+async function dumpStates(harness) {
+  const keys = (await harness.states.getKeys(`${NS}*`)).sort();
+  const values = await harness.states.getStates(keys);
+  const out = {};
+  keys.forEach((key, i) => {
+    if (values[i]) {
+      out[key] = { val: values[i].val, ack: values[i].ack };
+    }
+  });
+  return out;
+}
+
 tests.integration(ADAPTER_DIR, {
   controllerVersion: "stable",
   defineAdditionalTests({ suite }) {
@@ -130,6 +167,7 @@ tests.integration(ADAPTER_DIR, {
         this.timeout(360000);
         harness = getHarness();
         await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
+        await setSystemLanguage(harness, FIRST_LANGUAGE);
         await harness.startAdapterAndWait(false, FIXTURE_ENV);
         await feedFixtures(harness);
       });
@@ -141,6 +179,13 @@ tests.integration(ADAPTER_DIR, {
         fs.writeFileSync(INVENTORY, `${JSON.stringify(objects, null, 2)}\n`);
       });
 
+      it("writes test/states.inventory.json", async function () {
+        this.timeout(60000);
+        const states = await dumpStates(harness);
+        assert.ok(Object.keys(states).length > 0, "no states written — fixtures did not reach the adapter");
+        fs.writeFileSync(STATES_INVENTORY, `${JSON.stringify(states, null, 2)}\n`);
+      });
+
       it("covers every appliance type Home Connect knows", async function () {
         this.timeout(30000);
         const objects = await dumpObjects(harness);
@@ -150,6 +195,27 @@ tests.integration(ADAPTER_DIR, {
           APPLIANCE_COUNT,
           "the inventory must prove the datapoints of appliances the maintainer does not own",
         );
+      });
+    });
+
+    // The same run once more in a second system language: a label that stays the same in both was never
+    // translated. A suite of its own — the harness starts an adapter only once per suite.
+    suite("second system language", getHarness => {
+      let harness;
+      before(async function () {
+        this.timeout(360000);
+        harness = getHarness();
+        await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
+        await setSystemLanguage(harness, SECOND_LANGUAGE);
+        await harness.startAdapterAndWait(false, FIXTURE_ENV);
+        await feedFixtures(harness);
+      });
+
+      it("writes test/objects.inventory.de.json", async function () {
+        this.timeout(60000);
+        const objects = await dumpObjects(harness);
+        assert.ok(Object.keys(objects).length > 0, "no objects created — fixtures did not reach the adapter");
+        fs.writeFileSync(OBJECTS_SECOND_LANGUAGE, `${JSON.stringify(objects, null, 2)}\n`);
       });
     });
 

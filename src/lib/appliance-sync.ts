@@ -32,6 +32,26 @@ import { copyDeviceTree, keepHistoryUnder, movedId, retargetAliases, type Device
 import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
+import { PROGRAM_UIDS } from "./program-uids";
+import { DEFAULT_LABEL_LANGUAGE, ownValueLabel, programLabels, unknownProgramLabel, valueLabel } from "./value-labels";
+import {
+  decodeErrorCodes,
+  decodeHistoryMinutes,
+  decodeHistoryUids,
+  decodeProgramDetails,
+  decodeFavoriteProgram,
+  decodeSessionSummary,
+  ERROR_CODES_KEY,
+  FAVORITE_PROGRAM_RE,
+  HISTORY_TIME_KEY,
+  HISTORY_UID_KEY,
+  isProgramRecordKey,
+  PROGRAM_DETAILS_RE,
+  RUN_DETAIL,
+  SESSION_SUMMARY_KEY,
+  type ProgramDetails,
+  type SessionSummary,
+} from "./program-records";
 import type { SseEvent } from "./sse-parser";
 import type { JsonResult } from "./http";
 
@@ -41,6 +61,8 @@ export interface AdapterPort {
   readonly namespace: string;
   /** The adapter logger. */
   readonly log: ioBroker.Logger;
+  /** The ioBroker system language — the language of every value label the adapter writes. */
+  readonly language?: string;
   /** Create/extend an object (idempotent). */
   extendObject(id: string, obj: ioBroker.PartialObject): Promise<unknown>;
   /** Set a state value. */
@@ -93,6 +115,13 @@ export interface AdapterPort {
   clearTimer(handle: unknown): void;
 }
 
+/** The BSH parts of a state's `native`: key, write candidates, and the values its list keeps. */
+interface BshNative {
+  bshKey?: string;
+  bshValues?: string[];
+  seenValues?: string[];
+}
+
 /** What a known state carries: its BSH key + candidate values (for the write-back resolve). */
 interface KnownState {
   bshKey?: string;
@@ -110,7 +139,65 @@ interface KnownState {
   /** Whether `common.states` / `native.bshValues` are present — both must be cleared before a refresh. */
   hasStates?: boolean;
   hasValues?: boolean;
+  /**
+   * Values this datapoint carried that its list did not name (`native.seenValues`,
+   * append-only): handed to every transform, so the list keeps them.
+   */
+  seenValues?: string[];
 }
+
+/** The last decoded program records of one appliance. */
+interface DeviceRecords {
+  /** Program numbers of the last runs, newest first. */
+  uids?: number[];
+  /** Running minutes of the last runs, newest first. */
+  minutes?: number[];
+  /** Lifetime counters per program number. */
+  details: Map<number, ProgramDetails>;
+  /** The last finished run. */
+  summary?: SessionSummary;
+}
+
+/** Names of the first history slots (the rest count on with a number). */
+const HISTORY_PROGRAM_NAMES: readonly I18nKey[] = ["histProgram1", "histProgram2", "histProgram3", "histProgram4"];
+const HISTORY_DURATION_NAMES: readonly I18nKey[] = ["histDuration1", "histDuration2", "histDuration3", "histDuration4"];
+
+/**
+ * Two names joined per language ("Spin · Runs completed"), for a datapoint whose
+ * name must say which of several siblings it is.
+ *
+ * @param first the leading name (a translation object or plain text)
+ * @param second the trailing name
+ * @returns the joined translation object
+ */
+function joinNames(first: ioBroker.StringOrTranslated, second: ioBroker.StringOrTranslated): ioBroker.Translated {
+  const pick = (n: ioBroker.StringOrTranslated, lang: string): string =>
+    typeof n === "string" ? n : ((n as Record<string, string>)[lang] ?? n.en);
+  const langs = new Set([
+    "en",
+    ...(typeof first === "string" ? [] : Object.keys(first)),
+    ...(typeof second === "string" ? [] : Object.keys(second)),
+  ]);
+  const out: Record<string, string> = {};
+  for (const lang of langs) {
+    out[lang] = `${pick(first, lang)} · ${pick(second, lang)}`;
+  }
+  return out as ioBroker.Translated;
+}
+
+/**
+ * `BSH.Common.Status.ProgramRunDetail.EndTrigger` by its number — the order of the
+ * appliances' own description (device-dumps-2026-09-07, `devices.json`, uid 626).
+ */
+const END_TRIGGERS = [
+  "ProgramFinished",
+  "ProgramAbortedByUser",
+  "ProgramAbortedByAppliance",
+  "ProgramAbortedByApplianceCriticalError",
+] as const;
+
+/** How far the program seen running may lie outside a run's reported start and end (clock skew). */
+const RUN_PAIRING_TOLERANCE_MS = 60_000;
 
 /**
  * One cached program definition: the option state ids it declares, plus the
@@ -236,6 +323,8 @@ const CHANNEL_KEYS: Record<string, I18nKey> = {
   programs: "channelPrograms",
   options: "channelOptions",
   commands: "channelCommands",
+  history: "channelHistory",
+  lastRun: "channelLastRun",
 };
 
 /**
@@ -311,10 +400,7 @@ const OWNED_COMMON_KEYS = ["type", "role", "read", "write", "unit", "min", "max"
  * @param native.bshValues the full BSH candidate values of a writable enum
  * @returns a stable string signature
  */
-function metaSignature(
-  common: Partial<ioBroker.StateCommon>,
-  native: { bshKey?: string; bshValues?: string[] },
-): string {
+function metaSignature(common: Partial<ioBroker.StateCommon>, native: BshNative): string {
   const c = common as Record<string, unknown>;
   const picked: Record<string, unknown> = {};
   for (const key of OWNED_COMMON_KEYS) {
@@ -463,6 +549,21 @@ export class ApplianceSync {
    * transform change ever needs a forced refresh, with the reason.
    */
   private readonly settingDefs = new Map<string, Record<string, SettingDef>>();
+  /**
+   * device id → the appliance's program number → the full program key. The
+   * numbers are the appliance family's own (cotton is 28673 on a washer and 31495
+   * on a washer-dryer), so they are learned per appliance and kept in the device
+   * object's `native.programUids`.
+   */
+  private readonly programUids = new Map<string, Record<string, string>>();
+  /** device id → the program seen running, and since when (epoch ms) — what a run summary is paired with. */
+  private readonly runningProgram = new Map<string, { key: string; since: number }>();
+  /** device id → the last decoded program records, drawn again when a program number is learned. */
+  private readonly records = new Map<string, DeviceRecords>();
+  /** `deviceId|key` of every record that arrived in a shape the adapter cannot read — reported once a run. */
+  private readonly unreadableRecords = new Set<string>();
+  /** device ids whose `statistics` folder was written this run — once, not per record. */
+  private readonly statisticsFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
   private readonly settingDefsDirty = new Set<string>();
   /**
@@ -651,6 +752,7 @@ export class ApplianceSync {
           haId?: unknown;
           type?: unknown;
           programOptions?: unknown;
+          programUids?: unknown;
           settingDefs?: unknown;
           idScheme?: unknown;
           movingTo?: unknown;
@@ -727,6 +829,14 @@ export class ApplianceSync {
             }
             this.programDefs.set(deviceId, defs);
           }
+          if (isRecord(native.programUids)) {
+            this.programUids.set(
+              deviceId,
+              Object.fromEntries(
+                Object.entries(native.programUids).filter((kv): kv is [string, string] => typeof kv[1] === "string"),
+              ),
+            );
+          }
           // Same for the setting definitions: restored here, so a restart fetches
           // no single-setting endpoint again.
           if (isRecord(native.settingDefs)) {
@@ -760,6 +870,9 @@ export class ApplianceSync {
         const bshValues = Array.isArray(native.bshValues)
           ? native.bshValues.filter((v): v is string => typeof v === "string")
           : undefined;
+        const seenValues = Array.isArray(native.seenValues)
+          ? native.seenValues.filter((v): v is string => typeof v === "string")
+          : undefined;
         // The pattern is type-filtered to states, so common is a StateCommon.
         const common = (obj.common ?? {}) as Partial<ioBroker.StateCommon>;
         this.knownStates.set(rel, {
@@ -771,6 +884,7 @@ export class ApplianceSync {
           desc: common.desc,
           hasStates: common.states !== undefined,
           hasValues: bshValues !== undefined,
+          seenValues,
           nameSource: storedNameSource(native),
         });
         const parts = rel.split(".");
@@ -1793,6 +1907,7 @@ export class ApplianceSync {
    * @param native.bshValues the full BSH candidate values of a writable enum
    * @param nameSource where `common.name` came from (remembered in native, so a
    *   later start can tell an auto-name from a rename by the user)
+   * @param channelLabel the channel's name when it is none of the fixed channels (a program's statistics)
    * @returns the namespace-relative state id
    */
   private async createState(
@@ -1800,8 +1915,9 @@ export class ApplianceSync {
     channel: string,
     id: string,
     common: ioBroker.StateCommon,
-    native: { bshKey?: string; bshValues?: string[] },
+    native: BshNative,
     nameSource: NameSource,
+    channelLabel?: ioBroker.StringOrTranslated,
   ): Promise<string> {
     const fullId = `${deviceId}.${channel}.${id}`;
     // A stop while the definition or list read was on its way: nothing is written
@@ -1811,7 +1927,7 @@ export class ApplianceSync {
     }
     await this.port.extendObject(`${deviceId}.${channel}`, {
       type: "channel",
-      common: { name: channelName(channel) },
+      common: { name: channelLabel ?? channelName(channel) },
       native: {},
     });
     await this.port.extendObject(fullId, {
@@ -1829,6 +1945,7 @@ export class ApplianceSync {
       desc: common.desc,
       hasStates: common.states !== undefined,
       hasValues: native.bshValues !== undefined,
+      seenValues: native.seenValues,
     });
     return fullId;
   }
@@ -2101,6 +2218,10 @@ export class ApplianceSync {
         () => this.syncItems(deviceId, haId, "/status", "status"),
         () => this.syncItems(deviceId, haId, "/settings", "settings"),
         () => this.syncPrograms(deviceId, haId),
+        // The status came before the program list: the datapoints that name a
+        // program by its number are drawn again against the list now complete, so
+        // the next pass finds nothing to change.
+        () => this.drawProgramNames(deviceId),
         () => this.ensureCommands(deviceId, haId),
       ];
       for (const step of steps) {
@@ -2334,13 +2455,46 @@ export class ApplianceSync {
     const staleRead =
       source === "sync" &&
       (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
+    if (isProgramRecordKey(raw.key)) {
+      // An encoded record never becomes a datapoint of its own: it is decoded
+      // into readable ones (decision 40).
+      await this.applyProgramRecord(deviceId, raw.key, value);
+      return;
+    }
+    if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
+      this.noteRunningProgram(deviceId, value);
+    }
+    const { channel: itemChannel, id: itemId } = stateIdForKey(raw.key);
+    const programRoot = raw.key === SELECTED_PROGRAM_KEY || raw.key === ACTIVE_PROGRAM_KEY;
+    let constraints = parseConstraints(raw.constraints);
+    if (!programRoot && !constraints?.allowedvalues) {
+      // An answer without the list (a response carries only what the appliance
+      // reports right now; a single-setting read can fail) keeps the list the
+      // cloud gave before — neither the catalogue nor the bare value replaces it.
+      const kept = this.knownStates.get(`${deviceId}.${itemChannel}.${itemId}`)?.bshValues;
+      if (kept && kept.length > 0) {
+        constraints = { ...constraints, allowedvalues: kept };
+      }
+    }
+    if (raw.key === ACTIVE_PROGRAM_KEY && !constraints?.allowedvalues) {
+      // The running program reads from the same list the selection offers — one
+      // list for both, or the running program would show as a bare short value.
+      const offered = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues;
+      if (offered && offered.length > 0) {
+        constraints = { ...constraints, allowedvalues: offered };
+      }
+    }
     const states = expandBshItem(
       {
         key: raw.key,
         name: typeof raw.name === "string" ? raw.name : undefined,
         value,
         unit: typeof raw.unit === "string" ? raw.unit : undefined,
-        constraints: parseConstraints(raw.constraints),
+        constraints,
+        lang: this.port.language,
+        seen: programRoot
+          ? this.seenPrograms(deviceId)
+          : this.knownStates.get(`${deviceId}.${itemChannel}.${itemId}`)?.seenValues,
       },
       lockableDoor,
     );
@@ -2355,14 +2509,18 @@ export class ApplianceSync {
       if (t.channel !== "options" && typeof value === "string" && t.value === shortEnum(value) && value.includes(".")) {
         // The datapoint's list first: a value-only item brings no list, and the
         // transformer's fallback candidate set is just the value itself.
-        const candidates =
-          this.knownStates.get(`${deviceId}.${t.channel}.${t.id}`)?.bshValues ??
-          t.bshValues ??
-          (raw.key === ACTIVE_PROGRAM_KEY
-            ? this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues
-            : undefined);
-        if (candidates) {
-          t.value = shortEnumIn(value, candidates);
+        const known = this.knownStates.get(`${deviceId}.${t.channel}.${t.id}`);
+        const candidates = [
+          ...(known?.bshValues ??
+            t.bshValues ??
+            (raw.key === ACTIVE_PROGRAM_KEY
+              ? this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues
+              : undefined) ??
+            []),
+          ...(programRoot ? this.seenPrograms(deviceId) : (known?.seenValues ?? [])),
+        ];
+        if (candidates.length > 0) {
+          t.value = shortEnumIn(value, [...new Set([...candidates, value])]);
         }
       }
       // A value-less item (key only, or `null` outside the program roots) cannot
@@ -2398,6 +2556,623 @@ export class ApplianceSync {
   }
 
   /**
+   * Whether a written value names a program the appliance only RAN — one in the
+   * list, but not among the programs the cloud offers for selection.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the written value
+   * @returns whether it is such a program
+   */
+  private isSeenOnlyProgram(deviceId: string, value: ioBroker.StateValue): boolean {
+    if (typeof value !== "string") {
+      return false;
+    }
+    const offered = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues ?? [];
+    const seen = this.seenPrograms(deviceId).filter(v => !offered.includes(v));
+    const full = [...offered, ...seen];
+    const wanted = value.toLowerCase();
+    return seen.some(v => v.toLowerCase() === wanted || shortEnumIn(v, full) === wanted || shortEnum(v) === wanted);
+  }
+
+  // ─── encoded program records → readable datapoints (decision 40) ───────────
+
+  /**
+   * Remember the program that is running — the anchor a run summary is paired
+   * with to learn the appliance's number for it. "" (idle) keeps the last one:
+   * the summary of a run arrives when the run is over.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the full program key of the active program, "" when idle
+   */
+  private noteRunningProgram(deviceId: string, value: string): void {
+    if (value.length === 0 || this.runningProgram.get(deviceId)?.key === value) {
+      return;
+    }
+    this.runningProgram.set(deviceId, { key: value, since: Date.now() });
+  }
+
+  /**
+   * The decoded records of one appliance.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns its record store
+   */
+  private recordsOf(deviceId: string): DeviceRecords {
+    let rec = this.records.get(deviceId);
+    if (!rec) {
+      rec = { details: new Map() };
+      this.records.set(deviceId, rec);
+    }
+    return rec;
+  }
+
+  /**
+   * Decode one encoded record and draw the readable datapoints it feeds. A value
+   * of a shape the decoder does not know writes nothing — never the raw text —
+   * and is reported once a run, so the format can be added.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the record's BSH key
+   * @param value the raw value
+   */
+  private async applyProgramRecord(deviceId: string, key: string, value: unknown): Promise<void> {
+    if (value === undefined || value === null) {
+      return;
+    }
+    const rec = this.recordsOf(deviceId);
+    if (key === HISTORY_UID_KEY) {
+      const uids = decodeHistoryUids(value);
+      if (!uids) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.uids = uids;
+      // Inside a device pass the program list is read AFTER the status: the pass
+      // draws the program names once it is complete (drawProgramNames) — drawing
+      // here as well cost every first start one extra object write per datapoint.
+      if (!this.syncing.has(deviceId)) {
+        await this.drawHistoryPrograms(deviceId);
+      }
+    } else if (key === HISTORY_TIME_KEY) {
+      const minutes = decodeHistoryMinutes(value);
+      if (!minutes) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.minutes = minutes;
+      await this.drawHistoryDurations(deviceId);
+    } else if (PROGRAM_DETAILS_RE.test(key)) {
+      const details = decodeProgramDetails(value);
+      if (!details) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.details.set(details.uid, details);
+      await this.drawStatistics(deviceId, details);
+    } else if (key === SESSION_SUMMARY_KEY) {
+      const summary = decodeSessionSummary(value);
+      if (!summary) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      rec.summary = summary;
+      await this.learnProgramUid(deviceId, summary);
+      if (!this.syncing.has(deviceId)) {
+        await this.drawLastRun(deviceId);
+      }
+    } else if (FAVORITE_PROGRAM_RE.test(key)) {
+      const uid = decodeFavoriteProgram(value);
+      if (uid === undefined) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      const slot = FAVORITE_PROGRAM_RE.exec(key)?.[1] ?? "";
+      await this.applyRecordState(
+        deviceId,
+        "settings",
+        `favorite${slot}Program`,
+        {
+          name: tName("favProgram", slot),
+          desc: tName("favProgramDesc"),
+          type: "string",
+          role: "text",
+          states: this.programStates(deviceId, [uid]),
+        },
+        this.programValue(deviceId, uid),
+      );
+    } else if (key === ERROR_CODES_KEY) {
+      const codes = decodeErrorCodes(value);
+      if (codes === undefined) {
+        return this.reportUnreadable(deviceId, key, value);
+      }
+      await this.applyRecordState(
+        deviceId,
+        "status",
+        "errorCodes",
+        { name: tName("stErrorCodes"), desc: tName("errorCodesDesc"), type: "string", role: "text" },
+        codes,
+      );
+      // What a script reacts to is whether there IS a fault — its own datapoint,
+      // never something to parse out of the code text.
+      await this.applyRecordState(
+        deviceId,
+        "status",
+        "faultActive",
+        { name: tName("stFaultActive"), desc: tName("faultActiveDesc"), type: "boolean", role: "indicator.error" },
+        codes.length > 0,
+      );
+    }
+  }
+
+  /**
+   * One line, once a run and record, for a value the adapter cannot read — the
+   * datapoint stays away rather than showing the raw text.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the record's BSH key
+   * @param value the raw value
+   */
+  private reportUnreadable(deviceId: string, key: string, value: unknown): void {
+    const family = PROGRAM_DETAILS_RE.test(key) ? "LaundryCare.Common.Status.Program.Details.*" : key;
+    if (this.unreadableRecords.has(`${deviceId}|${family}`)) {
+      return;
+    }
+    this.unreadableRecords.add(`${deviceId}|${family}`);
+    const shown = typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value);
+    this.port.log.info(
+      `${deviceId}: ${key} came in a form the adapter cannot read yet, so it is not shown: ${shown} — please report it at https://github.com/krobipd/ioBroker.homeconnect/issues`,
+    );
+  }
+
+  /**
+   * Create/refresh one datapoint the adapter derives itself (no BSH key of its
+   * own — a decoded record must never look like a mapped key to the start-up
+   * repairs) and set its value.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param channel the channel path (may be nested: `statistics.cotton`)
+   * @param id the within-channel id
+   * @param shape the name, desc, type, role and optional unit / list
+   * @param value the value to set
+   * @param channelLabel the channel's name, when it is not one of the fixed channels
+   */
+  private async applyRecordState(
+    deviceId: string,
+    channel: string,
+    id: string,
+    shape: Pick<ioBroker.StateCommon, "name" | "desc" | "type" | "role" | "unit" | "states">,
+    value: ioBroker.StateValue,
+    channelLabel?: ioBroker.StringOrTranslated,
+  ): Promise<void> {
+    const common: ioBroker.StateCommon = { read: true, write: false, ...shape };
+    for (const k of ["unit", "states", "desc"] as const) {
+      if (common[k] === undefined) {
+        delete common[k];
+      }
+    }
+    await this.applyTransformedState(
+      deviceId,
+      undefined,
+      { channel, id, common, nameSource: "i18n", value },
+      "sync",
+      channelLabel,
+    );
+  }
+
+  /**
+   * Every program this appliance can be named with: the cloud's offer, the
+   * programs it ran, and the ones learned from its program numbers.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns the full program keys
+   */
+  private knownPrograms(deviceId: string): string[] {
+    const offered = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues ?? [];
+    return [
+      ...new Set([...offered, ...this.seenPrograms(deviceId), ...Object.values(this.programUids.get(deviceId) ?? {})]),
+    ];
+  }
+
+  /**
+   * The value a program number stands for in a datapoint: the program's short
+   * value once the number is learned, `program<number>` until then.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the short value
+   */
+  private programValue(deviceId: string, uid: number): string {
+    const key = this.programKeyFor(deviceId, uid);
+    if (!key) {
+      return `program${uid}`;
+    }
+    const all = this.knownPrograms(deviceId);
+    return shortEnumIn(key, all.includes(key) ? all : [...all, key]);
+  }
+
+  /**
+   * The program an appliance number stands for: the one learned on this appliance,
+   * else the one the appliances' own descriptions give for its type (program-uids.ts).
+   * A described program the cloud also names for this appliance by the same last
+   * segment IS that program — the cloud's key is taken, so the value matches the
+   * program lists ("…Spin.Spin.SpinDrain" is reported as "…Program.Spin").
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the full program key, or undefined while the number is unknown
+   */
+  private programKeyFor(deviceId: string, uid: number): string | undefined {
+    const learned = this.programUids.get(deviceId)?.[String(uid)];
+    if (learned) {
+      return learned;
+    }
+    const described = PROGRAM_UIDS[this.typeByDeviceId.get(deviceId) ?? ""]?.[uid];
+    if (!described) {
+      return undefined;
+    }
+    const same = this.knownPrograms(deviceId).filter(k => shortEnum(k) === shortEnum(described));
+    return same.length === 1 ? same[0] : described;
+  }
+
+  /**
+   * The selection list of a datapoint that names a program by its number.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uids the numbers the datapoints show right now
+   * @returns short value → label, in the system language
+   */
+  private programStates(deviceId: string, uids: readonly number[]): Record<string, string> {
+    const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
+    const all = this.knownPrograms(deviceId);
+    const states: Record<string, string> = {};
+    for (const key of all) {
+      states[shortEnumIn(key, all)] = valueLabel(key, lang);
+    }
+    for (const uid of uids) {
+      const key = this.programKeyFor(deviceId, uid);
+      const value = this.programValue(deviceId, uid);
+      if (states[value] === undefined) {
+        states[value] = key ? valueLabel(key, lang) : unknownProgramLabel(uid, lang);
+      }
+    }
+    return states;
+  }
+
+  /**
+   * `history.program1..n` — the programs of the last runs, newest first.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async drawHistoryPrograms(deviceId: string): Promise<void> {
+    const uids = this.records.get(deviceId)?.uids ?? [];
+    const states = this.programStates(deviceId, uids);
+    for (const [i, uid] of uids.entries()) {
+      const n = i + 1;
+      await this.applyRecordState(
+        deviceId,
+        "history",
+        `program${n}`,
+        {
+          name: n <= HISTORY_PROGRAM_NAMES.length ? tName(HISTORY_PROGRAM_NAMES[i]) : tName("histProgramN", n),
+          desc: tName("histProgramDesc"),
+          type: "string",
+          role: "text",
+          states,
+        },
+        this.programValue(deviceId, uid),
+      );
+    }
+  }
+
+  /**
+   * Draw the datapoints that name a program by its number again (history, last run).
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async drawProgramNames(deviceId: string): Promise<void> {
+    if (!this.records.has(deviceId)) {
+      return;
+    }
+    await this.drawHistoryPrograms(deviceId);
+    await this.drawLastRun(deviceId);
+  }
+
+  /**
+   * `history.duration1..n` — how long the last runs took, newest first.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async drawHistoryDurations(deviceId: string): Promise<void> {
+    for (const [i, minutes] of (this.records.get(deviceId)?.minutes ?? []).entries()) {
+      const n = i + 1;
+      await this.applyRecordState(
+        deviceId,
+        "history",
+        `duration${n}`,
+        {
+          name: n <= HISTORY_DURATION_NAMES.length ? tName(HISTORY_DURATION_NAMES[i]) : tName("histDurationN", n),
+          desc: tName("histDurationDesc"),
+          type: "number",
+          role: "value",
+          unit: "min",
+        },
+        minutes,
+      );
+    }
+  }
+
+  /**
+   * The id segment of a program's statistics channel: the program's short value
+   * (dots folded into camelCase), `program<number>` until the number is learned.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @returns the channel segment
+   */
+  private statisticsSegment(deviceId: string, uid: number): string {
+    return this.programValue(deviceId, uid).replace(/\.(\w)/g, (_m, c: string) => c.toUpperCase());
+  }
+
+  /**
+   * `statistics.<program>.completed/started/runtime` — one program's lifetime counters.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param d the decoded counters
+   */
+  private async drawStatistics(deviceId: string, d: ProgramDetails): Promise<void> {
+    const key = this.programKeyFor(deviceId, d.uid);
+    const channel = `statistics.${this.statisticsSegment(deviceId, d.uid)}`;
+    const label = key ? programLabels(key) : tName("unknownProgram", d.uid);
+    if (!this.statisticsFolders.has(deviceId)) {
+      await this.port.extendObject(`${deviceId}.statistics`, {
+        type: "folder",
+        common: { name: tName("channelStatistics") },
+        native: {},
+      });
+      this.statisticsFolders.add(deviceId);
+    }
+    const counters: Array<[string, I18nKey, I18nKey, number, string | undefined]> = [
+      ["completed", "statCompleted", "statCompletedDesc", d.completed, undefined],
+      ["started", "statStarted", "statStartedDesc", d.started, undefined],
+      ["runtime", "statRuntime", "statRuntimeDesc", Math.round(d.seconds / 360) / 10, "h"],
+    ];
+    for (const [id, name, desc, value, unit] of counters) {
+      // The name carries the program: every program has the same three counters,
+      // and two datapoints of one appliance never share a name.
+      await this.applyRecordState(
+        deviceId,
+        channel,
+        id,
+        {
+          name: joinNames(label, tName(name)),
+          desc: tName(desc),
+          type: "number",
+          role: "value",
+          ...(unit ? { unit } : {}),
+        },
+        value,
+        label,
+      );
+    }
+  }
+
+  /**
+   * `lastRun.*` — the last finished run: program, start, end, duration.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async drawLastRun(deviceId: string): Promise<void> {
+    const s = this.records.get(deviceId)?.summary;
+    if (!s) {
+      return;
+    }
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "program",
+      {
+        name: tName("lrProgram"),
+        desc: tName("lrProgramDesc"),
+        type: "string",
+        role: "text",
+        states: this.programStates(deviceId, [s.programUid]),
+      },
+      this.programValue(deviceId, s.programUid),
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "start",
+      { name: tName("lrStart"), desc: tName("lrStartDesc"), type: "number", role: "date.start" },
+      s.start,
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "end",
+      { name: tName("lrEnd"), desc: tName("lrEndDesc"), type: "number", role: "date.end" },
+      s.end,
+    );
+    await this.applyRecordState(
+      deviceId,
+      "lastRun",
+      "duration",
+      { name: tName("lrDuration"), desc: tName("lrDurationDesc"), type: "number", role: "value", unit: "min" },
+      Math.round((s.end - s.start) / 60_000),
+    );
+    // The run's own figures, where the appliance reports them (laundry appliances).
+    const figures: Array<[string, number, I18nKey, I18nKey, string, string, (v: number) => number]> = [
+      ["water", RUN_DETAIL.waterMl, "lrWater", "lrWaterDesc", "l", "value", v => v / 1000],
+      ["energy", RUN_DETAIL.energyWh, "lrEnergy", "lrEnergyDesc", "Wh", "value.energy.consumed", v => v],
+      ["detergent", RUN_DETAIL.detergentMl, "lrDetergent", "lrDetergentDesc", "ml", "value", v => v],
+      ["softener", RUN_DETAIL.softenerMl, "lrSoftener", "lrSoftenerDesc", "ml", "value", v => v],
+    ];
+    for (const [id, uid, name, desc, unit, role, scale] of figures) {
+      const v = s.details[uid];
+      if (v !== undefined) {
+        await this.applyRecordState(
+          deviceId,
+          "lastRun",
+          id,
+          { name: tName(name), desc: tName(desc), type: "number", role, unit },
+          scale(v),
+        );
+      }
+    }
+    const trigger = s.details[RUN_DETAIL.endTrigger];
+    const triggerNames = END_TRIGGERS;
+    if (trigger !== undefined && triggerNames[trigger] !== undefined) {
+      const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
+      await this.applyRecordState(
+        deviceId,
+        "lastRun",
+        "endTrigger",
+        {
+          name: tName("lrEndTrigger"),
+          desc: tName("lrEndTriggerDesc"),
+          type: "string",
+          role: "text",
+          states: Object.fromEntries(triggerNames.map(n => [n.toLowerCase(), valueLabel(n, lang)])),
+        },
+        triggerNames[trigger].toLowerCase(),
+      );
+    }
+  }
+
+  /**
+   * Learn which program an appliance number stands for: a run summary names the
+   * number of the run that just ended, and the program seen RUNNING inside that
+   * run's start and end is that program. Only that pairing counts — a summary read
+   * again later (every reconnect reads it) while another program runs must not
+   * teach anything, and a number keeps the program it was learned with.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param s the decoded summary
+   */
+  private async learnProgramUid(deviceId: string, s: SessionSummary): Promise<void> {
+    const running = this.runningProgram.get(deviceId);
+    if (
+      !running ||
+      running.since < s.start - RUN_PAIRING_TOLERANCE_MS ||
+      running.since > s.end + RUN_PAIRING_TOLERANCE_MS
+    ) {
+      return;
+    }
+    const learned = { ...(this.programUids.get(deviceId) ?? {}) };
+    const uid = String(s.programUid);
+    if (learned[uid] !== undefined) {
+      if (learned[uid] !== running.key) {
+        this.port.log.debug(
+          `${deviceId}: program number ${uid} ran as ${running.key}, but is known as ${learned[uid]} — kept`,
+        );
+      }
+      return;
+    }
+    if (Object.values(learned).includes(running.key)) {
+      this.port.log.debug(`${deviceId}: ${running.key} already has a program number — ${uid} not taken`);
+      return;
+    }
+    // Where its statistics stand until now: `program<number>`, or the name the
+    // appliances' descriptions gave — the move below starts from there.
+    const before = this.statisticsSegment(deviceId, s.programUid);
+    learned[uid] = running.key;
+    this.programUids.set(deviceId, learned);
+    try {
+      await this.port.extendObject(deviceId, { native: { programUids: learned } });
+    } catch (e) {
+      this.port.log.debug(`storing the program numbers of ${deviceId} failed: ${errMessage(e)}`);
+    }
+    this.port.log.debug(`${deviceId}: program number ${uid} is ${running.key}`);
+    await this.moveStatistics(deviceId, s.programUid, before);
+    await this.drawHistoryPrograms(deviceId);
+  }
+
+  /**
+   * A program number just got its program: its statistics channel moves from
+   * where it stood (`program<number>`, or a described name the appliance reports
+   * differently) to the program's name, carrying recordings, aliases, rooms and
+   * functions (the tree-move helpers of decision 36), and is drawn again.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param uid the appliance's program number
+   * @param before the channel segment the statistics stood under until now
+   */
+  private async moveStatistics(deviceId: string, uid: number, before: string): Promise<void> {
+    const from = `${deviceId}.statistics.${before}`;
+    const to = `${deviceId}.statistics.${this.statisticsSegment(deviceId, uid)}`;
+    const details = this.records.get(deviceId)?.details.get(uid);
+    const moving = [...this.knownStates.keys()].some(id => id.startsWith(`${from}.`));
+    if (moving && from !== to) {
+      try {
+        await copyDeviceTree(this.moveDeps(), from, to);
+        const ns = this.port.namespace;
+        const carry = new Map<string, string[]>();
+        for (const id of [...this.knownStates.keys()].filter(k => k === from || k.startsWith(`${from}.`))) {
+          const next = movedId(`${ns}.${id}`, `${ns}.${from}`, `${ns}.${to}`);
+          if (next) {
+            carry.set(`${ns}.${id}`, [next]);
+          }
+          this.knownStates.delete(id);
+        }
+        await this.port.deleteTreeCarryingEnums(from, carry);
+        // Drawing below writes the copies once more, by MERGE: the recording
+        // configuration the copy carries stays, the names become the program's.
+      } catch (e) {
+        this.port.log.warn(`moving ${from} to ${to} failed: ${errMessage(e)} — tried again on the next start`);
+      }
+    }
+    if (details) {
+      await this.drawStatistics(deviceId, details);
+    }
+  }
+
+  /**
+   * The programs an appliance ran that its selection list did not name — kept by
+   * the selected AND the running program, and handed to both, so the two
+   * datapoints show one list.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns the full program keys, in the order they were first seen
+   */
+  private seenPrograms(deviceId: string): string[] {
+    const selected = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.seenValues ?? [];
+    const active = this.knownStates.get(`${deviceId}.programs.activeProgram`)?.seenValues ?? [];
+    return [...new Set([...selected, ...active])];
+  }
+
+  /**
+   * A value arrived that the datapoint's list does not name (a program chosen at
+   * the appliance, a process phase no source lists). Its label is ADDED to the
+   * object once — a merge adds keys, so nothing is cleared and nothing else is
+   * touched — and the value joins `native.seenValues`, so every later transform
+   * keeps it in the list. This is the only object write a value item can cause,
+   * and it happens once per new value, never per event.
+   *
+   * @param fullId the namespace-relative state id
+   * @param known its in-memory record
+   * @param t the transformed state carrying the grown `seenValues`
+   */
+  private async addSeenValue(fullId: string, known: KnownState, t: TransformedState): Promise<void> {
+    const before = known.seenValues ?? [];
+    const grown = t.seenValues ?? [];
+    const added = grown.filter(v => !before.includes(v));
+    const states = t.common.states;
+    if (added.length === 0 || typeof t.value !== "string" || !isRecord(states)) {
+      return;
+    }
+    const label = states[t.value];
+    if (typeof label !== "string") {
+      return;
+    }
+    try {
+      await this.port.extendObject(fullId, {
+        common: { states: { [t.value]: label } },
+        native: { seenValues: [...before, ...added] },
+      });
+      known.seenValues = [...before, ...added];
+      known.hasStates = true;
+      this.port.log.debug(`${fullId}: added "${t.value}" to its list of values`);
+    } catch (e) {
+      this.port.log.debug(`adding "${t.value}" to the list of ${fullId} failed: ${errMessage(e)}`);
+    }
+  }
+
+  /**
    * Create/refresh one transformed state and set its value (the per-state half
    * of {@link applyBshItem}).
    *
@@ -2405,18 +3180,31 @@ export class ApplianceSync {
    * @param bshKey the source BSH key (shared by all states of an expanded item)
    * @param t the transformed state
    * @param source "sync" (owns metadata) or "values" (value-only)
+   * @param channelLabel the channel's name when it is none of the fixed channels (a program's statistics)
    */
   private async applyTransformedState(
     deviceId: string,
-    bshKey: string,
+    bshKey: string | undefined,
     t: TransformedState,
     source: "sync" | "values",
+    channelLabel?: ioBroker.StringOrTranslated,
   ): Promise<void> {
     const fullId = `${deviceId}.${t.channel}.${t.id}`;
     const known = this.knownStates.get(fullId);
     if (!known) {
-      await this.createState(deviceId, t.channel, t.id, t.common, { bshKey, bshValues: t.bshValues }, t.nameSource);
+      await this.createState(
+        deviceId,
+        t.channel,
+        t.id,
+        t.common,
+        { bshKey, bshValues: t.bshValues, ...(t.seenValues ? { seenValues: t.seenValues } : {}) },
+        t.nameSource,
+        channelLabel,
+      );
     } else {
+      if (source === "values") {
+        await this.addSeenValue(fullId, known, t);
+      }
       if (source === "sync") {
         const sig = metaSignature(t.common, { bshKey, bshValues: t.bshValues });
         // Only a SUCCESSFUL refresh may stamp the signature. The refresh clears
@@ -2427,7 +3215,13 @@ export class ApplianceSync {
         // later sync of the same run retried it.
         if (
           known.metaSig !== sig &&
-          (await this.refreshStateObject(fullId, t.common, { bshKey, bshValues: t.bshValues }, known, t.nameSource))
+          (await this.refreshStateObject(
+            fullId,
+            t.common,
+            { bshKey, bshValues: t.bshValues, ...(t.seenValues ? { seenValues: t.seenValues } : {}) },
+            known,
+            t.nameSource,
+          ))
         ) {
           known.bshKey = bshKey;
           known.bshValues = t.bshValues;
@@ -2480,7 +3274,7 @@ export class ApplianceSync {
   private async refreshStateObject(
     fullId: string,
     common: ioBroker.StateCommon,
-    native: { bshKey?: string; bshValues?: string[] },
+    native: BshNative,
     known: KnownState,
     nameSource: NameSource,
   ): Promise<boolean> {
@@ -2524,6 +3318,7 @@ export class ApplianceSync {
       // read fails and the list entry alone carries no `allowedvalues`.
       known.hasStates = fresh.states !== undefined || known.hasStates === true;
       known.hasValues = native.bshValues !== undefined || known.hasValues === true;
+      known.seenValues = native.seenValues ?? known.seenValues;
       this.port.log.debug(`refreshed object metadata of ${fullId}`);
       return true;
     } catch (e) {
@@ -2811,6 +3606,7 @@ export class ApplianceSync {
       type: typeof raw.type === "string" ? raw.type : undefined,
       unit: typeof raw.unit === "string" ? raw.unit : undefined,
       constraints: parseConstraints(raw.constraints),
+      lang: this.port.language,
     };
     const t = transformOptionDefinition(opt);
     const fullId = `${deviceId}.options.${t.id}`;
@@ -2833,7 +3629,15 @@ export class ApplianceSync {
       return t.id;
     }
     const merged = await this.mergeOptionDefinition(fullId, known, t);
-    const sig = metaSignature(merged.common, { bshKey: opt.key, bshValues: merged.bshValues });
+    // The object keeps the key it was created with. Two appliance families can
+    // name one option differently (`…IDos1.Active` / `…IDos1Active`, even inside
+    // ONE program definition), and both land on this state id: taking each
+    // definition's key flipped the signature on every definition and rewrote the
+    // object each time (up to 401 rewrites of one option per start, measured on
+    // the fixture washer-dryer 2026-09-28). A write never needs this key — it
+    // goes out with the key of the armed program (decision 34).
+    const objectKey = known.bshKey ?? opt.key;
+    const sig = metaSignature(merged.common, { bshKey: objectKey, bshValues: merged.bshValues });
     // Same rule as in the item path: a refresh that failed halfway must not be
     // remembered as done, or the option keeps an empty selection list until the
     // next adapter start.
@@ -2842,12 +3646,12 @@ export class ApplianceSync {
       (await this.refreshStateObject(
         fullId,
         merged.common,
-        { bshKey: opt.key, bshValues: merged.bshValues },
+        { bshKey: objectKey, bshValues: merged.bshValues },
         known,
         t.nameSource,
       ));
     if (refreshed) {
-      known.bshKey = opt.key;
+      known.bshKey = objectKey;
       known.bshValues = merged.bshValues;
       known.metaSig = sig;
       known.type = merged.common.type;
@@ -2890,10 +3694,20 @@ export class ApplianceSync {
       bshValues = union;
       const exStates = isRecord(exCommon.states) ? exCommon.states : {};
       const newStates = isRecord(common.states) ? common.states : {};
+      const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
       const states: Record<string, string> = {};
       for (const v of union) {
         const short = shortEnum(v);
-        states[short] = exStates[short] ?? newStates[short] ?? short;
+        // The adapter's own label, in the system language, beats whatever stands:
+        // a stored label is the cloud's (English on a German installation — "1400
+        // rpm") or an older adapter's bare short value. Only a value the table
+        // does not know keeps the label it has.
+        const stored = exStates[short];
+        states[short] =
+          ownValueLabel(v, lang) ??
+          newStates[short] ??
+          (typeof stored === "string" && stored !== short ? stored : undefined) ??
+          valueLabel(v, lang, undefined, known.bshKey);
       }
       common.states = states;
     }
@@ -2925,14 +3739,13 @@ export class ApplianceSync {
       if (isRecord(raw) && typeof raw.key === "string") {
         const id = stateIdForKey(raw.key).id;
         const texts = stateText(raw.key);
-        const args = texts?.args ?? [];
         // The explanation belongs to the BSH key, not to the path the NAME took:
         // it is the adapter's own text either way. Computing it per branch meant a
         // command named from the cloud or from the fallback table silently lost
         // the description that stood right next to that name in the same table.
-        const desc = texts?.desc ? tName(texts.desc, ...args) : undefined;
+        const desc = texts?.desc ? tName(texts.desc) : undefined;
         if (texts?.name) {
-          await this.ensureButton(deviceId, "commands", id, tName(texts.name, ...args), "i18n", raw.key, desc);
+          await this.ensureButton(deviceId, "commands", id, tName(texts.name), "i18n", raw.key, desc);
           continue;
         }
         const apiName = cleanLabel(raw.name);
@@ -3058,6 +3871,15 @@ export class ApplianceSync {
             await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
           }
         }
+      } else if (channel === "programs" && stateId === "selectedProgram" && this.isSeenOnlyProgram(deviceId, value)) {
+        // A program the appliance ran but the cloud does not offer: it is in the
+        // list (so the value reads as a name), but Home Connect refuses to select
+        // it remotely. The user asked for something — the answer goes to info,
+        // and the datapoint goes back to what the appliance really has.
+        this.port.log.info(
+          `Write to ${rel} not sent: "${String(value)}" can only be chosen at the appliance — Home Connect does not offer it for remote selection.`,
+        );
+        await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
       } else {
         const both = ambiguousCandidates(value, ctx.bshValues);
         if (both.length > 0 && channel !== "options") {

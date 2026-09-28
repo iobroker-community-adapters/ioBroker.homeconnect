@@ -28,12 +28,6 @@ export interface StateText {
   name?: I18nKey;
   /** Translation key for `common.desc`. */
   desc?: I18nKey;
-  /**
-   * Values for the `%s` placeholders of {@link name} /
-   * {@link desc}. Only a numbered family sets this: one entry then covers every
-   * index the appliance reports, instead of one hand-written row per number.
-   */
-  args?: readonly (string | number)[];
 }
 
 /**
@@ -62,18 +56,6 @@ export const DOOR_COMPARTMENT_NAMES: Partial<Record<string, I18nKey>> = {
   FlexCompartment: "doorOpenFlexCompartment",
   WineCompartment: "doorOpenWineCompartment",
 };
-
-/**
- * Numbered BSH families: the appliance counts them up (`…Program02`, `…Program09`),
- * so a fixed table would always lag behind the next index. The capture group feeds
- * the `%s` placeholder of the texts — one row covers the whole family.
- */
-const NUMBERED_FAMILIES: ReadonlyArray<readonly [RegExp, StateText]> = [
-  [
-    /^LaundryCare\.Common\.Status\.Program\.Details\.Program(\d+)$/,
-    { name: "stProgramDetails", desc: "programDetailsDesc" },
-  ],
-];
 
 const DESCALING_ADVANCE: I18nKey = "evDescalingAdvanceDesc";
 const CALC_N_CLEAN_ADVANCE: I18nKey = "evCalcNCleanAdvanceDesc";
@@ -236,12 +218,6 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     name: "stInteriorIlluminationActive",
     desc: "interiorIlluminationActiveDesc",
   },
-  // Undocumented: neither the official state docs nor the 1020-key reference of
-  // homebridge-homeconnect carry this one, yet a dishwasher reports it over REST
-  // (measured on a live tree 2026-09-16). A status never carries a name over
-  // REST, so without this entry the datapoint kept the label derived from its id
-  // — an English string in every language.
-  "BSH.Common.Status.ErrorCodesList": { name: "stErrorCodesList", desc: "errorCodesListDesc" },
   "BSH.Common.Setting.PowerState": { name: "setPowerState", desc: "powerStateDesc" },
   "BSH.Common.Setting.ChildLock": { name: "setChildLock", desc: "childLockDesc" },
   "BSH.Common.Option.RemainingProgramTime": {
@@ -742,10 +718,9 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     desc: "dishwasherProgramPhaseDesc",
   },
   "Dishcare.Dishwasher.Status.EcoDryActive": { name: "stEcoDryActive", desc: "ecoDryActiveDesc" },
-  "BSH.Common.Status.ProgramSessionSummary.Latest": {
-    name: "stProgramSessionSummary",
-    desc: "programSessionSummaryDesc",
-  },
+  // Opt-in key of a dishwasher (live 2026-09-27); its values (On/Off) come from the
+  // appliance's own description (device-dumps-2026-09-07).
+  "Dishcare.Dishwasher.Setting.TimeLight": { name: "setTimeLight", desc: "timeLightDesc" },
   "BSH.Common.Status.Program.All.Energy.Consumed": {
     name: "stProgramAllEnergy",
     desc: "programAllEnergyDesc",
@@ -786,18 +761,9 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     name: "evIDosOpenTray",
     desc: "evIDosOpenTrayDesc",
   },
-  // The three below carry an encoded raw value ("ewN7e3sDewc", "AEQAGABFAAA"),
-  // and no source explains the encoding. The description says exactly that
-  // instead of inventing a meaning — and it says it in every language.
-  "LaundryCare.Common.Status.Program.History.Uid": {
-    name: "stProgramHistoryUid",
-    desc: "programHistoryUidDesc",
-  },
-  "LaundryCare.Common.Status.Program.History.EffectiveTime": {
-    name: "stProgramHistoryEffectiveTime",
-    desc: "programHistoryEffectiveTimeDesc",
-  },
-  // `…Program.Details.ProgramNN` is a numbered family — see NUMBERED_FAMILIES.
+  // The encoded program records (history, per-program details, the last run's
+  // summary, the fault code list) never become datapoints of their own — they are
+  // decoded into readable ones (program-records.ts), which carry their own texts.
 };
 
 /**
@@ -807,15 +773,5 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
  * @returns the texts, or undefined when the adapter has nothing to say about it
  */
 export function stateText(key: string): StateText | undefined {
-  const exact = STATE_TEXTS[key];
-  if (exact) {
-    return exact;
-  }
-  for (const [re, text] of NUMBERED_FAMILIES) {
-    const m = re.exec(key);
-    if (m) {
-      return { ...text, args: [Number(m[1])] };
-    }
-  }
-  return undefined;
+  return STATE_TEXTS[key];
 }

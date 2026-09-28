@@ -84,6 +84,10 @@ function resolveEnum(value, bshValues, collapse = false) {
   if (listed) {
     return listed;
   }
+  const twoSegments = bshValues.filter((v) => v.split(".").slice(-2).join(".").toLowerCase() === wanted);
+  if (twoSegments.length === 1) {
+    return twoSegments[0];
+  }
   const bySegment = bshValues.filter((v) => (0, import_value_transformer.shortEnum)(v) === wanted);
   return bySegment.length === 1 || collapse && bySegment.length > 1 ? bySegment[0] : void 0;
 }
