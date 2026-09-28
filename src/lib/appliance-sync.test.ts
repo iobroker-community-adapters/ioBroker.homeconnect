@@ -795,6 +795,24 @@ describe("ApplianceSync reachability", () => {
     // Removed from the account — the tree goes with it (see the dedicated tests).
     expect(port.objects.has("oven-1")).toBe(false);
   });
+
+  it("builds the channels of an appliance again when it is paired again in the same run", async () => {
+    // Channels are written once a run — a tree deleted meanwhile must not keep that mark.
+    const port = new FakePort();
+    appliance(port, "HA-1", "Oven", {
+      status: [{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Ready" }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    expect(port.objects.has("oven-1.status")).toBe(true);
+    sync.handleStreamEvent({ event: "DEPAIRED", id: "HA-1", data: "{}" });
+    await flush();
+    expect(port.objects.has("oven-1.status")).toBe(false);
+    sync.handleStreamEvent({ event: "PAIRED", id: "", data: JSON.stringify({ haId: "HA-1" }) });
+    await flush();
+    expect(port.objects.has("oven-1.status.operationState")).toBe(true);
+    expect(port.objects.get("oven-1.status")?.type).toBe("channel");
+  });
 });
 
 describe("ApplianceSync metadata refresh", () => {
@@ -6557,6 +6575,44 @@ describe("decoded program records (decision 40)", () => {
     expect(fav.write).toBe(false);
   });
 
+  it("keeps a program's statistics under one id whether the program list is known before or after", async () => {
+    // On an upgrade the program list stands in the database before the status is
+    // read; two programs ending in "Cotton" then make the list's short value two
+    // segments — the statistics id must not follow it.
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: `${NS}.wt-1`,
+        type: "device",
+        common: { name: "Wt" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wt", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    port.primeStates = {
+      [`${NS}.wt-1.programs.selectedProgram`]: {
+        _id: `${NS}.wt-1.programs.selectedProgram`,
+        type: "state",
+        common: { name: "Program", type: "string", role: "text", read: true, write: true, states: {} },
+        native: {
+          bshKey: "BSH.Common.Root.SelectedProgram",
+          bshValues: [wd("Cotton"), wd("Cotton.Cotton.Cotton")],
+        },
+      } as unknown as ioBroker.Object,
+    };
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [{ key: "LaundryCare.Common.Status.Program.Details.Program02", value: "D3sHAF0AXwANqOA" }],
+      available: [wd("Cotton"), wd("Cotton.Cotton.Cotton")],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.syncAppliances();
+    expect(port.states.get("wt-1.statistics.cotton.completed")).toBe(93);
+    expect([...port.objects.keys()].filter(id => id.startsWith("wt-1.statistics.") && !id.includes(".cotton"))).toEqual(
+      [],
+    );
+  });
+
   it("shows nothing for a record of a shape it cannot read, and says so once", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", {
@@ -6576,4 +6632,55 @@ describe("decoded program records (decision 40)", () => {
     const lines = port.logs.filter(l => l.startsWith("info: ") && l.includes("cannot read yet"));
     expect(lines).toHaveLength(2);
   });
+});
+
+describe("object writes per start (every fixture appliance type)", () => {
+  // The fleet measured at most three writes per object and start (tooling round 60):
+  // create, and at most two metadata refreshes while the pass learns lists. This
+  // replays each inventory fixture the way the fixture server answers it.
+  const DIR = join(__dirname, "../../test/fixtures/inventory");
+  const MAX_OBJECT_WRITES = 3;
+  for (const file of readdirSync(DIR).filter(f => f.endsWith(".json"))) {
+    const type = file.replace(/\.json$/, "");
+    it(`writes no object of a ${type} more than ${MAX_OBJECT_WRITES} times`, async () => {
+      const fixture = JSON.parse(readFileSync(join(DIR, file), "utf8")) as {
+        status: Array<Record<string, unknown>>;
+        settings: Array<Record<string, unknown>>;
+        programs: string[];
+        programOptions: unknown[];
+        commands: unknown[];
+      };
+      const port = new FakePort();
+      port.language = "de";
+      const base = "/api/homeappliances/HA-1";
+      appliance(port, "HA-1", type, {
+        type,
+        status: fixture.status,
+        settings: fixture.settings.map(({ constraints: _drop, ...rest }) => rest),
+        available: fixture.programs,
+        commands: fixture.commands,
+      });
+      for (const setting of fixture.settings) {
+        port.getResponses.set(`${base}/settings/${String(setting.key)}`, setting);
+      }
+      for (const program of fixture.programs) {
+        port.getResponses.set(`${base}/programs/available/${program}`, {
+          key: program,
+          options: fixture.programOptions,
+        });
+      }
+      if (fixture.programs.length > 0) {
+        port.getResponses.set(`${base}/programs/selected`, { key: fixture.programs[0], options: [] });
+      }
+      port.getResponses.set(`${base}/programs/active`, null);
+      const sync = new ApplianceSync(port);
+      await sync.syncAppliances();
+      const counts = new Map<string, number>();
+      for (const id of port.extendCalls) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      const over = [...counts].filter(([, n]) => n > MAX_OBJECT_WRITES).map(([id, n]) => `${id}: ${n}`);
+      expect(over).toEqual([]);
+    });
+  }
 });

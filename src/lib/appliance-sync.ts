@@ -562,6 +562,8 @@ export class ApplianceSync {
   private readonly records = new Map<string, DeviceRecords>();
   /** `deviceId|key` of every record that arrived in a shape the adapter cannot read — reported once a run. */
   private readonly unreadableRecords = new Set<string>();
+  /** Channel paths written this run — a channel object is written once, not per datapoint. */
+  private readonly writtenChannels = new Set<string>();
   /** device ids whose `statistics` folder was written this run — once, not per record. */
   private readonly statisticsFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
@@ -1049,6 +1051,7 @@ export class ApplianceSync {
         }
         try {
           await this.port.delObjectRecursive(root);
+          this.forgetWritten(root);
           removed++;
         } catch (e) {
           this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`);
@@ -1185,6 +1188,7 @@ export class ApplianceSync {
         (id, obj) => this.port.setForeignObject(id, obj),
       );
       const enums = await this.port.deleteTreeCarryingEnums(root, carry);
+      this.forgetWritten(root);
       const carried = [
         ...(recordings > 0 ? [`${recordings} recording(s)`] : []),
         ...(enums > 0 ? [`${enums} room/function entr${enums === 1 ? "y" : "ies"}`] : []),
@@ -1217,6 +1221,7 @@ export class ApplianceSync {
       this.pendingLegacyRoots.delete(root);
       try {
         await this.port.delObjectRecursive(root);
+        this.forgetWritten(root);
         this.port.log.info(
           `Removed the object tree ${root} of the previous adapter generation — its appliance is not on the Home Connect account.`,
         );
@@ -1351,6 +1356,7 @@ export class ApplianceSync {
         }
       }
       report.enums = await this.port.deleteTreeCarryingEnums(from, carry);
+      this.forgetWritten(from);
       const carried = [
         ...(report.enums > 0 ? [`${report.enums} room/function entr${report.enums === 1 ? "y" : "ies"}`] : []),
         ...(report.aliases > 0 ? [`${report.aliases} alias(es)`] : []),
@@ -1533,6 +1539,7 @@ export class ApplianceSync {
       for (const channelPath of drainedCandidates) {
         if ((remaining.get(channelPath) ?? 0) === 0) {
           await this.port.delObject(channelPath).catch(() => undefined);
+          this.forgetWritten(channelPath);
         }
       }
       if (migrated > 0) {
@@ -1567,6 +1574,7 @@ export class ApplianceSync {
   ): Promise<void> {
     try {
       await this.port.deleteTreeCarryingEnums(rel, new Map([[`${this.port.namespace}.${rel}`, [...targets]]]));
+      this.forgetWritten(rel);
     } catch (e) {
       this.port.log.debug(`removing ${rel} failed: ${errMessage(e)}`);
     }
@@ -1925,11 +1933,17 @@ export class ApplianceSync {
     if (this.stopped) {
       return fullId;
     }
-    await this.port.extendObject(`${deviceId}.${channel}`, {
-      type: "channel",
-      common: { name: channelLabel ?? channelName(channel) },
-      native: {},
-    });
+    // A channel is written once per run, not once per datapoint created in it
+    // (the status channel of a fresh appliance was written dozens of times).
+    // Its name is kept current at start (refreshChannelNames).
+    if (!this.writtenChannels.has(`${deviceId}.${channel}`)) {
+      await this.port.extendObject(`${deviceId}.${channel}`, {
+        type: "channel",
+        common: { name: channelLabel ?? channelName(channel) },
+        native: {},
+      });
+      this.writtenChannels.add(`${deviceId}.${channel}`);
+    }
     await this.port.extendObject(fullId, {
       type: "state",
       common,
@@ -2126,6 +2140,7 @@ export class ApplianceSync {
   private async removeAppliance(deviceId: string, haId: string): Promise<void> {
     try {
       await this.port.delObjectRecursive(deviceId);
+      this.forgetWritten(deviceId);
     } catch (e) {
       this.port.log.debug(`removing the object tree of ${deviceId} failed: ${errMessage(e)}`);
     }
@@ -2897,15 +2912,30 @@ export class ApplianceSync {
   }
 
   /**
-   * The id segment of a program's statistics channel: the program's short value
-   * (dots folded into camelCase), `program<number>` until the number is learned.
+   * The id segment of a program's statistics channel: the last segment of the
+   * program's key, `program<number>` while the number is unknown. Never the
+   * list-unique short value: that one depends on the program list at hand (two
+   * programs ending in "Cotton" make it two segments), and a channel id must not
+   * change with it — on an upgrade the list is known before the status is read,
+   * on a fresh start after, and the same statistics landed under two ids.
+   * Two programs of one appliance ending alike keep apart by their number.
    *
    * @param deviceId the id-safe device path segment
    * @param uid the appliance's program number
    * @returns the channel segment
    */
   private statisticsSegment(deviceId: string, uid: number): string {
-    return this.programValue(deviceId, uid).replace(/\.(\w)/g, (_m, c: string) => c.toUpperCase());
+    const key = this.programKeyFor(deviceId, uid);
+    if (!key) {
+      return `program${uid}`;
+    }
+    const tail = shortEnum(key);
+    const others = [...(this.records.get(deviceId)?.details.keys() ?? [])].filter(u => u !== uid);
+    const clash = others.some(u => {
+      const k = this.programKeyFor(deviceId, u);
+      return k !== undefined && shortEnum(k) === tail && u < uid;
+    });
+    return clash ? `${tail}${uid}` : tail;
   }
 
   /**
@@ -3110,6 +3140,7 @@ export class ApplianceSync {
           this.knownStates.delete(id);
         }
         await this.port.deleteTreeCarryingEnums(from, carry);
+        this.forgetWritten(from);
         // Drawing below writes the copies once more, by MERGE: the recording
         // configuration the copy carries stays, the names become the program's.
       } catch (e) {
@@ -3118,6 +3149,27 @@ export class ApplianceSync {
     }
     if (details) {
       await this.drawStatistics(deviceId, details);
+    }
+  }
+
+  /**
+   * Forget the once-per-run write marks below a deleted tree: a tree built again
+   * in the same run (an appliance paired again, a moved tree) needs its channels
+   * and statistics folder written again.
+   *
+   * @param rel the namespace-relative root that was deleted
+   */
+  private forgetWritten(rel: string): void {
+    for (const path of [...this.writtenChannels]) {
+      if (path === rel || path.startsWith(`${rel}.`)) {
+        this.writtenChannels.delete(path);
+      }
+    }
+    for (const deviceId of [...this.statisticsFolders]) {
+      const folder = `${deviceId}.statistics`;
+      if (folder === rel || folder.startsWith(`${rel}.`)) {
+        this.statisticsFolders.delete(deviceId);
+      }
     }
   }
 

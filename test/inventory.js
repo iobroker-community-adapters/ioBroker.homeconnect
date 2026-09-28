@@ -76,14 +76,20 @@ async function waitForEveryAppliance(harness) {
   // ~40 requests per appliance × 17 appliances ≈ 70 s before devicesTotal is
   // written. Real clouds answer slower than the spacing, so users never wait
   // for it — the fixture does.
+  //
+  // The criterion is devicesOnline, not devicesTotal: a start stamps every known
+  // appliance offline, and only THIS run's sync brings them online. devicesTotal
+  // is written at start from the device objects already in the database — on the
+  // upgrade suite's seeded tree it read 17 before any sync ran, and the suite
+  // checked a tree the new version had not built yet.
   const deadline = Date.now() + 300000;
   for (;;) {
-    const total = await harness.states.getStateAsync(`${NS}info.devicesTotal`);
-    if (total && total.val === APPLIANCE_COUNT) {
+    const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
+    if (online && online.val === APPLIANCE_COUNT) {
       break;
     }
     if (Date.now() > deadline) {
-      throw new Error(`only ${total ? total.val : 0} of ${APPLIANCE_COUNT} appliances reached the tree`);
+      throw new Error(`only ${online ? online.val : 0} of ${APPLIANCE_COUNT} appliances came online in this run`);
     }
     await new Promise(r => setTimeout(r, 250));
   }
