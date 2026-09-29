@@ -394,17 +394,6 @@ function stringOrUndef(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-/**
- * Whether an object carries a recording configuration (`common.custom` with at least one entry).
- *
- * @param obj the object as read
- * @returns whether something records it
- */
-function hasRecording(obj: ioBroker.Object): boolean {
-  const custom = (obj.common as { custom?: unknown } | undefined)?.custom;
-  return isRecord(custom) && Object.keys(custom).length > 0;
-}
-
 /** The `common` fields the transformer owns. `name` is handled by the label refresh, not the signature. */
 const OWNED_COMMON_KEYS = ["type", "role", "read", "write", "unit", "min", "max", "step", "states", "def"] as const;
 
@@ -1141,11 +1130,12 @@ export class ApplianceSync {
 
   /**
    * Sort out the trees the previous adapter generation (community 1.6.x) left behind — an update
-   * cleans up after itself, the user never deletes objects by hand. A tree nobody attached anything
-   * to goes right away. A tree with a recording, a room or function assignment or an alias pointing
-   * into it waits for its appliance: once the appliance list has created the new tree and the
-   * appliance has been read in full, {@link adoptLegacyTree} carries those over and deletes the old
-   * tree. Runs first at start, so no tree pass ever sees a legacy state.
+   * cleans up after itself, the user never deletes objects by hand. A tree without a room or function
+   * assignment and without an alias pointing into it goes right away. A tree with one waits for its
+   * appliance: once the appliance list has created the new tree and the appliance has been read in
+   * full, {@link adoptLegacyTree} carries those over and deletes the old tree. A recording decides
+   * nothing here — it belongs to the user and goes on only with the same datapoint. Runs first at
+   * start, so no tree pass ever sees a legacy state.
    */
   async sortOutLegacyTrees(): Promise<void> {
     try {
@@ -1165,11 +1155,7 @@ export class ApplianceSync {
       let removed = 0;
       for (const root of roots) {
         const rootFull = `${this.port.namespace}.${root}`;
-        const holds = Object.entries(all).some(
-          ([id, obj]) =>
-            (id === rootFull || id.startsWith(`${rootFull}.`)) &&
-            (attached.has(id) || (obj?.type === "state" && hasRecording(obj))),
-        );
+        const holds = [...attached].some(id => id === rootFull || id.startsWith(`${rootFull}.`));
         if (holds) {
           this.pendingLegacyRoots.add(root);
           continue;
@@ -1189,7 +1175,7 @@ export class ApplianceSync {
       }
       if (this.pendingLegacyRoots.size > 0) {
         this.port.log.info(
-          `${this.pendingLegacyRoots.size} object tree(s) of the previous adapter generation carry recordings, rooms or aliases — ` +
+          `${this.pendingLegacyRoots.size} object tree(s) of the previous adapter generation carry rooms or aliases — ` +
             `they move to the new datapoints once the appliance has been read.`,
         );
       }
@@ -1252,11 +1238,12 @@ export class ApplianceSync {
   }
 
   /**
-   * Hand a legacy tree over to its appliance's new tree and delete it: every recording moves to the
-   * datapoint that takes its place — continuing its series under the old id (`aliasId`) where the
-   * value type stays the same, as a new series where it changed (a door text became yes/no) — the
-   * room and function assignments and the aliases follow. A legacy datapoint without a counterpart
-   * goes with the tree; the log line says how many of them carried something.
+   * Hand a legacy tree over to its appliance's new tree and delete it: the room and function
+   * assignments and the aliases follow to the datapoints that take the old ones' place. A recording
+   * goes on only where the SAME datapoint lives on — one successor of the same value type, its series
+   * continued under the old id (`aliasId`); a datapoint replaced by several, or by one of another
+   * type (a door text became yes/no), is a new datapoint and starts without the user's settings. A
+   * legacy datapoint without a counterpart goes with the tree.
    *
    * @param deviceId the appliance's new device id
    * @param haId its haId
@@ -1272,7 +1259,6 @@ export class ApplianceSync {
       const all = await this.port.getAdapterObjects();
       const attached = await this.attachedIds();
       const carry = new Map<string, string[]>();
-      let recordings = 0;
       let lost = 0;
       for (const [id, obj] of Object.entries(all)) {
         if (!obj || obj.type !== "state" || !id.startsWith(`${rootFull}.`)) {
@@ -1281,31 +1267,26 @@ export class ApplianceSync {
         const targets = this.legacyTargets(this.relId(id), deviceId)
           .map(rel => `${ns}.${rel}`)
           .filter(full => all[full]?.type === "state");
-        const recorded = hasRecording(obj);
         if (targets.length === 0) {
-          if (recorded || attached.has(id)) {
+          if (attached.has(id)) {
             lost++;
           }
           continue;
         }
         carry.set(id, targets);
-        if (!recorded) {
-          continue;
+        const own = obj.common as { custom?: unknown; type?: unknown };
+        const successor = all[targets[0]]?.common as { custom?: unknown; type?: unknown } | undefined;
+        // The same datapoint moved: one successor of the same value type, which carries no settings of its own.
+        if (
+          targets.length === 1 &&
+          isRecord(own.custom) &&
+          successor?.type === own.type &&
+          !(isRecord(successor?.custom) && Object.keys(successor.custom).length > 0)
+        ) {
+          const custom = JSON.parse(JSON.stringify(own.custom)) as Record<string, unknown>;
+          keepHistoryUnder(custom, id);
+          await this.port.extendForeignObject(targets[0], { common: { custom } });
         }
-        for (const target of targets) {
-          const existing = all[target]?.common as { custom?: unknown; type?: unknown } | undefined;
-          if (isRecord(existing?.custom) && Object.keys(existing.custom).length > 0) {
-            continue; // the new datapoint already records — its settings stay
-          }
-          const custom = JSON.parse(JSON.stringify(obj.common.custom)) as Record<string, unknown>;
-          // Same value type: the series goes on under the old id. A new value type starts a new
-          // series — an old series of text would otherwise go on with yes/no values mixed into it.
-          if (existing?.type === (obj.common as { type?: unknown }).type) {
-            keepHistoryUnder(custom, id);
-          }
-          await this.port.extendForeignObject(target, { common: { custom } });
-        }
-        recordings++;
       }
       const aliases = await retargetAliases(
         await this.port.getAliases(),
@@ -1315,14 +1296,13 @@ export class ApplianceSync {
       const enums = await this.port.deleteTreeCarryingEnums(root, carry);
       this.forgetWritten(root);
       const carried = [
-        ...(recordings > 0 ? [`${recordings} recording(s)`] : []),
         ...(enums > 0 ? [`${enums} room/function entr${enums === 1 ? "y" : "ies"}`] : []),
         ...(aliases > 0 ? [`${aliases} alias(es)`] : []),
       ];
       this.port.log.info(
         `${this.label(deviceId)}: took over the object tree ${root} of the previous adapter generation` +
           `${carried.length > 0 ? ` — ${carried.join(", ")} carried to the new datapoints` : ""}` +
-          `${lost > 0 ? `; ${lost} datapoint(s) with a recording, room or alias have no counterpart and are gone` : ""}.`,
+          `${lost > 0 ? `; ${lost} datapoint(s) with a room or alias have no counterpart and are gone` : ""}.`,
       );
     } catch (e) {
       // The root waits again: the next full read tries once more.
@@ -1491,8 +1471,7 @@ export class ApplianceSync {
           fillOnly
             ? `Appliance "${name}": finished the interrupted move of ${from} to ${to} — moved ${report.datapoints} more datapoint(s)`
             : `Appliance "${name}": device id is now ${to} (was ${from}) — moved ${report.datapoints} datapoint(s)`
-        }${carried.length > 0 ? ` with ${carried.join(", ")}` : ""}` +
-          `${report.history > 0 ? `; ${report.history} recording(s) keep their history` : ""}`,
+        }${carried.length > 0 ? ` with ${carried.join(", ")}` : ""}`,
       );
     } catch (e) {
       this.port.log.warn(
@@ -1556,7 +1535,7 @@ export class ApplianceSync {
       /** old full id → the full ids that take its place, for the rooms and the aliases. */
       const moved = new Map<string, string[]>();
       let migrated = 0;
-      let history = 0;
+
       for (const [fullId, obj] of Object.entries(states)) {
         const rel = this.relId(fullId);
         const parts = rel.split(".");
@@ -1613,7 +1592,7 @@ export class ApplianceSync {
             // The recording goes on in its series, under the id it ran under so far.
             if (oldCommon.custom) {
               const custom = JSON.parse(JSON.stringify(oldCommon.custom)) as Record<string, unknown>;
-              history += keepHistoryUnder(custom, fullId);
+              keepHistoryUnder(custom, fullId);
               common.custom = custom;
             }
             if (t.channel === "settings") {
@@ -1670,8 +1649,7 @@ export class ApplianceSync {
       if (migrated > 0) {
         this.port.log.info(
           `Migrated ${migrated} datapoint(s) to the corrected tree layout` +
-            `${aliases > 0 ? ` with ${aliases} alias(es)` : ""}` +
-            `${history > 0 ? `; ${history} recording(s) keep their history` : ""}.`,
+            `${aliases > 0 ? ` with ${aliases} alias(es)` : ""}.`,
         );
       }
     } catch (e) {

@@ -2592,7 +2592,7 @@ describe("ApplianceSync.migrateDeviceIds", () => {
     expect([...port.objects.keys()].filter(k => k.startsWith("sx87tx02ce-60"))).toEqual([]);
     expect(port.logs.filter(l => l.startsWith("info"))).toEqual([
       'info: Appliance "Geschirrspüler": device id is now sx87tx02ce-5775 (was sx87tx02ce-60) — moved 1 datapoint(s) ' +
-        "with 1 room/function entry, 1 alias(es); 1 recording(s) keep their history",
+        "with 1 room/function entry, 1 alias(es)",
     ]);
   });
 
@@ -5805,14 +5805,14 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     expect(port.logs).toContain("debug: legacy cleanup: could not delete SIEMENS-A-0011: locked");
   });
 
-  it("holds a tree with a recording, a room or an alias until its appliance has been read in full", async () => {
+  it("holds a tree with a room or an alias until its appliance has been read in full", async () => {
     const port = new FakePort();
     communityTree(port);
     const sync = new ApplianceSync(port);
     await sync.sortOutLegacyTrees();
     expect(port.deleted).toEqual([]);
     expect(port.logs.filter(l => l.startsWith("info"))).toEqual([
-      "info: 1 object tree(s) of the previous adapter generation carry recordings, rooms or aliases — they move to the new datapoints once the appliance has been read.",
+      "info: 1 object tree(s) of the previous adapter generation carry rooms or aliases — they move to the new datapoints once the appliance has been read.",
     ]);
     // Switched off: no full read, so the old tree still waits.
     onAccount(port, false);
@@ -5820,7 +5820,7 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     expect(port.objects.has(ROOT)).toBe(true);
   });
 
-  it("carries recordings, rooms and aliases to the new datapoints and removes the old tree", async () => {
+  it("carries rooms and aliases to the new datapoints and removes the old tree", async () => {
     const port = new FakePort();
     communityTree(port);
     const sync = new ApplianceSync(port);
@@ -5830,18 +5830,11 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     await sync.syncAppliances();
 
     const NEW = `${NS}.sx87tx02ce-5775`;
-    // Same value type: the series goes on under the old id.
-    expect(port.objects.get("sx87tx02ce-5775.status.operationState")?.common?.custom).toEqual({
-      "influxdb.0": { enabled: true, aliasId: `${OLD}.status.BSH_Common_Status_OperationState` },
-    });
-    // The operation state also feeds the running flag — a yes/no: a new series, no alias id.
-    expect(port.objects.get("sx87tx02ce-5775.status.programRunning")?.common?.custom).toEqual({
-      "influxdb.0": { enabled: true },
-    });
-    // The door text became yes/no: recorded again, as a new series.
-    expect(port.objects.get("sx87tx02ce-5775.status.doorOpen")?.common?.custom).toEqual({
-      "influxdb.0": { enabled: true },
-    });
+    // The operation state became two datapoints and the door text a yes/no: new datapoints, which
+    // start without the user's recording settings (krobi 2026-09-29).
+    for (const id of ["status.operationState", "status.programRunning", "status.doorOpen"]) {
+      expect(port.objects.get(`sx87tx02ce-5775.${id}`)?.common?.custom).toBeUndefined();
+    }
     // The room follows the door to its successor; the alias on the old online flag to the marker.
     expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
       `${NEW}.status.doorOpen`,
@@ -5853,9 +5846,39 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     expect([...port.objects.keys()].filter(k => k.startsWith(ROOT))).toEqual([]);
     expect(port.logs.filter(l => l.includes("previous adapter generation"))).toEqual([
       "info: Geschirrspüler (sx87tx02ce-5775): took over the object tree 015090396331005775 of the previous adapter generation" +
-        " — 2 recording(s), 1 room/function entry, 1 alias(es) carried to the new datapoints;" +
-        " 1 datapoint(s) with a recording, room or alias have no counterpart and are gone.",
+        " — 1 room/function entry, 1 alias(es) carried to the new datapoints.",
     ]);
+  });
+
+  it("continues a recording only where the same datapoint lives on — one successor of the same type", async () => {
+    const port = new FakePort();
+    seed(port, {
+      [OLD]: { type: "device", common: { name: "Spüler" }, native: {} },
+      [`${OLD}.status.BSH_Common_Status_RemoteControlActive`]: {
+        type: "state",
+        common: { name: "Remote", type: "boolean", custom: { "influxdb.0": { enabled: true } } },
+        native: {},
+      },
+      "alias.0.kitchen.remote": {
+        type: "state",
+        common: { name: "Remote", alias: { id: `${OLD}.status.BSH_Common_Status_RemoteControlActive` } },
+        native: {},
+      },
+    });
+    const sync = new ApplianceSync(port);
+    await sync.sortOutLegacyTrees();
+    appliance(port, ROOT, "Spüler", {
+      vib: "SX87TX02CE",
+      status: [{ key: "BSH.Common.Status.RemoteControlActive", value: true }],
+      settings: [],
+      commands: [],
+    });
+    await sync.syncAppliances();
+    expect(port.objects.get("sx87tx02ce-5775.status.remoteControlActive")?.common?.custom).toEqual({
+      "influxdb.0": { enabled: true, aliasId: `${OLD}.status.BSH_Common_Status_RemoteControlActive` },
+    });
+    // The log reports what the adapter carried of its own — never a recording.
+    expect(port.logs.some(l => /recording/i.test(l))).toBe(false);
   });
 
   it("leaves a recording alone that the new datapoint already has", async () => {
@@ -5942,7 +5965,7 @@ describe("ApplianceSync.migrateRenamedStates carries what is attached", () => {
     expect((port.foreign.get("alias.0.washer.lock")?.common as { alias: unknown }).alias).toEqual({ id: NEW });
     expect(port.objects.has("washer-1.misc.childLock")).toBe(false);
     expect(port.logs.filter(l => l.startsWith("info"))).toEqual([
-      "info: Migrated 1 datapoint(s) to the corrected tree layout with 1 alias(es); 1 recording(s) keep their history.",
+      "info: Migrated 1 datapoint(s) to the corrected tree layout with 1 alias(es).",
     ]);
   });
 
@@ -6022,11 +6045,10 @@ describe("ApplianceSync rules the needle run of 2026-09-26 isolates", () => {
     await sync.sortOutLegacyTrees();
     appliance(port, ROOT, "Spüler", { vib: "SX87TX02CE", status: [], settings: [], commands: [] });
     await sync.syncAppliances();
-    // No hull of a datapoint the sync never built — the recording has no counterpart and is reported.
+    // No hull of a datapoint the sync never built; a recording alone holds nothing back and is not reported.
     expect(port.objects.has("sx87tx02ce-5775.status.remoteControlActive")).toBe(false);
-    expect(port.logs.some(l => l.includes("1 datapoint(s) with a recording, room or alias have no counterpart"))).toBe(
-      true,
-    );
+    expect(port.objects.has(ROOT)).toBe(false);
+    expect(port.logs.some(l => /recording/i.test(l))).toBe(false);
   });
 
   it("reports no take-over for an appliance without a legacy tree", async () => {
