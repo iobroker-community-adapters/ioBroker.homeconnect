@@ -578,7 +578,7 @@ tests.integration(ADAPTER_DIR, {
         });
 
         it("a recording goes on only with its own datapoint", async function () {
-          this.timeout(60000);
+          this.timeout(30000);
           const live = await dumpObjects(harness);
           const carriers = new Map();
           for (const [id, obj] of Object.entries(live)) {
@@ -609,7 +609,7 @@ tests.integration(ADAPTER_DIR, {
         // What a fresh installation does not have, an upgrade must not have either — whatever made it (round 64:
         // a datapoint created because the old one was recorded is exactly that).
         it("creates nothing a fresh installation lacks", async function () {
-          this.timeout(60000);
+          this.timeout(30000);
           const current = JSON.parse(fs.readFileSync(INVENTORY, "utf8"));
           const live = await dumpObjects(harness);
           const extra = Object.keys(live).filter(id => !(id in current));

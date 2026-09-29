@@ -18,8 +18,8 @@ const MINUTES: Presentation = { unit: "min", factor: 60, decimals: 0, from: ["se
 const LITRES_FROM_ML: Presentation = { unit: "l", factor: 1000, decimals: 1, from: ["ml"] };
 
 /**
- * Datapoint by datapoint, as krobi chose them on 2026-09-29 (the table with the live values: "ja deine
- * vorschläge sind doch absolut super, passt genau"). A key not listed shows what the appliance sends.
+ * Datapoint by datapoint, as krobi chose them on 2026-09-29 from a table with the live values and a proposal per
+ * datapoint ("your proposals fit exactly"). A key not listed shows what the appliance sends.
  */
 const PRESENTATIONS: Record<string, Presentation> = {
   // Lifetime totals of a laundry appliance: 2,011,440 s read as 558.7 h, 139,858 Wh as 139.86 kWh.
