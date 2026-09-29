@@ -62,6 +62,20 @@
     {
       "key": "BSH.Common.Status.ErrorCodesList",
       "value": "[]"
+    },
+    {
+      "key": "BSH.Common.Status.BackendConnected",
+      "value": true,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "BSH.Common.Status.SoftwareUpdateTransactionID",
+      "value": 0,
+      "constraints": {
+        "access": "read"
+      }
     }
   ],
   "settings": [
@@ -238,6 +252,13 @@
           "BSH.Common.EnumType.TemperatureUnit.Celsius",
           "BSH.Common.EnumType.TemperatureUnit.Fahrenheit"
         ]
+      }
+    },
+    {
+      "key": "BSH.Common.Setting.AllowBackendConnection",
+      "value": true,
+      "constraints": {
+        "access": "readWrite"
       }
     }
   ],
@@ -1000,6 +1021,9 @@
     },
     {
       "key": "BSH.Common.Command.ResumeProgram"
+    },
+    {
+      "key": "BSH.Common.Command.DeactivateWiFi"
     }
   ]
 }

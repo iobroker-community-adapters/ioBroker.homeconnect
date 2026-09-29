@@ -82,6 +82,34 @@
     {
       "key": "LaundryCare.Common.Status.Program.Details.Program20",
       "value": "D3u5AAEAAQAAFGQ"
+    },
+    {
+      "key": "BSH.Common.Status.BackendConnected",
+      "value": true,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "BSH.Common.Status.SoftwareUpdateTransactionID",
+      "value": 0,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "LaundryCare.Common.Status.Version.Smm.DomainFw",
+      "value": "2.5.0 17.10.2024 07:55:52",
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "LaundryCare.Common.Status.Version.Smm.HcFw",
+      "value": "2.2.0",
+      "constraints": {
+        "access": "read"
+      }
     }
   ],
   "settings": [
@@ -258,6 +286,13 @@
           "BSH.Common.EnumType.TemperatureUnit.Celsius",
           "BSH.Common.EnumType.TemperatureUnit.Fahrenheit"
         ]
+      }
+    },
+    {
+      "key": "BSH.Common.Setting.AllowBackendConnection",
+      "value": true,
+      "constraints": {
+        "access": "readWrite"
       }
     }
   ],
@@ -1017,6 +1052,9 @@
     },
     {
       "key": "BSH.Common.Command.ResumeProgram"
+    },
+    {
+      "key": "BSH.Common.Command.DeactivateWiFi"
     }
   ]
 }

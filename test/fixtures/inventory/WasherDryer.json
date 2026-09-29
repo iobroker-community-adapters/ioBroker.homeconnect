@@ -124,6 +124,34 @@
     {
       "key": "BSH.Common.Status.ProgramSessionSummary.Latest",
       "value": "{\"counter\":359,\"end\":\"2026-09-27T14:47:59.859Z\",\"sequence\":[{\"configuration\":{\"options\":[{\"uid\":24585,\"value\":false},{\"uid\":24578,\"value\":140},{\"uid\":27395,\"value\":0},{\"uid\":531,\"value\":780},{\"uid\":551,\"value\":780}],\"program\":31670},\"details\":[{\"uid\":616,\"value\":339},{\"uid\":627,\"value\":139193},{\"uid\":617,\"value\":1998540},{\"uid\":622,\"value\":12171000},{\"uid\":628,\"value\":40},{\"uid\":630,\"value\":720},{\"uid\":623,\"value\":0},{\"uid\":626,\"value\":0},{\"uid\":8197,\"value\":7258},{\"uid\":8198,\"value\":0},{\"uid\":8199,\"value\":5546},{\"uid\":8200,\"value\":0}]}],\"start\":\"2026-09-27T14:35:55.271Z\"}"
+    },
+    {
+      "key": "BSH.Common.Status.BackendConnected",
+      "value": true,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "BSH.Common.Status.SoftwareUpdateTransactionID",
+      "value": 0,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "LaundryCare.Common.Status.Version.Smm.DomainFw",
+      "value": "2.5.0 17.10.2024 07:55:52",
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "LaundryCare.Common.Status.Version.Smm.HcFw",
+      "value": "2.2.0",
+      "constraints": {
+        "access": "read"
+      }
     }
   ],
   "settings": [
@@ -321,6 +349,13 @@
         "min": 0,
         "max": 100,
         "stepsize": 1,
+        "access": "readWrite"
+      }
+    },
+    {
+      "key": "BSH.Common.Setting.AllowBackendConnection",
+      "value": true,
+      "constraints": {
         "access": "readWrite"
       }
     }
@@ -1473,6 +1508,9 @@
     },
     {
       "key": "BSH.Common.Command.ResumeProgram"
+    },
+    {
+      "key": "BSH.Common.Command.DeactivateWiFi"
     }
   ]
 }

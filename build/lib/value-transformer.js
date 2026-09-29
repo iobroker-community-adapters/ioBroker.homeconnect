@@ -34,6 +34,7 @@ var import_i18n = require("./i18n");
 var import_state_texts = require("./state-texts");
 var import_value_labels = require("./value-labels");
 var import_program_records = require("./program-records");
+var import_device_internal = require("./device-internal");
 var import_value_units = require("./value-units");
 var import_switch_values = require("./switch-values");
 const EVENT_PRESENT = "BSH.Common.EnumType.EventPresentState.Present";
@@ -126,6 +127,9 @@ function isDoorStatusKey(key) {
 function expandBshItem(item, lockableDoor) {
   var _a;
   if ((0, import_program_records.isProgramRecordKey)(item.key)) {
+    return [];
+  }
+  if ((0, import_device_internal.isDeviceInternalKey)(item.key)) {
     return [];
   }
   if (isDoorStatusKey(item.key)) {

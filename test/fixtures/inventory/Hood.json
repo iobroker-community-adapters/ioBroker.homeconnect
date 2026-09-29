@@ -35,6 +35,20 @@
       "constraints": {
         "access": "read"
       }
+    },
+    {
+      "key": "BSH.Common.Status.BackendConnected",
+      "value": true,
+      "constraints": {
+        "access": "read"
+      }
+    },
+    {
+      "key": "BSH.Common.Status.SoftwareUpdateTransactionID",
+      "value": 0,
+      "constraints": {
+        "access": "read"
+      }
     }
   ],
   "settings": [
@@ -254,6 +268,13 @@
         "min": 0,
         "max": 200,
         "stepsize": 1,
+        "access": "readWrite"
+      }
+    },
+    {
+      "key": "BSH.Common.Setting.AllowBackendConnection",
+      "value": true,
+      "constraints": {
         "access": "readWrite"
       }
     }
@@ -797,6 +818,9 @@
     },
     {
       "key": "BSH.Common.Command.ResumeProgram"
+    },
+    {
+      "key": "BSH.Common.Command.DeactivateWiFi"
     }
   ]
 }

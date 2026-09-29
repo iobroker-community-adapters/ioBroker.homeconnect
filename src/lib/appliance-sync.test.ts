@@ -7134,17 +7134,28 @@ describe("decoded program records (decision 40)", () => {
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
     // Drawn once, after the program list of the pass is complete — not once before it and again after.
-    expect(port.extendCalls.filter(id => id === "wt-1.history.program1")).toHaveLength(1);
+    expect(port.extendCalls.filter(id => id === "wt-1.history.latest.program")).toHaveLength(1);
     expect(port.extendCalls.filter(id => id === "wt-1.lastRun.program")).toHaveLength(1);
     // Numbers the appliances' own descriptions name are programs right away: 31670 is
     // spin, 31495 cotton — and cotton takes the cloud's key the program list carries.
-    expect(port.states.get("wt-1.history.program1")).toBe("spin");
-    const h1 = port.objects.get("wt-1.history.program1")?.common as ioBroker.StateCommon;
+    expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
+    const h1 = port.objects.get("wt-1.history.latest.program")?.common as ioBroker.StateCommon;
     expect(h1.states).toMatchObject({ spin: "Schleudern", cotton: "Baumwolle" });
     expect(h1.name).toEqual(tName("histProgram1"));
-    expect(port.states.get("wt-1.history.program3")).toBe("cotton");
-    expect(port.states.get("wt-1.history.duration1")).toBe(12);
-    expect(port.states.get("wt-1.history.duration3")).toBe(249);
+    expect(port.states.get("wt-1.history.thirdLatest.program")).toBe("cotton");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    expect(port.states.get("wt-1.history.thirdLatest.duration")).toBe(249);
+    // Each run is a channel with a name that says which run it is, in a history folder (decision 48).
+    expect(port.objects.get("wt-1.history")).toMatchObject({
+      type: "folder",
+      common: { name: tName("channelHistory") },
+    });
+    expect(port.objects.get("wt-1.history.latest")).toMatchObject({
+      type: "channel",
+      common: { name: tName("histRun1") },
+    });
+    expect(port.objects.get("wt-1.history.previous")).toMatchObject({ common: { name: tName("histRun2") } });
+    expect([...port.objects.keys()].some(id => /\.history\.(program|duration)\d/.test(id))).toBe(false);
     expect(port.states.get("wt-1.statistics.cotton.completed")).toBe(93);
     expect(port.states.get("wt-1.statistics.cotton.started")).toBe(95);
     expect(port.states.get("wt-1.statistics.cotton.runtime")).toBe(248.7);
@@ -7178,7 +7189,7 @@ describe("decoded program records (decision 40)", () => {
     }
     expect([...port.objects.keys()].some(id => id.includes("programDetails"))).toBe(false);
     // A decoded datapoint carries no BSH key: the start-up repairs must not take it for a mapped one.
-    expect((port.objects.get("wt-1.history.program1")?.native as { bshKey?: string }).bshKey).toBeUndefined();
+    expect((port.objects.get("wt-1.history.latest.program")?.native as { bshKey?: string }).bshKey).toBeUndefined();
 
     // A second pass with the same records writes no object at all.
     port.extendCalls.length = 0;
@@ -7513,4 +7524,319 @@ describe("object writes per start (every fixture appliance type)", () => {
       expect(over).toEqual([]);
     });
   }
+});
+
+describe("a tree that makes sense on every appliance type (decision 48)", () => {
+  it("creates no datapoint for the appliance's own connection and firmware, and reads no definition for them", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [
+        { key: "BSH.Common.Status.BackendConnected", value: true },
+        { key: "LaundryCare.Common.Status.Version.Smm.DomainFw", value: "2.5.0 17.10.2024 07:55:52" },
+        { key: "BSH.Common.Status.SoftwareUpdateTransactionID", value: 0 },
+        { key: "BSH.Common.Status.WiFiSignalStrength", value: -61 },
+      ],
+      settings: [
+        { key: "BSH.Common.Setting.AllowBackendConnection", value: true },
+        { key: "BSH.Common.Setting.ChildLock", value: false },
+      ],
+      commands: [{ key: "BSH.Common.Command.DeactivateWiFi" }, { key: "BSH.Common.Command.AllowSoftwareUpdate" }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const ids = [...port.objects.keys()];
+    expect(
+      ids.filter(id => /backendConnected|allowBackendConnection|version|deactivateWiFi|transaction/i.test(id)),
+    ).toEqual([]);
+    expect(port.getCalls.filter(p => p.includes("AllowBackendConnection"))).toEqual([]);
+    // What a user reads or uses stays.
+    expect(port.objects.has("wt-1.status.wiFiSignalStrength")).toBe(true);
+    expect(port.objects.has("wt-1.settings.childLock")).toBe(true);
+    expect(port.objects.has("wt-1.commands.allowSoftwareUpdate")).toBe(true);
+    // The stream brings them too — and is left out the same way.
+    sync.handleStreamEvent({
+      event: "STATUS",
+      id: "HA-1",
+      data: JSON.stringify({ items: [{ key: "BSH.Common.Status.BackendConnected", value: true }] }),
+    });
+    await flush();
+    expect(port.objects.has("wt-1.status.backendConnected")).toBe(false);
+  });
+
+  it("removes the ones an earlier version created — a button too — handing rooms and functions on", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-1", type: "WasherDryer" },
+      } as unknown as ioBroker.Object,
+    };
+    const state = (bshKey: string, type: string, role: string): ioBroker.Object =>
+      ({ _id: "", type: "state", common: { name: "x", type, role }, native: { bshKey } }) as unknown as ioBroker.Object;
+    port.primeStates = {
+      [`${NS}.wt-1.status.backendConnected`]: state("BSH.Common.Status.BackendConnected", "boolean", "indicator"),
+      [`${NS}.wt-1.status.versionSmmDomainFw`]: state(
+        "LaundryCare.Common.Status.Version.Smm.DomainFw",
+        "string",
+        "text",
+      ),
+      [`${NS}.wt-1.settings.allowBackendConnection`]: state(
+        "BSH.Common.Setting.AllowBackendConnection",
+        "boolean",
+        "switch",
+      ),
+      [`${NS}.wt-1.commands.deactivateWiFi`]: state("BSH.Common.Command.DeactivateWiFi", "boolean", "button"),
+      [`${NS}.wt-1.commands.acknowledgeEvent`]: state("BSH.Common.Command.AcknowledgeEvent", "boolean", "button"),
+      [`${NS}.wt-1.status.operationState`]: state("BSH.Common.Status.OperationState", "string", "text"),
+    };
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      port.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    port.objects.set("wt-1.status", { type: "channel", common: { name: "Status" }, native: {} });
+    port.objects.set("wt-1.settings", { type: "channel", common: { name: "Settings" }, native: {} });
+    port.foreign.set("enum.rooms.laundry", {
+      type: "enum",
+      common: { name: "Laundry", members: [`${NS}.wt-1.status.backendConnected`, `${NS}.wt-1.status.operationState`] },
+      native: {},
+    } as unknown as ioBroker.Object);
+    const sync = new ApplianceSync(port);
+    await sync.migrateRenamedStates();
+    for (const id of [
+      "wt-1.status.backendConnected",
+      "wt-1.status.versionSmmDomainFw",
+      "wt-1.settings.allowBackendConnection",
+      "wt-1.commands.deactivateWiFi",
+    ]) {
+      expect(port.objects.has(id), id).toBe(false);
+    }
+    // The other button and the other status stay where they are.
+    expect(port.objects.has("wt-1.commands.acknowledgeEvent")).toBe(true);
+    expect(port.objects.has("wt-1.status.operationState")).toBe(true);
+    // The settings channel held only the removed one — it goes; the status channel stays.
+    expect(port.objects.has("wt-1.settings")).toBe(false);
+    expect(port.objects.has("wt-1.status")).toBe(true);
+    // The room keeps its other member and lists no removed datapoint.
+    const members = (port.foreign.get("enum.rooms.laundry")?.common as { members: string[] }).members;
+    expect(members).toEqual([`${NS}.wt-1.status.operationState`]);
+  });
+
+  it("moves the numbered history datapoints to named runs, carrying value, recording, alias and room", async () => {
+    const port = new FakePort();
+    port.objects.set("wt-1", { type: "device", common: { name: "Wt" }, native: { haId: "HA-1" } });
+    port.objects.set("wt-1.history", { type: "channel", common: { name: "History" }, native: {} });
+    const custom = { "influxdb.0": { enabled: true } };
+    port.objects.set("wt-1.history.program1", {
+      type: "state",
+      common: { name: tName("histProgram1"), type: "string", role: "text", write: false, custom },
+      native: {},
+    });
+    port.objects.set("wt-1.history.duration3", {
+      type: "state",
+      common: { name: tName("histDuration3"), type: "number", role: "value", unit: "min", write: false },
+      native: {},
+    });
+    port.states.set("wt-1.history.program1", "spin");
+    port.stateMeta.set("wt-1.history.program1", { ts: 1000, lc: 900 });
+    port.states.set("wt-1.history.duration3", 249);
+    port.foreign.set("alias.0.lastProgram", {
+      type: "state",
+      common: { name: "Last", alias: { id: `${NS}.wt-1.history.program1` } },
+      native: {},
+    } as unknown as ioBroker.Object);
+    port.foreign.set("enum.functions.laundry", {
+      type: "enum",
+      common: { name: "Laundry", members: [`${NS}.wt-1.history.duration3`] },
+      native: {},
+    } as unknown as ioBroker.Object);
+    port.foreign.set("alias.0.door", {
+      type: "state",
+      common: { name: "Door", alias: { id: `${NS}.wt-1.status.doorOpen` } },
+      native: {},
+    } as unknown as ioBroker.Object);
+    const sync = new ApplianceSync(port);
+    await sync.migrateHistoryRuns();
+    // An alias on anything else is left alone.
+    expect((port.foreign.get("alias.0.door")?.common as { alias: { id: string } }).alias.id).toBe(
+      `${NS}.wt-1.status.doorOpen`,
+    );
+
+    expect(port.objects.get("wt-1.history")).toMatchObject({
+      type: "folder",
+      common: { name: tName("channelHistory") },
+    });
+    expect(port.objects.get("wt-1.history.latest")).toMatchObject({
+      type: "channel",
+      common: { name: tName("histRun1") },
+    });
+    expect(port.objects.get("wt-1.history.thirdLatest")).toMatchObject({
+      type: "channel",
+      common: { name: tName("histRun3") },
+    });
+    expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
+    expect(port.stateMeta.get("wt-1.history.latest.program")).toMatchObject({ ts: 1000, lc: 900 });
+    expect(port.states.get("wt-1.history.thirdLatest.duration")).toBe(249);
+    // The same datapoint lives on: its recording goes on in its series.
+    expect(port.objects.get("wt-1.history.latest.program")?.common).toMatchObject({
+      custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.wt-1.history.program1` } },
+    });
+    expect(port.objects.has("wt-1.history.program1")).toBe(false);
+    expect(port.objects.has("wt-1.history.duration3")).toBe(false);
+    expect((port.foreign.get("alias.0.lastProgram")?.common as { alias: { id: string } }).alias.id).toBe(
+      `${NS}.wt-1.history.latest.program`,
+    );
+    expect((port.foreign.get("enum.functions.laundry")?.common as { members: string[] }).members).toEqual([
+      `${NS}.wt-1.history.thirdLatest.duration`,
+    ]);
+    expect(port.logs).toContain("info: Moved 2 history datapoint(s) to named runs.");
+
+    // Nothing numbered left: a second start moves nothing and says nothing.
+    port.logs.length = 0;
+    await sync.migrateHistoryRuns();
+    expect(port.logs.filter(l => l.includes("history"))).toEqual([]);
+  });
+
+  it("empties the remaining time and progress while no program is under way", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Run" }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const send = (items: unknown[]): void =>
+      sync.handleStreamEvent({ event: "NOTIFY", id: "HA-1", data: JSON.stringify({ items }) });
+    send([
+      { key: "BSH.Common.Option.RemainingProgramTime", value: 60, unit: "seconds" },
+      { key: "BSH.Common.Option.ProgramProgress", value: 99, unit: "%" },
+    ]);
+    await flush();
+    expect(port.states.get("wt-1.options.remainingProgramTime")).toBe(1);
+    expect(port.states.get("wt-1.options.programProgress")).toBe(99);
+
+    // Finished still counts as a run: its figures stay.
+    send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Finished" }]);
+    await flush();
+    expect(port.states.get("wt-1.options.programProgress")).toBe(99);
+
+    // At rest: both are emptied, and a late leftover value is not shown again.
+    send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Inactive" }]);
+    await flush();
+    expect(port.states.get("wt-1.options.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+    send([{ key: "BSH.Common.Option.ProgramProgress", value: 100, unit: "%" }]);
+    await flush();
+    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+
+    // A new run shows its figures again — another text value (the door) says nothing about rest.
+    send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Run" }]);
+    send([{ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Closed" }]);
+    send([{ key: "BSH.Common.Option.ProgramProgress", value: 5, unit: "%" }]);
+    await flush();
+    expect(port.states.get("wt-1.options.programProgress")).toBe(5);
+  });
+
+  it("empties them at the start for an appliance that was left at rest", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-1", type: "WasherDryer" },
+      } as unknown as ioBroker.Object,
+    };
+    const state = (bshKey: string, type: string, unit?: string): ioBroker.Object =>
+      ({
+        _id: "",
+        type: "state",
+        common: { name: "x", type, role: "value", write: false, ...(unit ? { unit } : {}) },
+        native: { bshKey },
+      }) as unknown as ioBroker.Object;
+    port.primeStates = {
+      [`${NS}.wt-1.status.operationState`]: state("BSH.Common.Status.OperationState", "string"),
+      [`${NS}.wt-1.options.remainingProgramTime`]: state("BSH.Common.Option.RemainingProgramTime", "number", "min"),
+      [`${NS}.wt-1.options.programProgress`]: state("BSH.Common.Option.ProgramProgress", "number", "%"),
+    };
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      port.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    port.states.set("wt-1.status.operationState", "inactive");
+    port.states.set("wt-1.options.remainingProgramTime", 1);
+    port.states.set("wt-1.options.programProgress", 100);
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    expect(port.states.get("wt-1.options.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+
+    // A running appliance keeps its figures.
+    const running = new FakePort();
+    running.primeDevices = port.primeDevices;
+    running.primeStates = port.primeStates;
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      running.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    running.states.set("wt-1.status.operationState", "run");
+    running.states.set("wt-1.options.programProgress", 40);
+    await new ApplianceSync(running).primeFromObjects();
+    expect(running.states.get("wt-1.options.programProgress")).toBe(40);
+
+    // An operation state nobody reported yet ("") says nothing: the figures stay.
+    const unknown = new FakePort();
+    unknown.primeDevices = port.primeDevices;
+    unknown.primeStates = port.primeStates;
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      unknown.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    unknown.states.set("wt-1.status.operationState", "");
+    unknown.states.set("wt-1.options.programProgress", 40);
+    await new ApplianceSync(unknown).primeFromObjects();
+    expect(unknown.states.get("wt-1.options.programProgress")).toBe(40);
+  });
+
+  it("writes no run value of an appliance that has none", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Fridge", {
+      type: "FridgeFreezer",
+      status: [{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Inactive" }],
+    });
+    await new ApplianceSync(port).syncAppliances();
+    expect([...port.states.keys()].filter(id => id.includes(".options."))).toEqual([]);
+  });
+
+  it("draws no history folder for an appliance whose records carry no history", async () => {
+    const port = new FakePort();
+    const summary =
+      '{"counter":3,"end":"2026-09-27T14:47:59.859Z","sequence":[{"configuration":{"options":[],"program":31670},"details":[]}],"start":"2026-09-27T14:35:55.271Z"}';
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: summary }],
+    });
+    await new ApplianceSync(port).syncAppliances();
+    expect(port.objects.has("wt-1.lastRun.program")).toBe(true);
+    expect(port.objects.has("wt-1.history")).toBe(false);
+  });
+
+  it("draws the history folder again for an appliance paired again in the same run", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [
+        { key: "LaundryCare.Common.Status.Program.History.Uid", value: "ewN7B3u2e7Y" },
+        { key: "LaundryCare.Common.Status.Program.History.EffectiveTime", value: "AL0A-QAMAAw" },
+      ],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    expect(port.objects.get("wt-1.history")?.type).toBe("folder");
+    sync.handleStreamEvent({ event: "DEPAIRED", id: "HA-1", data: "{}" });
+    await flush();
+    expect(port.objects.has("wt-1.history")).toBe(false);
+    sync.handleStreamEvent({ event: "PAIRED", id: "", data: JSON.stringify({ haId: "HA-1" }) });
+    await flush();
+    expect(port.objects.get("wt-1.history")?.type).toBe("folder");
+    expect(port.objects.has("wt-1.history.latest.program")).toBe(true);
+  });
 });

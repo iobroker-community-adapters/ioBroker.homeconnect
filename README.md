@@ -121,6 +121,13 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- Changed: the program history names each run — latest, previous, third-to-last … — instead of numbering its datapoints; existing ones move along with their settings.
+- Changed: firmware identifiers and the appliance's own connection datapoints (cloud connection, switching Wi-Fi off) are no longer created, on any appliance type.
+- Fixed: remaining time and progress stay empty while no program is under way, instead of showing the figures of the last run.
+- Fixed: empty leftover objects below an appliance's former ID are removed at start.
+
 ### 1.25.1 (2026-09-29)
 
 - Changed: on/off datapoints are switches — the power state, the dishwasher's time light and the oven's steam assist; switching off sends Off, or Standby where the appliance has no Off.

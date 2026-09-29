@@ -29,7 +29,14 @@ import {
 } from "./command-dispatch";
 import { isRecord, errMessage, cleanLabel, humanizeId, coerceForType, slugOf } from "./pure-helpers";
 import { ID_SCHEME, deviceIdFor, legacyRootOf } from "./device-id";
-import { copyDeviceTree, keepHistoryUnder, movedId, retargetAliases, type DeviceMoveDeps } from "./device-move";
+import {
+  copyDeviceTree,
+  keepHistoryUnder,
+  movedId,
+  retargetAliases,
+  rewriteMovedObject,
+  type DeviceMoveDeps,
+} from "./device-move";
 import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
@@ -62,6 +69,8 @@ import {
   type ProgramDetails,
   type SessionSummary,
 } from "./program-records";
+import { isDeviceInternalKey } from "./device-internal";
+import { runSegment } from "./run-ordinal";
 import type { SseEvent } from "./sse-parser";
 import type { JsonResult } from "./http";
 
@@ -178,6 +187,9 @@ interface DeviceRecords {
 /** Names of the first history slots (the rest count on with a number). */
 const HISTORY_PROGRAM_NAMES: readonly I18nKey[] = ["histProgram1", "histProgram2", "histProgram3", "histProgram4"];
 const HISTORY_DURATION_NAMES: readonly I18nKey[] = ["histDuration1", "histDuration2", "histDuration3", "histDuration4"];
+const HISTORY_RUN_NAMES: readonly I18nKey[] = ["histRun1", "histRun2", "histRun3", "histRun4"];
+/** An old history datapoint that counted the runs (`history.program3`), before decision 48. */
+const NUMBERED_HISTORY = /^([^.]+)\.history\.(program|duration)(\d+)$/;
 
 /**
  * Two names joined per language ("Spin · Runs completed"), for a datapoint whose
@@ -339,6 +351,19 @@ interface SettingDef {
 
 /** The BSH key carrying the program that is selected on the appliance right now. */
 const SELECTED_PROGRAM_KEY = "BSH.Common.Root.SelectedProgram";
+/** The operation state: whether a program is under way. */
+const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
+/**
+ * The operation states in which a program is under way. Outside them the appliance's remaining time and
+ * progress are left over from the last run (a washer-dryer at rest: 1 min, 100 %) — Home Assistant empties
+ * both there too ("Otherwise, some sensors report erroneous values", `sensor.py`), decision 48.
+ */
+const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
+/** The options that only mean something while a program is under way. */
+const RUN_VALUE_KEYS: ReadonlyMap<string, string> = new Map([
+  ["BSH.Common.Option.RemainingProgramTime", "options.remainingProgramTime"],
+  ["BSH.Common.Option.ProgramProgress", "options.programProgress"],
+]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
 
 /** The translated channel names — the adapter's own structure, not cloud text. */
@@ -630,6 +655,10 @@ export class ApplianceSync {
   private readonly writtenChannels = new Set<string>();
   /** device ids whose `statistics` folder was written this run — once, not per record. */
   private readonly statisticsFolders = new Set<string>();
+  /** Appliances whose last operation state says no program is under way (decision 48). */
+  private readonly atRest = new Set<string>();
+  /** Appliances whose `history` folder was written in this run. */
+  private readonly historyFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
   private readonly settingDefsDirty = new Set<string>();
   /**
@@ -982,6 +1011,56 @@ export class ApplianceSync {
     await this.bringOldFormsUpToDate(oldForms);
     await this.refreshValueLabels(storedLists);
     await this.refreshChannelNames();
+    await this.restRunValuesAtStart();
+  }
+
+  /**
+   * Note an operation state (stream, sync or the stored one at the start): outside a program under way the
+   * appliance is at rest, and its remaining time and progress are left over (decision 48).
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the operation state as sent (full key or short value)
+   * @returns whether the appliance is at rest now
+   */
+  private noteOperationState(deviceId: string, value: string): boolean {
+    if (PROGRAM_UNDER_WAY.has(shortEnum(value).toLowerCase())) {
+      this.atRest.delete(deviceId);
+      return false;
+    }
+    this.atRest.add(deviceId);
+    return true;
+  }
+
+  /**
+   * Write "no value" to the options that only mean something while a program is under way.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async emptyRunValues(deviceId: string): Promise<void> {
+    for (const id of RUN_VALUE_KEYS.values()) {
+      const rel = `${deviceId}.${id}`;
+      if (this.knownStates.has(rel)) {
+        await this.port.setStateChanged(rel, { val: null, ack: true });
+      }
+    }
+  }
+
+  /**
+   * At the start, an appliance that was left at rest gets the same treatment as one that just came to rest —
+   * its stored operation state decides; the first sync or event corrects it either way.
+   */
+  private async restRunValuesAtStart(): Promise<void> {
+    for (const rel of [...this.knownStates.keys()].filter(id => id.endsWith(".status.operationState"))) {
+      try {
+        const stored = (await this.port.getState(rel))?.val;
+        const deviceId = rel.split(".")[0];
+        if (typeof stored === "string" && stored.length > 0 && this.noteOperationState(deviceId, stored)) {
+          await this.emptyRunValues(deviceId);
+        }
+      } catch (e) {
+        this.port.log.debug(`reading the stored operation state of ${rel} failed: ${errMessage(e)}`);
+      }
+    }
   }
 
   /**
@@ -1628,6 +1707,60 @@ export class ApplianceSync {
       setState: (id, state) => this.port.setForeignState(id, state),
       aliases: () => this.port.getAliases(),
     };
+  }
+
+  /**
+   * Move the numbered history datapoints of an older version (`history.program3`, `history.duration3`) to the
+   * run they describe (`history.thirdLatest.program`), decision 48. It is the same datapoint with the same
+   * value type, so its object, value, recording, aliases, rooms and functions move along; `history` becomes the
+   * folder the run channels sit in. Runs before priming, like every other migration.
+   */
+  async migrateHistoryRuns(): Promise<void> {
+    try {
+      const ns = this.port.namespace;
+      const all = await this.port.getAdapterObjects();
+      let moved = 0;
+      for (const [fullId, obj] of Object.entries(all)) {
+        const match = NUMBERED_HISTORY.exec(this.relId(fullId));
+        if (!match || !obj) {
+          continue;
+        }
+        const [, deviceId, kind, digits] = match;
+        const run = this.historyRun(Number(digits));
+        const toRel = `${deviceId}.${run.channel}.${kind}`;
+        const toFull = `${ns}.${toRel}`;
+        await this.ensureHistoryFolder(deviceId);
+        await this.port.extendObject(`${deviceId}.${run.channel}`, {
+          type: "channel",
+          common: { name: run.label },
+          native: {},
+        });
+        const { object } = rewriteMovedObject(fullId, obj, fullId, toFull);
+        await this.port.setForeignObject(toFull, object);
+        const state = (await this.port.getForeignStates(fullId))[fullId];
+        if (state) {
+          await this.port.setForeignState(toFull, {
+            val: state.val,
+            ack: state.ack,
+            ...(typeof state.ts === "number" ? { ts: state.ts } : {}),
+            ...(typeof state.lc === "number" ? { lc: state.lc } : {}),
+            ...(typeof state.q === "number" ? { q: state.q } : {}),
+          });
+        }
+        await retargetAliases(
+          await this.port.getAliases(),
+          id => (id === fullId ? toFull : undefined),
+          (id, alias) => this.port.setForeignObject(id, alias),
+        );
+        await this.port.deleteTreeCarryingEnums(this.relId(fullId), new Map([[fullId, [toFull]]]));
+        moved++;
+      }
+      if (moved > 0) {
+        this.port.log.info(`Moved ${moved} history datapoint(s) to named runs.`);
+      }
+    } catch (e) {
+      this.port.log.warn(`moving the history datapoints failed: ${errMessage(e)} — tried again on the next start`);
+    }
   }
 
   /**
@@ -2590,7 +2723,8 @@ export class ApplianceSync {
       if (this.notReady.has(deviceId)) {
         break;
       }
-      if (isRecord(raw)) {
+      // An appliance-internal key never becomes a datapoint — not even its definition is read (decision 48).
+      if (isRecord(raw) && !(typeof raw.key === "string" && isDeviceInternalKey(raw.key))) {
         await this.applyBshItem(deviceId, isSettings ? await this.withSettingDef(deviceId, haId, raw) : raw, "sync");
       }
     }
@@ -2712,6 +2846,13 @@ export class ApplianceSync {
       await this.applyProgramRecord(deviceId, raw.key, value);
       return;
     }
+    // The operation state decides at once whether a program is under way — before any await, so a run value
+    // the stream sends right after it is judged by the new state (decision 48).
+    const restingNow =
+      raw.key === OPERATION_STATE_KEY &&
+      typeof value === "string" &&
+      !staleRead &&
+      this.noteOperationState(deviceId, value);
     if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       this.noteRunningProgram(deviceId, value);
     }
@@ -2780,7 +2921,14 @@ export class ApplianceSync {
       // 40 would go out as "40"), and the next item with a value would turn it
       // back: one object write per alternation. It refreshes nothing.
       const valueless = value === undefined || value === null;
+      if (RUN_VALUE_KEYS.has(raw.key) && this.atRest.has(deviceId)) {
+        // A value left over from the last run: the metadata still counts, the value is not shown (decision 48).
+        t.value = undefined;
+      }
       await this.applyTransformedState(deviceId, raw.key, t, valueless && !staleRead ? "values" : source);
+    }
+    if (restingNow) {
+      await this.emptyRunValues(deviceId);
     }
     // A program the user chose AT THE APPLIANCE arrives here as a plain value
     // item — and only here is the FULL program key still available: the state it
@@ -3085,19 +3233,54 @@ export class ApplianceSync {
   }
 
   /**
-   * `history.program1..n` — the programs of the last runs, newest first.
+   * The `history` folder of an appliance, written once per run — each run below it is a channel of its own.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private async ensureHistoryFolder(deviceId: string): Promise<void> {
+    if (this.historyFolders.has(deviceId)) {
+      return;
+    }
+    await this.port.extendObject(`${deviceId}.history`, {
+      type: "folder",
+      common: { name: tName("channelHistory") },
+      native: {},
+    });
+    this.historyFolders.add(deviceId);
+  }
+
+  /**
+   * The channel of the n-th run counted back from the newest, and its name (decision 48).
+   *
+   * @param n 1 for the newest run
+   * @returns the channel path below the device and its label
+   */
+  private historyRun(n: number): { channel: string; label: ioBroker.StringOrTranslated } {
+    return {
+      channel: `history.${runSegment(n)}`,
+      label: n <= HISTORY_RUN_NAMES.length ? tName(HISTORY_RUN_NAMES[n - 1]) : tName("histRunN", n),
+    };
+  }
+
+  /**
+   * `history.<run>.program` — the programs of the last runs, newest first (`latest`, `previous`, …).
    *
    * @param deviceId the id-safe device path segment
    */
   private async drawHistoryPrograms(deviceId: string): Promise<void> {
     const uids = this.records.get(deviceId)?.uids ?? [];
+    if (uids.length === 0) {
+      return;
+    }
+    await this.ensureHistoryFolder(deviceId);
     const states = this.programStates(deviceId, uids);
     for (const [i, uid] of uids.entries()) {
       const n = i + 1;
+      const run = this.historyRun(n);
       await this.applyRecordState(
         deviceId,
-        "history",
-        `program${n}`,
+        run.channel,
+        "program",
         {
           name: n <= HISTORY_PROGRAM_NAMES.length ? tName(HISTORY_PROGRAM_NAMES[i]) : tName("histProgramN", n),
           desc: tName("histProgramDesc"),
@@ -3106,6 +3289,7 @@ export class ApplianceSync {
           states,
         },
         this.programValue(deviceId, uid),
+        run.label,
       );
     }
   }
@@ -3124,17 +3308,21 @@ export class ApplianceSync {
   }
 
   /**
-   * `history.duration1..n` — how long the last runs took, newest first.
+   * `history.<run>.duration` — how long the last runs took, newest first.
    *
    * @param deviceId the id-safe device path segment
    */
   private async drawHistoryDurations(deviceId: string): Promise<void> {
-    for (const [i, minutes] of (this.records.get(deviceId)?.minutes ?? []).entries()) {
+    // Called right after a history that decoded to at least one run — the decoder never returns an empty list.
+    const minutesList = this.records.get(deviceId)?.minutes ?? [];
+    await this.ensureHistoryFolder(deviceId);
+    for (const [i, minutes] of minutesList.entries()) {
       const n = i + 1;
+      const run = this.historyRun(n);
       await this.applyRecordState(
         deviceId,
-        "history",
-        `duration${n}`,
+        run.channel,
+        "duration",
         {
           name: n <= HISTORY_DURATION_NAMES.length ? tName(HISTORY_DURATION_NAMES[i]) : tName("histDurationN", n),
           desc: tName("histDurationDesc"),
@@ -3143,6 +3331,7 @@ export class ApplianceSync {
           unit: "min",
         },
         minutes,
+        run.label,
       );
     }
   }
@@ -3407,6 +3596,12 @@ export class ApplianceSync {
     for (const path of [...this.writtenChannels]) {
       if (path === rel || path.startsWith(`${rel}.`)) {
         this.writtenChannels.delete(path);
+      }
+    }
+    for (const deviceId of [...this.historyFolders]) {
+      const folder = `${deviceId}.history`;
+      if (folder === rel || folder.startsWith(`${rel}.`)) {
+        this.historyFolders.delete(deviceId);
       }
     }
     for (const deviceId of [...this.statisticsFolders]) {
@@ -4069,7 +4264,8 @@ export class ApplianceSync {
     const data = await this.port.apiGet(appliancePath(haId, "/commands"));
     const commands = isRecord(data) && Array.isArray(data.commands) ? data.commands : [];
     for (const raw of commands) {
-      if (isRecord(raw) && typeof raw.key === "string") {
+      // A command of the appliance's own connection (switching its Wi-Fi off) is never offered (decision 48).
+      if (isRecord(raw) && typeof raw.key === "string" && !isDeviceInternalKey(raw.key)) {
         const id = stateIdForKey(raw.key).id;
         const texts = stateText(raw.key);
         // The explanation belongs to the BSH key, not to the path the NAME took:

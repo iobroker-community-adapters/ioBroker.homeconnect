@@ -138,6 +138,8 @@ export class Homeconnect extends utils.Adapter {
    * writes and notifies every subscriber).
    */
   private objectMirror = new ObjectMirror("");
+  /** The objects without an object type the database held at the start (decision 48). */
+  private untypedAtStart: string[] = [];
   /**
    * The own states' last values, read once in onReady: a read-only state is compared
    * here instead of in the database (tooling round 62 — `setStateChangedAsync` reads
@@ -233,6 +235,8 @@ export class Homeconnect extends utils.Adapter {
         ["legacy cleanup", () => sync.sortOutLegacyTrees()],
         ["device id migration", () => sync.migrateDeviceIds()],
         ["datapoint migration", () => sync.migrateRenamedStates()],
+        ["history migration", () => sync.migrateHistoryRuns()],
+        ["leftover cleanup", () => this.dropUntypedObjects()],
         ["priming", () => sync.primeFromObjects()],
         ["reachable stamp", () => sync.markAllUnreachable()],
       ];
@@ -376,8 +380,26 @@ export class Homeconnect extends utils.Adapter {
         endkey: `${this.namespace}.\u9999`,
       });
       this.objectMirror.load(list.rows);
+      this.untypedAtStart = this.objectMirror.untyped();
     } catch (e) {
       this.log.debug(`Could not read the own objects — every object write goes out: ${errMessage(e)}`);
+    }
+  }
+
+  /**
+   * Delete the objects without an object type in the own namespace (decision 48). The adapter never writes
+   * one; they are leftovers another writer created by extending an id that did not exist — e.g. under the
+   * device id an appliance had before 1.24.0. The object is only deleted, nothing on it is read.
+   */
+  private async dropUntypedObjects(): Promise<void> {
+    let dropped = 0;
+    for (const id of this.untypedAtStart) {
+      await this.delObjectAsync(id);
+      this.objectMirror.forget(id);
+      dropped++;
+    }
+    if (dropped > 0) {
+      this.log.info(`Removed ${dropped} leftover object(s) without an object type.`);
     }
   }
 

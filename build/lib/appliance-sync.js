@@ -37,8 +37,12 @@ var import_switch_values = require("./switch-values");
 var import_value_units = require("./value-units");
 var import_value_labels = require("./value-labels");
 var import_program_records = require("./program-records");
+var import_device_internal = require("./device-internal");
+var import_run_ordinal = require("./run-ordinal");
 const HISTORY_PROGRAM_NAMES = ["histProgram1", "histProgram2", "histProgram3", "histProgram4"];
 const HISTORY_DURATION_NAMES = ["histDuration1", "histDuration2", "histDuration3", "histDuration4"];
+const HISTORY_RUN_NAMES = ["histRun1", "histRun2", "histRun3", "histRun4"];
+const NUMBERED_HISTORY = /^([^.]+)\.history\.(program|duration)(\d+)$/;
 function joinNames(first, second) {
   const pick = (n, lang) => {
     var _a;
@@ -92,6 +96,12 @@ function confirmedValue(channel, stateId, req, bshValues, written) {
 }
 const NOT_READY_RETRY_MS = [3e4, 6e4, 12e4];
 const SELECTED_PROGRAM_KEY = "BSH.Common.Root.SelectedProgram";
+const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
+const PROGRAM_UNDER_WAY = /* @__PURE__ */ new Set(["delayedstart", "run", "pause", "finished"]);
+const RUN_VALUE_KEYS = /* @__PURE__ */ new Map([
+  ["BSH.Common.Option.RemainingProgramTime", "options.remainingProgramTime"],
+  ["BSH.Common.Option.ProgramProgress", "options.programProgress"]
+]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
 const CHANNEL_KEYS = {
   info: "channelInfo",
@@ -282,6 +292,10 @@ class ApplianceSync {
   writtenChannels = /* @__PURE__ */ new Set();
   /** device ids whose `statistics` folder was written this run — once, not per record. */
   statisticsFolders = /* @__PURE__ */ new Set();
+  /** Appliances whose last operation state says no program is under way (decision 48). */
+  atRest = /* @__PURE__ */ new Set();
+  /** Appliances whose `history` folder was written in this run. */
+  historyFolders = /* @__PURE__ */ new Set();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
   settingDefsDirty = /* @__PURE__ */ new Set();
   /**
@@ -582,6 +596,54 @@ class ApplianceSync {
     await this.bringOldFormsUpToDate(oldForms);
     await this.refreshValueLabels(storedLists);
     await this.refreshChannelNames();
+    await this.restRunValuesAtStart();
+  }
+  /**
+   * Note an operation state (stream, sync or the stored one at the start): outside a program under way the
+   * appliance is at rest, and its remaining time and progress are left over (decision 48).
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the operation state as sent (full key or short value)
+   * @returns whether the appliance is at rest now
+   */
+  noteOperationState(deviceId, value) {
+    if (PROGRAM_UNDER_WAY.has((0, import_value_transformer.shortEnum)(value).toLowerCase())) {
+      this.atRest.delete(deviceId);
+      return false;
+    }
+    this.atRest.add(deviceId);
+    return true;
+  }
+  /**
+   * Write "no value" to the options that only mean something while a program is under way.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async emptyRunValues(deviceId) {
+    for (const id of RUN_VALUE_KEYS.values()) {
+      const rel = `${deviceId}.${id}`;
+      if (this.knownStates.has(rel)) {
+        await this.port.setStateChanged(rel, { val: null, ack: true });
+      }
+    }
+  }
+  /**
+   * At the start, an appliance that was left at rest gets the same treatment as one that just came to rest —
+   * its stored operation state decides; the first sync or event corrects it either way.
+   */
+  async restRunValuesAtStart() {
+    var _a;
+    for (const rel of [...this.knownStates.keys()].filter((id) => id.endsWith(".status.operationState"))) {
+      try {
+        const stored = (_a = await this.port.getState(rel)) == null ? void 0 : _a.val;
+        const deviceId = rel.split(".")[0];
+        if (typeof stored === "string" && stored.length > 0 && this.noteOperationState(deviceId, stored)) {
+          await this.emptyRunValues(deviceId);
+        }
+      } catch (e) {
+        this.port.log.debug(`reading the stored operation state of ${rel} failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+      }
+    }
   }
   /**
    * Bring every datapoint an older version stored in another form to the current one, object and value, without a
@@ -1161,6 +1223,59 @@ class ApplianceSync {
       setState: (id, state) => this.port.setForeignState(id, state),
       aliases: () => this.port.getAliases()
     };
+  }
+  /**
+   * Move the numbered history datapoints of an older version (`history.program3`, `history.duration3`) to the
+   * run they describe (`history.thirdLatest.program`), decision 48. It is the same datapoint with the same
+   * value type, so its object, value, recording, aliases, rooms and functions move along; `history` becomes the
+   * folder the run channels sit in. Runs before priming, like every other migration.
+   */
+  async migrateHistoryRuns() {
+    try {
+      const ns = this.port.namespace;
+      const all = await this.port.getAdapterObjects();
+      let moved = 0;
+      for (const [fullId, obj] of Object.entries(all)) {
+        const match = NUMBERED_HISTORY.exec(this.relId(fullId));
+        if (!match || !obj) {
+          continue;
+        }
+        const [, deviceId, kind, digits] = match;
+        const run = this.historyRun(Number(digits));
+        const toRel = `${deviceId}.${run.channel}.${kind}`;
+        const toFull = `${ns}.${toRel}`;
+        await this.ensureHistoryFolder(deviceId);
+        await this.port.extendObject(`${deviceId}.${run.channel}`, {
+          type: "channel",
+          common: { name: run.label },
+          native: {}
+        });
+        const { object } = (0, import_device_move.rewriteMovedObject)(fullId, obj, fullId, toFull);
+        await this.port.setForeignObject(toFull, object);
+        const state = (await this.port.getForeignStates(fullId))[fullId];
+        if (state) {
+          await this.port.setForeignState(toFull, {
+            val: state.val,
+            ack: state.ack,
+            ...typeof state.ts === "number" ? { ts: state.ts } : {},
+            ...typeof state.lc === "number" ? { lc: state.lc } : {},
+            ...typeof state.q === "number" ? { q: state.q } : {}
+          });
+        }
+        await (0, import_device_move.retargetAliases)(
+          await this.port.getAliases(),
+          (id) => id === fullId ? toFull : void 0,
+          (id, alias) => this.port.setForeignObject(id, alias)
+        );
+        await this.port.deleteTreeCarryingEnums(this.relId(fullId), /* @__PURE__ */ new Map([[fullId, [toFull]]]));
+        moved++;
+      }
+      if (moved > 0) {
+        this.port.log.info(`Moved ${moved} history datapoint(s) to named runs.`);
+      }
+    } catch (e) {
+      this.port.log.warn(`moving the history datapoints failed: ${(0, import_pure_helpers.errMessage)(e)} \u2014 tried again on the next start`);
+    }
   }
   /**
    * Migrate datapoints whose id changed with a newer adapter version to their
@@ -1948,7 +2063,7 @@ class ApplianceSync {
       if (this.notReady.has(deviceId)) {
         break;
       }
-      if ((0, import_pure_helpers.isRecord)(raw)) {
+      if ((0, import_pure_helpers.isRecord)(raw) && !(typeof raw.key === "string" && (0, import_device_internal.isDeviceInternalKey)(raw.key))) {
         await this.applyBshItem(deviceId, isSettings ? await this.withSettingDef(deviceId, haId, raw) : raw, "sync");
       }
     }
@@ -2049,6 +2164,7 @@ class ApplianceSync {
       await this.applyProgramRecord(deviceId, raw.key, value);
       return;
     }
+    const restingNow = raw.key === OPERATION_STATE_KEY && typeof value === "string" && !staleRead && this.noteOperationState(deviceId, value);
     if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       this.noteRunningProgram(deviceId, value);
     }
@@ -2094,7 +2210,13 @@ class ApplianceSync {
         }
       }
       const valueless = value === void 0 || value === null;
+      if (RUN_VALUE_KEYS.has(raw.key) && this.atRest.has(deviceId)) {
+        t.value = void 0;
+      }
       await this.applyTransformedState(deviceId, raw.key, t, valueless && !staleRead ? "values" : source);
+    }
+    if (restingNow) {
+      await this.emptyRunValues(deviceId);
     }
     if (raw.key === SELECTED_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       if (value.length === 0) {
@@ -2370,20 +2492,53 @@ class ApplianceSync {
     return states;
   }
   /**
-   * `history.program1..n` — the programs of the last runs, newest first.
+   * The `history` folder of an appliance, written once per run — each run below it is a channel of its own.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  async ensureHistoryFolder(deviceId) {
+    if (this.historyFolders.has(deviceId)) {
+      return;
+    }
+    await this.port.extendObject(`${deviceId}.history`, {
+      type: "folder",
+      common: { name: (0, import_i18n.tName)("channelHistory") },
+      native: {}
+    });
+    this.historyFolders.add(deviceId);
+  }
+  /**
+   * The channel of the n-th run counted back from the newest, and its name (decision 48).
+   *
+   * @param n 1 for the newest run
+   * @returns the channel path below the device and its label
+   */
+  historyRun(n) {
+    return {
+      channel: `history.${(0, import_run_ordinal.runSegment)(n)}`,
+      label: n <= HISTORY_RUN_NAMES.length ? (0, import_i18n.tName)(HISTORY_RUN_NAMES[n - 1]) : (0, import_i18n.tName)("histRunN", n)
+    };
+  }
+  /**
+   * `history.<run>.program` — the programs of the last runs, newest first (`latest`, `previous`, …).
    *
    * @param deviceId the id-safe device path segment
    */
   async drawHistoryPrograms(deviceId) {
     var _a, _b;
     const uids = (_b = (_a = this.records.get(deviceId)) == null ? void 0 : _a.uids) != null ? _b : [];
+    if (uids.length === 0) {
+      return;
+    }
+    await this.ensureHistoryFolder(deviceId);
     const states = this.programStates(deviceId, uids);
     for (const [i, uid] of uids.entries()) {
       const n = i + 1;
+      const run = this.historyRun(n);
       await this.applyRecordState(
         deviceId,
-        "history",
-        `program${n}`,
+        run.channel,
+        "program",
         {
           name: n <= HISTORY_PROGRAM_NAMES.length ? (0, import_i18n.tName)(HISTORY_PROGRAM_NAMES[i]) : (0, import_i18n.tName)("histProgramN", n),
           desc: (0, import_i18n.tName)("histProgramDesc"),
@@ -2391,7 +2546,8 @@ class ApplianceSync {
           role: "text",
           states
         },
-        this.programValue(deviceId, uid)
+        this.programValue(deviceId, uid),
+        run.label
       );
     }
   }
@@ -2408,18 +2564,21 @@ class ApplianceSync {
     await this.drawLastRun(deviceId);
   }
   /**
-   * `history.duration1..n` — how long the last runs took, newest first.
+   * `history.<run>.duration` — how long the last runs took, newest first.
    *
    * @param deviceId the id-safe device path segment
    */
   async drawHistoryDurations(deviceId) {
     var _a, _b;
-    for (const [i, minutes] of ((_b = (_a = this.records.get(deviceId)) == null ? void 0 : _a.minutes) != null ? _b : []).entries()) {
+    const minutesList = (_b = (_a = this.records.get(deviceId)) == null ? void 0 : _a.minutes) != null ? _b : [];
+    await this.ensureHistoryFolder(deviceId);
+    for (const [i, minutes] of minutesList.entries()) {
       const n = i + 1;
+      const run = this.historyRun(n);
       await this.applyRecordState(
         deviceId,
-        "history",
-        `duration${n}`,
+        run.channel,
+        "duration",
         {
           name: n <= HISTORY_DURATION_NAMES.length ? (0, import_i18n.tName)(HISTORY_DURATION_NAMES[i]) : (0, import_i18n.tName)("histDurationN", n),
           desc: (0, import_i18n.tName)("histDurationDesc"),
@@ -2427,7 +2586,8 @@ class ApplianceSync {
           role: "value",
           unit: "min"
         },
-        minutes
+        minutes,
+        run.label
       );
     }
   }
@@ -2679,6 +2839,12 @@ class ApplianceSync {
     for (const path of [...this.writtenChannels]) {
       if (path === rel || path.startsWith(`${rel}.`)) {
         this.writtenChannels.delete(path);
+      }
+    }
+    for (const deviceId of [...this.historyFolders]) {
+      const folder = `${deviceId}.history`;
+      if (folder === rel || folder.startsWith(`${rel}.`)) {
+        this.historyFolders.delete(deviceId);
       }
     }
     for (const deviceId of [...this.statisticsFolders]) {
@@ -3189,7 +3355,7 @@ class ApplianceSync {
     const data = await this.port.apiGet(appliancePath(haId, "/commands"));
     const commands = (0, import_pure_helpers.isRecord)(data) && Array.isArray(data.commands) ? data.commands : [];
     for (const raw of commands) {
-      if ((0, import_pure_helpers.isRecord)(raw) && typeof raw.key === "string") {
+      if ((0, import_pure_helpers.isRecord)(raw) && typeof raw.key === "string" && !(0, import_device_internal.isDeviceInternalKey)(raw.key)) {
         const id = (0, import_value_transformer.stateIdForKey)(raw.key).id;
         const texts = (0, import_state_texts.stateText)(raw.key);
         const desc = (texts == null ? void 0 : texts.desc) ? (0, import_i18n.tName)(texts.desc) : void 0;

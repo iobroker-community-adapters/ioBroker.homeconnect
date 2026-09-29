@@ -75,6 +75,17 @@ describe("ObjectMirror", () => {
     expect(m.covers("wm-1.status", { common: { name: "State" } })).toBe(false);
   });
 
+  it("names the objects without an object type — never one of its own kinds (decision 48)", () => {
+    const m = mirror();
+    expect(m.untyped()).toEqual([]);
+    m.load([
+      { id: `${NS}.wm-1`, value: { type: "device", common: { name: "Wm" } } },
+      { id: `${NS}.wm-05.settings.powerState`, value: { common: {}, from: "system.adapter.other.0" } },
+      { id: `${NS}.wm-1.status.door`, value: { type: "state", common: {} } },
+    ]);
+    expect(m.untyped()).toEqual([`${NS}.wm-05.settings.powerState`]);
+  });
+
   it("never covers an object it does not hold", () => {
     const m = mirror();
     expect(m.covers("info", { common: {} })).toBe(false);

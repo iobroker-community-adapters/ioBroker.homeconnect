@@ -187,6 +187,7 @@ interface FakeSync {
   sortOutLegacyTrees: ReturnType<typeof vi.fn>;
   migrateDeviceIds: ReturnType<typeof vi.fn>;
   migrateRenamedStates: ReturnType<typeof vi.fn>;
+  migrateHistoryRuns: ReturnType<typeof vi.fn>;
   primeFromObjects: ReturnType<typeof vi.fn>;
   syncAppliances: ReturnType<typeof vi.fn>;
   markAllUnreachable: ReturnType<typeof vi.fn>;
@@ -293,6 +294,7 @@ function setup(config: Record<string, unknown> = {}): Ctx {
       sortOutLegacyTrees: vi.fn(() => Promise.resolve(undefined)),
       migrateDeviceIds: vi.fn(() => Promise.resolve(undefined)),
       migrateRenamedStates: vi.fn(() => Promise.resolve(undefined)),
+      migrateHistoryRuns: vi.fn(() => Promise.resolve(undefined)),
       primeFromObjects: vi.fn(() => Promise.resolve(undefined)),
       // Resolves TRUE: syncAppliances reports whether it reached the cloud, and
       // the outage catch-up only stamps its cooldown on a sync that did.
@@ -558,6 +560,11 @@ describe("Homeconnect sign-in wiring", () => {
     );
     expect(ctx.syncs[0].migrateRenamedStates).toHaveBeenCalled();
     expect(ctx.syncs[0].migrateRenamedStates.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.syncs[0].primeFromObjects.mock.invocationCallOrder[0],
+    );
+    // The numbered history moves to named runs before priming too (decision 48).
+    expect(ctx.syncs[0].migrateHistoryRuns).toHaveBeenCalledTimes(1);
+    expect(ctx.syncs[0].migrateHistoryRuns.mock.invocationCallOrder[0]).toBeLessThan(
       ctx.syncs[0].primeFromObjects.mock.invocationCallOrder[0],
     );
     expect(ctx.syncs[0].primeFromObjects).toHaveBeenCalled();
@@ -2448,6 +2455,25 @@ describe("Homeconnect writes an object only when it changes (tooling round 61)",
     ctx.i.extendObject.mockClear();
     await ctx.i.refreshManifestObjects();
     expect(extended(ctx)).toEqual([]);
+  });
+
+  it("removes the objects without an object type it finds at the start, and nothing else (decision 48)", async () => {
+    const ctx = setup();
+    // What an earlier version left under an appliance's former id: an object another writer created by
+    // extending an id that did not exist — no type, no name.
+    ctx.i.objects.set("wm-05.settings.powerState", { common: {}, from: "system.adapter.other.0" });
+    ctx.i.objects.set("wm-1", { type: "device", common: { name: "Wm" }, native: {} });
+    ctx.i.objects.set("wm-1.settings.powerState", { type: "state", common: { name: "Power" }, native: {} });
+    await ctx.i.onReady();
+    expect(ctx.i.objects.has("wm-05.settings.powerState")).toBe(false);
+    expect(ctx.i.objects.has("wm-1")).toBe(true);
+    expect(ctx.i.objects.has("wm-1.settings.powerState")).toBe(true);
+    expect(ctx.i.log.info).toHaveBeenCalledWith("Removed 1 leftover object(s) without an object type.");
+    // A start with nothing left over says nothing.
+    const again = setup();
+    again.i.objects.set("wm-1", { type: "device", common: { name: "Wm" }, native: {} });
+    await again.i.onReady();
+    expect(again.i.log.info).not.toHaveBeenCalledWith(expect.stringContaining("leftover"));
   });
 
   it("writes the one manifest object whose text differs", async () => {

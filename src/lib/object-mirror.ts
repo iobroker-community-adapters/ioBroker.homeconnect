@@ -142,6 +142,19 @@ export class ObjectMirror {
   }
 
   /**
+   * The objects in the own namespace without an object type. The adapter never writes one: every object it
+   * creates carries a type. Such an object is a leftover another writer created by extending an id that did
+   * not exist (decision 48).
+   *
+   * @returns their full ids
+   */
+  untyped(): string[] {
+    return [...this.objects.entries()]
+      .filter(([, obj]) => typeof (obj as { type?: unknown }).type !== "string")
+      .map(([id]) => id);
+  }
+
+  /**
    * Forget one object — after a non-recursive deletion; what lies below it stays.
    *
    * @param id a relative or full id

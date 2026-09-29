@@ -11,6 +11,7 @@ import { tName } from "./i18n";
 import { stateText, DOOR_COMPARTMENT_NAMES } from "./state-texts";
 import { catalogValues, DEFAULT_LABEL_LANGUAGE, noProgramLabel, valueLabel } from "./value-labels";
 import { isProgramRecordKey } from "./program-records";
+import { isDeviceInternalKey } from "./device-internal";
 import { boundShown, presentationFor, shownUnit, toShown } from "./value-units";
 import { isSwitchKey, switchRole, switchState } from "./switch-values";
 
@@ -325,6 +326,11 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
   // An encoded program record has no datapoint of its own (see program-records.ts):
   // its readable datapoints come from the decoder, and an old raw one is migrated away.
   if (isProgramRecordKey(item.key)) {
+    return [];
+  }
+  // An appliance-internal key (connection, firmware) never becomes a datapoint, and an old one is migrated away
+  // (decision 48).
+  if (isDeviceInternalKey(item.key)) {
     return [];
   }
   // No value in, no value out — at EVERY expansion. A key-only item (the cloud
