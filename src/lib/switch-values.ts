@@ -30,7 +30,16 @@ function tail(value: string): string {
  */
 export function isSwitchKey(key: string): boolean {
   const type = KEY_ENUM_TYPES[key];
-  const names = type !== undefined ? ENUM_TYPE_VALUES[type] : KEY_VALUE_NAMES[key];
+  return isSwitchValueSet(type !== undefined ? ENUM_TYPE_VALUES[type] : KEY_VALUE_NAMES[key]);
+}
+
+/**
+ * Whether a set of values is an on/off switch: On plus an off-like value, and nothing else but "undefined".
+ *
+ * @param names the full values or bare value names
+ * @returns whether they make a switch
+ */
+export function isSwitchValueSet(names: readonly string[] | undefined): boolean {
   if (!names || names.length === 0) {
     return false;
   }

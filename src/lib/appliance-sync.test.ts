@@ -653,9 +653,17 @@ describe("ApplianceSync.primeFromObjects + write after a restart-while-offline",
         common: { name: "remainingProgramTime", type: "number", role: "value", read: true, write: false },
         native: { bshKey: "BSH.Common.Option.RemainingProgramTime" },
       } as unknown as ioBroker.Object,
+      [`${NS}.washer.options.finishInRelative`]: {
+        _id: "",
+        type: "state",
+        common: { name: "finishInRelative", type: "number", role: "level", read: true, write: true, unit: "min" },
+        native: { bshKey: "BSH.Common.Option.FinishInRelative" },
+      } as unknown as ioBroker.Object,
     };
     // setState/getState use namespace-relative ids (like the adapter).
     port.states.set("washer.options.spinSpeed", "rpm1200");
+    // Shown in minutes (decision 47) — the appliance gets seconds.
+    port.states.set("washer.options.finishInRelative", 236);
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
 
@@ -674,6 +682,7 @@ describe("ApplianceSync.primeFromObjects + write after a restart-while-offline",
     expect(port.writes).toHaveLength(1);
     expect(port.writes[0].body?.options).toEqual([
       { key: "LaundryCare.Washer.Option.SpinSpeed", value: "LaundryCare.Washer.EnumType.SpinSpeed.RPM1200" },
+      { key: "BSH.Common.Option.FinishInRelative", value: 14160 },
     ]);
   });
 });
@@ -5927,24 +5936,42 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
   });
 
   it("leaves a recording alone that the new datapoint already has", async () => {
+    // The same datapoint lives on (one successor, same type) — but the user already set up the new one.
     const port = new FakePort();
-    communityTree(port);
+    seed(port, {
+      [OLD]: { type: "device", common: { name: "Spüler" }, native: {} },
+      [`${OLD}.status.BSH_Common_Status_RemoteControlActive`]: {
+        type: "state",
+        common: { name: "Remote", type: "boolean", custom: { "influxdb.0": { enabled: true } } },
+        native: {},
+      },
+      "alias.0.kitchen.remote": {
+        type: "state",
+        common: { name: "Remote", alias: { id: `${OLD}.status.BSH_Common_Status_RemoteControlActive` } },
+        native: {},
+      },
+    });
     const sync = new ApplianceSync(port);
     await sync.sortOutLegacyTrees();
-    onAccount(port);
+    appliance(port, ROOT, "Spüler", {
+      vib: "SX87TX02CE",
+      status: [{ key: "BSH.Common.Status.RemoteControlActive", value: true }],
+      settings: [],
+      commands: [],
+    });
     const real = port.extendObject.bind(port);
     // The new datapoint was set up for recording by hand before the old tree was taken over. Only
     // the adapter's own metadata writes restore it — a carry that writes `custom` must stay visible.
     port.extendObject = (id: string, obj: ioBroker.PartialObject): Promise<unknown> => {
       const result = real(id, obj);
-      if (id === "sx87tx02ce-5775.status.operationState" && obj.common?.custom === undefined) {
+      if (id === "sx87tx02ce-5775.status.remoteControlActive" && obj.common?.custom === undefined) {
         const stored = port.objects.get(id) as { common: Record<string, unknown> };
         stored.common.custom = { "history.0": { enabled: true } };
       }
       return result;
     };
     await sync.syncAppliances();
-    expect(port.objects.get("sx87tx02ce-5775.status.operationState")?.common?.custom).toEqual({
+    expect(port.objects.get("sx87tx02ce-5775.status.remoteControlActive")?.common?.custom).toEqual({
       "history.0": { enabled: true },
     });
   });
@@ -6088,6 +6115,8 @@ describe("ApplianceSync rules the needle run of 2026-09-26 isolates", () => {
     });
     const sync = new ApplianceSync(port);
     await sync.sortOutLegacyTrees();
+    // A recording alone holds nothing back — the tree goes right away.
+    expect(port.objects.has(ROOT)).toBe(false);
     appliance(port, ROOT, "Spüler", { vib: "SX87TX02CE", status: [], settings: [], commands: [] });
     await sync.syncAppliances();
     // No hull of a datapoint the sync never built; a recording alone holds nothing back and is not reported.
@@ -6712,6 +6741,66 @@ describe("readable values (2026-09-28)", () => {
     await new ApplianceSync(again).primeFromObjects();
     expect(again.extendCalls).toEqual([]);
     expect(again.stateWrites).toEqual([]);
+  });
+
+  it("drops the on/off list when a switch reaches the sync still stored as text", async () => {
+    // The change of form at start failed (objects db) — the metadata refresh of the next sync must not merge the
+    // boolean over the old list and leave "on"/"off" labels on a switch.
+    const port = new FakePort();
+    const P = "BSH.Common.EnumType.PowerState";
+    port.primeDevices = {
+      [`${NS}.wm-1`]: {
+        _id: `${NS}.wm-1`,
+        type: "device",
+        common: { name: "Wm" },
+        native: { haId: "HA-1", type: "Washer", enumber: "Wm", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const stored = {
+      _id: `${NS}.wm-1.settings.powerState`,
+      type: "state",
+      common: {
+        name: "Power",
+        type: "string",
+        role: "text",
+        read: true,
+        write: true,
+        states: { off: "Off", on: "On" },
+      },
+      native: { bshKey: "BSH.Common.Setting.PowerState", bshValues: [`${P}.Off`, `${P}.On`], nameSource: "i18n" },
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [stored._id]: stored };
+    port.objects.set("wm-1.settings.powerState", structuredClone(stored));
+    appliance(port, "HA-1", "Wm", {
+      type: "Washer",
+      status: [],
+      settings: [
+        {
+          key: "BSH.Common.Setting.PowerState",
+          value: `${P}.On`,
+          constraints: { allowedvalues: [`${P}.Off`, `${P}.On`] },
+        },
+      ],
+    });
+    const real = port.extendObject.bind(port);
+    let failed = false;
+    port.extendObject = (id: string, obj: ioBroker.PartialObject): Promise<unknown> => {
+      // Only the change of form at start fails — the patch that makes the text a switch.
+      if (id === "wm-1.settings.powerState" && (obj.common as { states?: unknown } | undefined)?.states === null) {
+        failed = true;
+        return Promise.reject(new Error("objects db down"));
+      }
+      return real(id, obj);
+    };
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    expect(failed).toBe(true);
+    expect((port.objects.get("wm-1.settings.powerState")?.common as ioBroker.StateCommon).type).toBe("string");
+    port.extendObject = real;
+    await sync.syncAppliances();
+    const common = port.objects.get("wm-1.settings.powerState")?.common as ioBroker.StateCommon;
+    expect(common).toMatchObject({ type: "boolean", role: "switch.power" });
+    expect(common.states).toBeFalsy();
   });
 
   it("a relabelled value list is no change for the next sync", async () => {
