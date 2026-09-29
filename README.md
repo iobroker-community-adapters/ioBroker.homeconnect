@@ -121,6 +121,10 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
+### **WORK IN PROGRESS**
+
+- Fixed: after an update, value lists of options the appliance was not offering kept English labels or had no list at all; they now show the installation's language from the start.
+
 ### 1.25.0 (2026-09-29)
 
 - Changed: value lists speak the system language — programs, phases and settings show names like "Cotton" or "Running" instead of short values or English labels.
