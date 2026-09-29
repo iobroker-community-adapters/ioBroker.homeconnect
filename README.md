@@ -124,6 +124,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 ### **WORK IN PROGRESS**
 
 - Fixed: after an update, value lists of options the appliance was not offering kept English labels or had no list at all; they now show the installation's language from the start.
+- Fixed: the stain option for butter and oil stains was labelled "clarified butter" in every language; it now reads "butter/oil", as the manufacturer names it.
 
 ### 1.25.0 (2026-09-29)
 
