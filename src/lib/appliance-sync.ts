@@ -872,6 +872,8 @@ export class ApplianceSync {
     } catch (e) {
       this.port.log.debug(`priming devices from objects failed: ${errMessage(e)}`);
     }
+    /** Every datapoint with a value list: its stored `common` and what is known about it, for the label repair. */
+    const storedLists = new Map<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>();
     try {
       const objects = await this.port.getForeignObjects(`${this.port.namespace}.*`, "state");
       for (const [fullId, obj] of Object.entries(objects)) {
@@ -892,7 +894,7 @@ export class ApplianceSync {
         const defGeneration = typeof native.defGeneration === "number" ? native.defGeneration : undefined;
         // The pattern is type-filtered to states, so common is a StateCommon.
         const common = (obj.common ?? {}) as Partial<ioBroker.StateCommon>;
-        this.knownStates.set(rel, {
+        const known: KnownState = {
           bshKey,
           bshValues,
           metaSig: metaSignature(common, { bshKey, bshValues }),
@@ -904,7 +906,11 @@ export class ApplianceSync {
           seenValues,
           defGeneration,
           nameSource: storedNameSource(native),
-        });
+        };
+        this.knownStates.set(rel, known);
+        if (isRecord(common.states)) {
+          storedLists.set(rel, { common, known });
+        }
         const parts = rel.split(".");
         // Writable options.* belong to the start-payload set (optionKeys); read-only
         // display options (RemainingProgramTime, …) must not.
@@ -919,7 +925,62 @@ export class ApplianceSync {
       this.port.log.debug(`priming known states from objects failed: ${errMessage(e)}`);
     }
     await this.refreshLegacyLabels();
+    await this.refreshValueLabels(storedLists);
     await this.refreshChannelNames();
+  }
+
+  /**
+   * Give every stored value list the adapter's own labels in the system language, without a single cloud
+   * request (decision 41). A list is otherwise relabelled only when a definition or an answer carries its
+   * datapoint again — and Home Connect sends an option only in the state and program it belongs to
+   * (measured 2026-09-29: the washer-dryer's definitions carried no temperature at all while it was idle), so
+   * an update left such a datapoint with the labels an older version stored ("400 rpm" on a German
+   * installation) for good. A value the table does not know keeps the label it has; the set of values is
+   * not touched — which values a list holds stays the definitions' business.
+   *
+   * @param storedLists relative id → stored `common` and known state of every datapoint with a value list
+   */
+  private async refreshValueLabels(
+    storedLists: ReadonlyMap<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>,
+  ): Promise<void> {
+    const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
+    for (const [rel, { common, known }] of storedLists) {
+      const stored = (common.states ?? {}) as Record<string, string>;
+      const states: Record<string, string> = { ...stored };
+      let changed = false;
+      const relabel = (short: string, wanted: string | undefined): void => {
+        if (wanted !== undefined && typeof stored[short] === "string" && stored[short] !== wanted) {
+          states[short] = wanted;
+          changed = true;
+        }
+      };
+      const values = known.bshValues ?? [];
+      if (values.length > 0) {
+        for (const v of values) {
+          for (const short of new Set([shortEnumIn(v, values), shortEnum(v)])) {
+            const label = stored[short];
+            // The transformer's rule: own label, else the stored (cloud) one — never the bare short value.
+            relabel(short, valueLabel(v, lang, label !== short ? label : undefined, known.bshKey));
+          }
+        }
+      } else {
+        // A read-only list stores no full values; its short value still ends like the full one,
+        // which is all the own table looks at. Without a row the label stays as it is.
+        for (const short of Object.keys(stored)) {
+          relabel(short, ownValueLabel(short, lang));
+        }
+      }
+      if (!changed) {
+        continue;
+      }
+      try {
+        await this.port.extendObject(rel, { common: { states } });
+        // The stored object carries the new labels now: the next sync must not take them for a change.
+        known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
+      } catch (e) {
+        this.port.log.debug(`relabelling the values of ${rel} failed: ${errMessage(e)}`);
+      }
+    }
   }
 
   /**

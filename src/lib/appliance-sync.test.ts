@@ -6325,6 +6325,100 @@ describe("readable values (2026-09-28)", () => {
     expect(spin.states).toEqual({ rpm1400: "1400 U/min", rpm1200: "1200 U/min" });
   });
 
+  it("gives a stored value list its own labels at start, without the cloud and only once", async () => {
+    // Measured 2026-09-29 on a washer-dryer: no current definition carried the temperature, so
+    // the labels 1.24.0 stored ("Cold") stood on a German installation after the update.
+    const port = new FakePort();
+    port.language = "de";
+    const id = "wm-1.options.temperature";
+    const t = "LaundryCare.Washer.EnumType.Temperature";
+    port.primeDevices = {
+      [`${NS}.wm-1`]: {
+        _id: `${NS}.wm-1`,
+        type: "device",
+        common: { name: "Wm" },
+        native: { haId: "HA-1", type: "Washer", enumber: "Wm", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const stored = {
+      _id: `${NS}.${id}`,
+      type: "state",
+      common: {
+        name: "Temperature",
+        type: "string",
+        role: "text",
+        read: true,
+        write: true,
+        states: { cold: "Cold", gc20: "20°C", mysteryvalue: "mysteryvalue", othervalue: "Cloud text" },
+      },
+      native: {
+        bshKey: "LaundryCare.Washer.Option.Temperature",
+        bshValues: [`${t}.Cold`, `${t}.GC20`, `${t}.MysteryValue`, `${t}.OtherValue`],
+        defGeneration: 4,
+      },
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [`${NS}.${id}`]: stored };
+    port.objects.set(id, structuredClone(stored));
+    await new ApplianceSync(port).primeFromObjects();
+    expect(port.getCalls).toEqual([]);
+    // Own label where the table has one; a cloud text the table lacks stays; a bare short value never is a label.
+    expect((port.objects.get(id)?.common as ioBroker.StateCommon).states).toEqual({
+      cold: "Kalt",
+      gc20: "20 °C",
+      mysteryvalue: "Mystery value",
+      othervalue: "Cloud text",
+    });
+    // The next start finds the labels in place and writes nothing.
+    port.primeStates = { [`${NS}.${id}`]: structuredClone(port.objects.get(id)!) as ioBroker.Object };
+    const before = port.extendCalls.length;
+    await new ApplianceSync(port).primeFromObjects();
+    expect(port.extendCalls.slice(before)).not.toContain(id);
+  });
+
+  it("a relabelled value list is no change for the next sync", async () => {
+    // The relabelling at start keeps the remembered signature in step with the object, so the
+    // first answer that carries the datapoint does not write the same labels a second time.
+    const port = new FakePort();
+    port.language = "de";
+    const id = "wm-1.status.operationState";
+    const o = "BSH.Common.EnumType.OperationState";
+    port.primeDevices = {
+      [`${NS}.wm-1`]: {
+        _id: `${NS}.wm-1`,
+        type: "device",
+        common: { name: "Wm" },
+        native: { haId: "HA-1", type: "Washer", enumber: "Wm", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    appliance(port, "HA-1", "Wm", {
+      type: "Washer",
+      status: [{ key: "BSH.Common.Status.OperationState", value: `${o}.Ready` }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.syncAppliances();
+    const built = structuredClone(port.objects.get(id)!);
+    const english = structuredClone(built);
+    const states = (english.common as ioBroker.StateCommon).states as Record<string, string>;
+    for (const k of Object.keys(states)) {
+      states[k] = `${k} (en)`;
+    }
+    const again = new FakePort();
+    again.language = "de";
+    again.primeDevices = port.primeDevices;
+    again.primeStates = { [`${NS}.${id}`]: { ...english, _id: `${NS}.${id}` } as ioBroker.Object };
+    again.objects.set(id, structuredClone(english));
+    appliance(again, "HA-1", "Wm", {
+      type: "Washer",
+      status: [{ key: "BSH.Common.Status.OperationState", value: `${o}.Ready` }],
+    });
+    const next = new ApplianceSync(again);
+    await next.primeFromObjects();
+    expect(again.objects.get(id)?.common).toEqual(built.common);
+    await next.syncAppliances();
+    expect(again.extendCalls.filter(c => c === id)).toHaveLength(1);
+  });
+
   describe("an option list of an older definition generation is rebuilt once", () => {
     const programA = "Cooking.Oven.Program.HeatingMode.HotAir";
     const programB = "Cooking.Oven.Program.HeatingMode.PizzaSetting";
