@@ -81,6 +81,10 @@ vi.mock("@iobroker/adapter-core", () => {
       this.objects.set(this.key(id), { ...(this.objects.get(this.key(id)) ?? {}), ...obj });
       return Promise.resolve();
     });
+    /** All own states in one call, like the controller's `getStatesAsync("*")` (by full id). */
+    public getStatesAsync = vi.fn(() =>
+      Promise.resolve(Object.fromEntries([...this.states].map(([k, v]) => [`${this.namespace}.${k}`, { ...v, q: 0 }]))),
+    );
     /** One list call over the namespace, like the controller's `getObjectList` (rows by full id). */
     public getObjectListAsync = vi.fn(() =>
       Promise.resolve({
@@ -255,6 +259,9 @@ function internalOf(adapter: Homeconnect): {
   extendForeignObjectAsync: ReturnType<typeof vi.fn>;
   delObjectAsync: ReturnType<typeof vi.fn>;
   getObjectListAsync: ReturnType<typeof vi.fn>;
+  getStatesAsync: ReturnType<typeof vi.fn>;
+  setState: ReturnType<typeof vi.fn>;
+  setStateChangedAsync: ReturnType<typeof vi.fn>;
   readOwnObjects(): Promise<void>;
   refreshManifestObjects(): Promise<void>;
 } {
@@ -2204,9 +2211,10 @@ describe("Homeconnect findings of the 2026-09-24 audit (unload, 401)", () => {
     await ctx.i.onReady();
     await ctx.auths[0].port.onSignedIn();
     const order: string[] = [];
-    (ctx.i as unknown as { setState: ReturnType<typeof vi.fn> }).setState.mockImplementationOnce(() =>
-      Promise.reject(new Error("db gone")),
-    );
+    // The first final write goes through setStateChangedAsync (the fake's objects carry no read-only flag).
+    (
+      ctx.i as unknown as { setStateChangedAsync: ReturnType<typeof vi.fn> }
+    ).setStateChangedAsync.mockImplementationOnce(() => Promise.reject(new Error("db gone")));
     let finishMarkers: () => void = () => undefined;
     ctx.syncs[0].markAllUnreachable.mockImplementation(
       () =>
@@ -2537,6 +2545,103 @@ describe("Homeconnect writes an object only when it changes (tooling round 61)",
     await port.deleteTreeCarryingEnums("old-1", new Map());
     await port.extendObject("old-1.status.door", structuredClone(state));
     expect(extended(ctx).filter(id => id === "old-1.status.door")).toHaveLength(2);
+  });
+
+  it("compares a read-only state in memory and writes it only on a change", async () => {
+    const ctx = setup();
+    ctx.i.objects.set("wm-1.status.running", { type: "state", common: { write: false }, native: {} });
+    ctx.i.states.set("wm-1.status.running", { val: false, ack: true });
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      setStateChanged(id: string, state: Record<string, unknown>): Promise<unknown>;
+    };
+    ctx.i.setState.mockClear();
+    ctx.i.setStateChangedAsync.mockClear();
+    await port.setStateChanged("wm-1.status.running", { val: false, ack: true });
+    await port.setStateChanged("wm-1.status.running", { val: true, ack: true });
+    await port.setStateChanged("wm-1.status.running", { val: true, ack: true });
+    // Never read back from the database: no setStateChangedAsync, one write for the one change.
+    expect(ctx.i.setStateChangedAsync).not.toHaveBeenCalled();
+    expect(ctx.i.setState.mock.calls.map(c => [c[0], (c[1] as { val: unknown }).val])).toEqual([
+      ["wm-1.status.running", true],
+    ]);
+  });
+
+  it("leaves a writable state to setStateChangedAsync, whose database compare sees a user's write", async () => {
+    const ctx = setup();
+    ctx.i.objects.set("wm-1.settings.power", { type: "state", common: { write: true }, native: {} });
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      setStateChanged(id: string, state: Record<string, unknown>): Promise<unknown>;
+    };
+    ctx.i.setStateChangedAsync.mockClear();
+    await port.setStateChanged("wm-1.settings.power", { val: "on", ack: true });
+    expect(ctx.i.setStateChangedAsync).toHaveBeenCalledWith("wm-1.settings.power", { val: "on", ack: true });
+  });
+
+  it("writes a read-only state again after the sync deleted it", async () => {
+    const ctx = setup();
+    const state = { type: "state", common: { write: false }, native: {} };
+    ctx.i.objects.set("wm-1.status.running", state);
+    ctx.i.objects.set("wm-2.status.running", structuredClone(state));
+    ctx.i.objects.set("wm-3.status.running", structuredClone(state));
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      setStateChanged(id: string, state: Record<string, unknown>): Promise<unknown>;
+      delObject(id: string): Promise<unknown>;
+      delObjectRecursive(id: string): Promise<unknown>;
+      deleteTreeCarryingEnums(root: string, carry: ReadonlyMap<string, readonly string[]>): Promise<number>;
+      extendObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+    };
+    for (const id of ["wm-1.status.running", "wm-2.status.running", "wm-3.status.running"]) {
+      await port.setStateChanged(id, { val: true, ack: true });
+    }
+    await port.delObject("wm-1.status.running");
+    await port.delObjectRecursive("wm-2");
+    await port.deleteTreeCarryingEnums("wm-3", new Map());
+    ctx.i.setState.mockClear();
+    for (const id of ["wm-1.status.running", "wm-2.status.running", "wm-3.status.running"]) {
+      await port.extendObject(id, structuredClone(state));
+      await port.setStateChanged(id, { val: true, ack: true });
+    }
+    expect(ctx.i.setState.mock.calls.map(c => c[0])).toEqual([
+      "wm-1.status.running",
+      "wm-2.status.running",
+      "wm-3.status.running",
+    ]);
+  });
+
+  it("writes a read-only state when the own states could not be read", async () => {
+    const ctx = setup();
+    ctx.i.objects.set("wm-1.status.running", { type: "state", common: { write: false }, native: {} });
+    ctx.i.states.set("wm-1.status.running", { val: true, ack: true });
+    ctx.i.getStatesAsync.mockImplementation(() => Promise.reject(new Error("states db down")));
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      setStateChanged(id: string, state: Record<string, unknown>): Promise<unknown>;
+    };
+    ctx.i.setState.mockClear();
+    await port.setStateChanged("wm-1.status.running", { val: true, ack: true });
+    expect(ctx.i.setState).toHaveBeenCalledTimes(1);
+    expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("Could not read the own states"));
+  });
+
+  it("holds a value moved to a new id, and one written every time", async () => {
+    const ctx = setup();
+    ctx.i.objects.set("wm-1.status.running", { type: "state", common: { write: false }, native: {} });
+    ctx.i.objects.set("wm-1.status.remaining", { type: "state", common: { write: false }, native: {} });
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      setStateChanged(id: string, state: Record<string, unknown>): Promise<unknown>;
+      setState(id: string, state: Record<string, unknown>): Promise<unknown>;
+      setForeignState(id: string, state: Record<string, unknown>): Promise<unknown>;
+    };
+    await port.setForeignState("homeconnect.0.wm-1.status.running", { val: true, ack: true });
+    await port.setState("wm-1.status.remaining", { val: 30, ack: true });
+    ctx.i.setState.mockClear();
+    await port.setStateChanged("wm-1.status.running", { val: true, ack: true });
+    await port.setStateChanged("wm-1.status.remaining", { val: 30, ack: true });
+    expect(ctx.i.setState).not.toHaveBeenCalled();
   });
 
   it("writes everything when the own tree could not be read", async () => {

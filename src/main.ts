@@ -14,7 +14,7 @@ import { looksLikeClientId } from "./lib/sign-in-help";
 import { migrateNativeKeys } from "./lib/native-key-migration";
 import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { LogDedup, categorize } from "./lib/log-dedup";
-import { ObjectMirror } from "./lib/object-mirror";
+import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import type { I18nKey } from "./lib/i18n";
 
 /** Production API host (global EU/US region; China would be api.home-connect.cn). */
@@ -139,6 +139,12 @@ export class Homeconnect extends utils.Adapter {
    * writes and notifies every subscriber).
    */
   private objectMirror = new ObjectMirror("");
+  /**
+   * The own states' last values, read once in onReady: a read-only state is compared
+   * here instead of in the database (tooling round 62 — `setStateChangedAsync` reads
+   * the state on every call).
+   */
+  private readonly stateMirror = new StateMirror();
   /** Epoch-ms of the next REST request slot (see {@link MIN_REQUEST_GAP_MS}). */
   private nextRequestAt = 0;
   /**
@@ -190,21 +196,24 @@ export class Homeconnect extends utils.Adapter {
       if (await migrateNativeKeys(this, SETTINGS_MIGRATIONS, errMessage)) {
         return;
       }
+      // The own objects and states, read once before anything is written: every later
+      // write is compared against them.
+      await this.readOwnObjects();
+      await this.readOwnStates();
       // Whatever goes offline at a stop goes offline at the start too: after a
       // crash, a kill or a power cut the teardown never ran, and nothing else
       // would correct a green marker until a sign-in succeeds — which can take
       // days while a device flow waits for the user, and never happens without
       // credentials.
-      await this.setStateChangedAsync("info.connection", { val: false, ack: true });
-      await this.setStateChangedAsync("auth.signedIn", { val: false, ack: true });
+      await this.setStateIfChanged("info.connection", { val: false, ack: true });
+      await this.setStateIfChanged("auth.signedIn", { val: false, ack: true });
       // Nothing asked Home Connect yet this run — the fleet's word for "nothing to report".
-      await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });
+      await this.setStateIfChanged("auth.lastError", { val: "Unknown", ack: true });
 
       // Translated object names (channels, markers, buttons) come from admin/i18n.
       // Initialised before the credential check, so an instance that is not
       // configured yet still gets its manifest objects named.
       await I18n.init(join(this.adapterDir, "admin"), this);
-      await this.readOwnObjects();
       await this.refreshManifestObjects();
 
       // The local start-up steps run ONCE per run, here — none of them talks to
@@ -373,6 +382,52 @@ export class Homeconnect extends utils.Adapter {
     }
   }
 
+  /** Read the own states once — one bulk call — so a read-only state is never read back to compare it. */
+  private async readOwnStates(): Promise<void> {
+    try {
+      this.stateMirror.load((await this.getStatesAsync("*")) ?? {});
+    } catch (e) {
+      this.log.debug(`Could not read the own states — every read-only state write goes out: ${errMessage(e)}`);
+    }
+  }
+
+  /**
+   * Write a state only when its value changes. A read-only state is written by the
+   * adapter alone and compared in memory; a writable one goes through
+   * `setStateChangedAsync`, whose database compare also sees a user's write.
+   *
+   * @param id the namespace-relative or full own id
+   * @param state the state to write
+   * @returns what the write returned, or undefined when nothing was written
+   */
+  private async setStateIfChanged(id: string, state: ioBroker.SettableState): Promise<unknown> {
+    const full = this.objectMirror.fullId(id);
+    if (!this.objectMirror.readOnly(id)) {
+      const result = await this.setStateChangedAsync(id, state);
+      this.stateMirror.remember(full, state);
+      return result;
+    }
+    if (!this.stateMirror.differs(full, state)) {
+      return undefined;
+    }
+    const result = await this.setState(id, state);
+    this.stateMirror.remember(full, state);
+    return result;
+  }
+
+  /**
+   * Write a state every time (a token, a link, a measured value) and hold what was written.
+   *
+   * @param id the namespace-relative or full own id
+   * @param state the state to write
+   * @returns what the write returned
+   */
+  private async setStateRemembered(id: string, state: ioBroker.SettableState): Promise<unknown> {
+    const result = await this.setState(id, state);
+    this.stateMirror.remember(this.objectMirror.fullId(id), state);
+    return result;
+  }
+
   /**
    * `extendObject` for ApplianceSync: left out when it would change nothing.
    *
@@ -396,17 +451,19 @@ export class Homeconnect extends utils.Adapter {
       log: this.log,
       language: this.systemLanguage,
       extendObject: (id, obj) => this.extendChangedObject(id, obj),
-      setState: (id, state) => this.setState(id, state),
-      setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
+      setState: (id, state) => this.setStateRemembered(id, state),
+      setStateChanged: (id, state) => this.setStateIfChanged(id, state),
       getState: id => this.getStateAsync(id),
       getObject: id => this.getObjectAsync(id),
       delObject: async id => {
         await this.delObjectAsync(id);
         this.objectMirror.forget(id);
+        this.stateMirror.forget(this.objectMirror.fullId(id), false);
       },
       delObjectRecursive: async id => {
         await this.delObjectAsync(id, { recursive: true });
         this.objectMirror.forgetTree(id);
+        this.stateMirror.forget(this.objectMirror.fullId(id), true);
       },
       getForeignObjects: (pattern, type) => this.getForeignObjectsAsync(pattern, type),
       getAdapterObjects: () => this.getAdapterObjectsAsync(),
@@ -431,7 +488,11 @@ export class Homeconnect extends utils.Adapter {
         }
         return result;
       },
-      setForeignState: (id, state) => this.setForeignStateAsync(id, state),
+      setForeignState: async (id, state) => {
+        const result = await this.setForeignStateAsync(id, state);
+        this.stateMirror.remember(id, state);
+        return result;
+      },
       getAliases: () => this.getForeignObjectsAsync("alias.*", "state"),
       getEnums: async () => (await this.getForeignObjectsAsync("enum.*", "enum")) ?? {},
       deleteTreeCarryingEnums: (root, carry) => this.deleteTreeCarryingEnums(root, carry),
@@ -469,6 +530,7 @@ export class Homeconnect extends utils.Adapter {
     }
     await remove();
     this.objectMirror.forgetTree(root);
+    this.stateMirror.forget(this.objectMirror.fullId(root), true);
     return carried.size;
   }
 
@@ -479,17 +541,17 @@ export class Homeconnect extends utils.Adapter {
       loadRefreshToken: () => this.loadRefreshToken(),
       saveToken: token => this.saveToken(token),
       setVerificationUrl: async url => {
-        await this.setState("auth.verificationUrl", { val: url, ack: true });
+        await this.setStateRemembered("auth.verificationUrl", { val: url, ack: true });
       },
       setConnected: async connected => {
         this.signedIn = connected;
         await this.publishConnection();
       },
       setProblem: async text => {
-        await this.setStateChangedAsync("auth.lastError", { val: text, ack: true });
+        await this.setStateIfChanged("auth.lastError", { val: text, ack: true });
       },
       clearStoredLogin: async () => {
-        await this.setState("auth.session", { val: "", ack: true });
+        await this.setStateRemembered("auth.session", { val: "", ack: true });
       },
       notify: message => this.notifyUser(message),
       onSignedIn: () => this.onAuthenticated(),
@@ -539,7 +601,7 @@ export class Homeconnect extends utils.Adapter {
    * @param token the token to store
    */
   private async saveToken(token: StoredToken): Promise<void> {
-    await this.setState("auth.session", { val: this.encrypt(JSON.stringify(token)), ack: true });
+    await this.setStateRemembered("auth.session", { val: this.encrypt(JSON.stringify(token)), ack: true });
   }
 
   /**
@@ -736,8 +798,8 @@ export class Homeconnect extends utils.Adapter {
     try {
       // The sign-in half on its own, so the settings panel can tell "signed in,
       // live updates down" from "not signed in" — info.connection alone cannot.
-      await this.setStateChangedAsync("auth.signedIn", { val: this.signedIn, ack: true });
-      await this.setStateChangedAsync("info.connection", { val: this.signedIn && this.streamUp, ack: true });
+      await this.setStateIfChanged("auth.signedIn", { val: this.signedIn, ack: true });
+      await this.setStateIfChanged("info.connection", { val: this.signedIn && this.streamUp, ack: true });
     } catch (e) {
       this.log.debug(`Could not write info.connection: ${errMessage(e)}`);
     }
@@ -1167,10 +1229,10 @@ export class Homeconnect extends utils.Adapter {
       // "signed in" for an instance that was not running. Same rule as the
       // appliance markers: whatever is set at runtime is reset on the way out.
       const writes: Promise<unknown>[] = [
-        this.setState("info.connection", { val: false, ack: true }),
-        this.setState("auth.signedIn", { val: false, ack: true }),
+        this.setStateIfChanged("info.connection", { val: false, ack: true }),
+        this.setStateIfChanged("auth.signedIn", { val: false, ack: true }),
         // Off: nothing to report (the fleet's reason-text rule) — the next start asks again.
-        this.setState("auth.lastError", { val: "Unknown", ack: true }),
+        this.setStateIfChanged("auth.lastError", { val: "Unknown", ack: true }),
       ];
       // A rotated refresh token the object database refused earlier gets its last
       // chance here: Home Connect kills the previous one the moment it hands out

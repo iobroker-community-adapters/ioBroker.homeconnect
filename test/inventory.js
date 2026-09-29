@@ -59,6 +59,27 @@ const SETTLE_MS = 10000;
 const INSTANCE_OBJECTS = new Set(
   (require(path.join(ADAPTER_DIR, "io-package.json")).instanceObjects ?? []).map(o => `${NS}${o._id}`),
 );
+// Round 62: every adapter start loads test/resource-probe.js (fleet master) FIRST; at its exit it records what the
+// adapter or one of its libraries left open after onUnload, and the run fails on any of it (the after() at the end).
+const RESOURCE_PROBE = path.join(__dirname, "resource-probe.js");
+const RESOURCE_DIR = fs.mkdtempSync(path.join(require("node:os").tmpdir(), `${ADAPTER}-resources-`));
+// Round 62: the adapter's read-only states (`common.write: false`) — only the adapter writes them, so it compares them
+// in memory; a database read of one in the quiet window after the verdict is a finding.
+const READ_ONLY = new Set();
+
+/**
+ * The environment of every adapter start: the resource probe first, then the test hooks of this adapter.
+ *
+ * @param {...string} hooks absolute paths of `--require` hooks (fixture servers, DNS)
+ * @returns {Record<string, string>} the environment
+ */
+function adapterEnv(...hooks) {
+  return {
+    NODE_OPTIONS: [RESOURCE_PROBE, ...hooks].map(file => `--require ${file}`).join(" "),
+    RESOURCE_PROBE_DIR: RESOURCE_DIR,
+    RESOURCE_PROBE_NS: NS,
+  };
+}
 
 /**
  * Every object write of the adapter in this suite, and which of them changed nothing (round 61). An unchanged
@@ -71,8 +92,10 @@ const INSTANCE_OBJECTS = new Set(
  * @returns {Promise<{writes: Map<string, number>, unchanged: string[], deleted: string[], times: Array<[string, number]>}>} the watch
  */
 async function watchObjectWrites(harness) {
-  const watch = { writes: new Map(), unchanged: [], deleted: [], times: [] };
+  const watch = { writes: new Map(), unchanged: [], deleted: [], times: [], unchangedIndicators: [] };
   const known = new Map();
+  const roles = new Map();
+  const states = new Map();
   const content = obj => {
     const { ts, from, user, ...rest } = obj;
     return canonical(rest);
@@ -84,7 +107,14 @@ async function watchObjectWrites(harness) {
     if (!obj) {
       watch.deleted.push(id);
       known.delete(id);
+      roles.delete(id);
       return;
+    }
+    roles.set(id, obj.common?.role);
+    if (obj.type === "state" && obj.common?.write === false) {
+      READ_ONLY.add(id);
+    } else {
+      READ_ONLY.delete(id);
     }
     const now = content(obj);
     if (obj.from === `system.adapter.${ADAPTER}.0`) {
@@ -97,10 +127,28 @@ async function watchObjectWrites(harness) {
     }
     known.set(id, now);
   });
+  // Round 62: an indicator state (`indicator.*`) is written only on a change (read-only: compared in memory,
+  // writable: setStateChangedAsync) — a write that changes nothing is a finding. Compared is what js-controller
+  // 7.2.2 compares in setStateChangedAsync: val strictly, ack, q, c; an object value always counts as changed.
+  harness.on("stateChange", (id, state) => {
+    if (!id.startsWith(NS) || !state || state.from !== `system.adapter.${ADAPTER}.0`) {
+      return;
+    }
+    const now =
+      state.val !== null && typeof state.val === "object" ? null : canonical([state.val, state.ack, state.q, state.c]);
+    if (now !== null && states.get(id) === now && String(roles.get(id)).startsWith("indicator")) {
+      watch.unchangedIndicators.push(id);
+    }
+    states.set(id, now);
+  });
   const list = await harness.objects.getObjectListAsync({ startkey: NS, endkey: `${NS}香` });
   for (const row of list.rows) {
     if (row.value) {
       known.set(row.id, content(row.value));
+      roles.set(row.id, row.value.common?.role);
+      if (row.value.type === "state" && row.value.common?.write === false) {
+        READ_ONLY.add(row.id);
+      }
     }
   }
   return watch;
@@ -114,9 +162,6 @@ const FIXTURE_NATIVE = {
   clientID: "F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7F1C7",
   clientSecret: "fixture-client-secret",
 };
-
-/** The environment that puts the fixtures in front of the adapter's own fetch. */
-const FIXTURE_ENV = { NODE_OPTIONS: `--require ${HOOK}` };
 
 /**
  * Wait for a STATE of the adapter, never for "the tree stopped growing": the
@@ -259,7 +304,7 @@ tests.integration(ADAPTER_DIR, {
         watch = await watchObjectWrites(harness);
         await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
         await setSystemLanguage(harness, FIRST_LANGUAGE);
-        await harness.startAdapterAndWait(false, FIXTURE_ENV);
+        await harness.startAdapterAndWait(false, adapterEnv(HOOK));
         await feedFixtures(harness);
       });
 
@@ -287,6 +332,11 @@ tests.integration(ADAPTER_DIR, {
         assert.deepStrictEqual(idle, [], `objects written without a change:\n${idle.join("\n")}`);
       });
 
+      it("rewrites no indicator state unchanged", function () {
+        const idle = [...new Set(watch.unchangedIndicators)];
+        assert.deepStrictEqual(idle, [], `indicator states written without a change:\n${idle.join("\n")}`);
+      });
+
       it("covers every appliance type Home Connect knows", async function () {
         this.timeout(30000);
         const objects = await dumpObjects(harness);
@@ -308,7 +358,7 @@ tests.integration(ADAPTER_DIR, {
         harness = getHarness();
         await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
         await setSystemLanguage(harness, SECOND_LANGUAGE);
-        await harness.startAdapterAndWait(false, FIXTURE_ENV);
+        await harness.startAdapterAndWait(false, adapterEnv(HOOK));
         await feedFixtures(harness);
       });
 
@@ -340,10 +390,14 @@ tests.integration(ADAPTER_DIR, {
           // The inventory was written in FIRST_LANGUAGE: labels the adapter localises itself (`states`) only
           // compare in the same language.
           await setSystemLanguage(harness, FIRST_LANGUAGE);
-          await harness.startAdapterAndWait(false, FIXTURE_ENV);
+          await harness.startAdapterAndWait(false, adapterEnv(HOOK));
           await feedFixtures(harness);
           await waitForAdapterWork(harness);
           verdictAt = Date.now();
+          fs.writeFileSync(
+            path.join(RESOURCE_DIR, "window.json"),
+            JSON.stringify({ start: verdictAt, end: verdictAt + SETTLE_MS }),
+          );
         });
 
         it("every current object carries the current texts and roles", async function () {
@@ -388,6 +442,11 @@ tests.integration(ADAPTER_DIR, {
           assert.deepStrictEqual(idle, [], `objects written without a change:\n${idle.join("\n")}`);
         });
 
+        it("rewrites no indicator state unchanged", function () {
+          const idle = [...new Set(watch.unchangedIndicators)];
+          assert.deepStrictEqual(idle, [], `indicator states written without a change:\n${idle.join("\n")}`);
+        });
+
         // A kept object that is deleted and created anew makes the suite judge a fresh object, not the upgraded
         // one (hassemu v1.43.1: the stale cleanup removed 18 seeded clients before the dump).
         it("deletes no object the release keeps", function () {
@@ -406,4 +465,31 @@ tests.integration(ADAPTER_DIR, {
       });
     }
   },
+});
+
+// Round 62: after every suite, every adapter process of this run has exited — what it left open after onUnload fails
+// the run. Every start leaves a marker: no marker means a start without adapterEnv(), a marker without a report a
+// process that never reached its exit (killed after a hanging onUnload, or crashed).
+after(function () {
+  const files = fs.readdirSync(RESOURCE_DIR);
+  const starts = files.filter(f => f.endsWith(".start")).map(f => f.slice(0, -".start".length));
+  const silent = starts.filter(pid => !files.includes(`${pid}.json`));
+  const reports = starts
+    .filter(pid => !silent.includes(pid))
+    .map(pid => JSON.parse(fs.readFileSync(path.join(RESOURCE_DIR, `${pid}.json`), "utf8")));
+  const left = reports.flatMap(r => r.left);
+  const reread = reports.flatMap(r =>
+    Object.entries(r.quiet)
+      .filter(([id]) => READ_ONLY.has(id))
+      .map(([id, n]) => `${id} ×${n}`),
+  );
+  fs.rmSync(RESOURCE_DIR, { recursive: true, force: true });
+  assert.ok(starts.length > 0, "no adapter start loaded the resource probe — a start without adapterEnv()");
+  assert.deepStrictEqual(silent, [], "adapter processes that never reached their exit (killed or crashed)");
+  assert.deepStrictEqual(left, [], `left open after onUnload:\n${left.join("\n")}`);
+  assert.deepStrictEqual(
+    reread,
+    [],
+    `read-only states read back from the database while nothing changed:\n${reread.join("\n")}`,
+  );
 });

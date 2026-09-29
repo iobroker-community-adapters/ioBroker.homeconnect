@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ObjectMirror, coveredBy, mergedWith } from "./object-mirror";
+import { ObjectMirror, StateMirror, coveredBy, mergedWith } from "./object-mirror";
 
 const NS = "homeconnect.0";
 
@@ -114,5 +114,51 @@ describe("ObjectMirror", () => {
     ]);
     m.forgetTree("wm-1");
     expect(m.covers("wm-10", { common: { name: "B" } })).toBe(true);
+  });
+});
+
+describe("ObjectMirror.readOnly", () => {
+  it("is true only for a known state with write false", () => {
+    const m = new ObjectMirror(NS);
+    m.load([
+      { id: `${NS}.info.connection`, value: { type: "state", common: { write: false } } },
+      { id: `${NS}.wm-1.settings.power`, value: { type: "state", common: { write: true } } },
+      { id: `${NS}.info`, value: { type: "channel", common: { write: false } } },
+    ]);
+    expect(m.readOnly("info.connection")).toBe(true);
+    expect(m.readOnly("wm-1.settings.power")).toBe(false);
+    expect(m.readOnly("info")).toBe(false);
+    expect(m.readOnly("wm-1.unknown")).toBe(false);
+  });
+});
+
+describe("StateMirror", () => {
+  it("differs for an unknown state, and for another value, ack or quality", () => {
+    const m = new StateMirror();
+    m.load({ [`${NS}.a`]: { val: false, ack: true, q: 0 } as ioBroker.State, [`${NS}.b`]: null });
+    expect(m.differs(`${NS}.a`, { val: false, ack: true })).toBe(false);
+    expect(m.differs(`${NS}.a`, { val: 0, ack: true })).toBe(true);
+    expect(m.differs(`${NS}.a`, { val: false, ack: false })).toBe(true);
+    expect(m.differs(`${NS}.a`, { val: false, ack: true, q: 0x02 })).toBe(true);
+    expect(m.differs(`${NS}.b`, { val: null, ack: true })).toBe(true);
+  });
+
+  it("holds what was written", () => {
+    const m = new StateMirror();
+    m.remember(`${NS}.a`, { val: "x", ack: true });
+    expect(m.differs(`${NS}.a`, { val: "x", ack: true })).toBe(false);
+  });
+
+  it("forgets a deleted state, and with recursive everything below it but not a sibling", () => {
+    const m = new StateMirror();
+    for (const id of ["wm-1.a", "wm-1.b.c", "wm-10.a"]) {
+      m.remember(`${NS}.${id}`, { val: 1, ack: true });
+    }
+    m.forget(`${NS}.wm-1.a`, false);
+    expect(m.differs(`${NS}.wm-1.a`, { val: 1, ack: true })).toBe(true);
+    expect(m.differs(`${NS}.wm-1.b.c`, { val: 1, ack: true })).toBe(false);
+    m.forget(`${NS}.wm-1`, true);
+    expect(m.differs(`${NS}.wm-1.b.c`, { val: 1, ack: true })).toBe(true);
+    expect(m.differs(`${NS}.wm-10.a`, { val: 1, ack: true })).toBe(false);
   });
 });

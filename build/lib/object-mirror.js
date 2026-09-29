@@ -19,6 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var object_mirror_exports = {};
 __export(object_mirror_exports, {
   ObjectMirror: () => ObjectMirror,
+  StateMirror: () => StateMirror,
   coveredBy: () => coveredBy,
   mergedWith: () => mergedWith
 });
@@ -112,6 +113,18 @@ class ObjectMirror {
     this.objects.set(this.fullId(id), obj);
   }
   /**
+   * Whether an own state is read-only (`common.write === false`) — only the adapter writes it, so its value is
+   * compared in memory ({@link StateMirror}); a state the mirror does not know counts as writable.
+   *
+   * @param id a relative or full id
+   * @returns true for a known read-only state
+   */
+  readOnly(id) {
+    var _a;
+    const obj = this.objects.get(this.fullId(id));
+    return (obj == null ? void 0 : obj.type) === "state" && ((_a = obj.common) == null ? void 0 : _a.write) === false;
+  }
+  /**
    * Forget one object — after a non-recursive deletion; what lies below it stays.
    *
    * @param id a relative or full id
@@ -133,9 +146,61 @@ class ObjectMirror {
     }
   }
 }
+class StateMirror {
+  states = /* @__PURE__ */ new Map();
+  /**
+   * Take the start-up read of the own states.
+   *
+   * @param states full id → state, as `getStatesAsync` answers
+   */
+  load(states) {
+    this.states.clear();
+    for (const [id, state] of Object.entries(states)) {
+      if (state) {
+        this.remember(id, state);
+      }
+    }
+  }
+  /**
+   * Whether writing `state` to `id` would change what it holds.
+   *
+   * @param id the full id
+   * @param state what would be written
+   * @returns false only for a held state with the same value, ack and quality
+   */
+  differs(id, state) {
+    var _a;
+    const held = this.states.get(id);
+    return held === void 0 || held.val !== state.val || held.ack !== (state.ack === true) || held.q !== ((_a = state.q) != null ? _a : 0);
+  }
+  /**
+   * Hold what was written.
+   *
+   * @param id the full id
+   * @param state what was written
+   */
+  remember(id, state) {
+    var _a;
+    this.states.set(id, { val: state.val, ack: state.ack === true, q: (_a = state.q) != null ? _a : 0 });
+  }
+  /**
+   * Forget a state and, with `recursive`, every state below it — after a deletion, the next write goes out.
+   *
+   * @param id the full id
+   * @param recursive also the states below it
+   */
+  forget(id, recursive) {
+    for (const known of [...this.states.keys()]) {
+      if (known === id || recursive && known.startsWith(`${id}.`)) {
+        this.states.delete(known);
+      }
+    }
+  }
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   ObjectMirror,
+  StateMirror,
   coveredBy,
   mergedWith
 });

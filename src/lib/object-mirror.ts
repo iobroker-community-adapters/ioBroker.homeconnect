@@ -130,6 +130,18 @@ export class ObjectMirror {
   }
 
   /**
+   * Whether an own state is read-only (`common.write === false`) — only the adapter writes it, so its value is
+   * compared in memory ({@link StateMirror}); a state the mirror does not know counts as writable.
+   *
+   * @param id a relative or full id
+   * @returns true for a known read-only state
+   */
+  readOnly(id: string): boolean {
+    const obj = this.objects.get(this.fullId(id)) as { type?: unknown; common?: { write?: unknown } } | undefined;
+    return obj?.type === "state" && obj.common?.write === false;
+  }
+
+  /**
    * Forget one object — after a non-recursive deletion; what lies below it stays.
    *
    * @param id a relative or full id
@@ -148,6 +160,75 @@ export class ObjectMirror {
     for (const known of [...this.objects.keys()]) {
       if (known === full || known.startsWith(`${full}.`)) {
         this.objects.delete(known);
+      }
+    }
+  }
+}
+
+/** The fields js-controller compares in `setStateChangedAsync` (7.2.2): the value strictly, ack and quality. */
+interface HeldState {
+  val: unknown;
+  ack: boolean;
+  q: number;
+}
+
+/**
+ * The own states' last values, by full id — for the read-only ones the adapter alone writes (tooling round 62,
+ * Entwicklung/CLAUDE_PATTERNS.md § "Anzeigen nur bei Änderung schreiben"). `setStateChangedAsync` reads the state
+ * from the database on EVERY call; comparing here costs no database command. Filled once at start with one bulk
+ * read; a state it does not hold is always written.
+ */
+export class StateMirror {
+  private readonly states = new Map<string, HeldState>();
+
+  /**
+   * Take the start-up read of the own states.
+   *
+   * @param states full id → state, as `getStatesAsync` answers
+   */
+  load(states: Record<string, ioBroker.State | null | undefined>): void {
+    this.states.clear();
+    for (const [id, state] of Object.entries(states)) {
+      if (state) {
+        this.remember(id, state);
+      }
+    }
+  }
+
+  /**
+   * Whether writing `state` to `id` would change what it holds.
+   *
+   * @param id the full id
+   * @param state what would be written
+   * @returns false only for a held state with the same value, ack and quality
+   */
+  differs(id: string, state: ioBroker.SettableState): boolean {
+    const held = this.states.get(id);
+    return (
+      held === undefined || held.val !== state.val || held.ack !== (state.ack === true) || held.q !== (state.q ?? 0)
+    );
+  }
+
+  /**
+   * Hold what was written.
+   *
+   * @param id the full id
+   * @param state what was written
+   */
+  remember(id: string, state: ioBroker.SettableState): void {
+    this.states.set(id, { val: state.val, ack: state.ack === true, q: state.q ?? 0 });
+  }
+
+  /**
+   * Forget a state and, with `recursive`, every state below it — after a deletion, the next write goes out.
+   *
+   * @param id the full id
+   * @param recursive also the states below it
+   */
+  forget(id: string, recursive: boolean): void {
+    for (const known of [...this.states.keys()]) {
+      if (known === id || (recursive && known.startsWith(`${id}.`))) {
+        this.states.delete(known);
       }
     }
   }
