@@ -305,7 +305,7 @@
     {
       "key": "LaundryCare.Washer.Setting.IDos1BaseLevel",
       "value": 0,
-      "unit": "%",
+      "unit": "ml",
       "constraints": {
         "min": 0,
         "max": 100,
@@ -316,7 +316,7 @@
     {
       "key": "LaundryCare.Washer.Setting.IDos2BaseLevel",
       "value": 0,
-      "unit": "%",
+      "unit": "ml",
       "constraints": {
         "min": 0,
         "max": 100,
@@ -785,7 +785,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.Duration",
@@ -795,7 +796,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ElapsedProgramTime",
@@ -805,7 +807,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ElapsedProgramTime.AutoCounting",
@@ -822,7 +825,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "BSH.Common.Option.EstimatedTotalProgramTime",
@@ -832,7 +836,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.FinishInRelative",
@@ -842,7 +847,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ProgramName",
@@ -859,7 +865,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "BSH.Common.Option.RemainingProgramTime",
@@ -869,7 +876,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.RemainingProgramTime.AutoCounting",
@@ -908,7 +916,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.WaterForecast",
@@ -918,7 +927,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "LaundryCare.Common.Option.LoadRecommendation",
@@ -928,7 +938,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "gram"
     },
     {
       "key": "LaundryCare.Common.Option.LowTemperatureHygiene",
@@ -1019,7 +1030,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "LaundryCare.Dryer.Option.DryingTarget",

@@ -249,7 +249,7 @@
     {
       "key": "Cooking.Hood.Setting.ColorTemperaturePercent",
       "value": 0,
-      "unit": "°C",
+      "unit": "%",
       "constraints": {
         "min": 0,
         "max": 200,
@@ -608,7 +608,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.Duration",
@@ -618,7 +619,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ElapsedProgramTime",
@@ -628,7 +630,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ElapsedProgramTime.AutoCounting",
@@ -645,7 +648,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "BSH.Common.Option.EstimatedTotalProgramTime",
@@ -655,7 +659,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.FinishInRelative",
@@ -665,7 +670,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.ProgramName",
@@ -682,7 +688,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "BSH.Common.Option.RemainingProgramTime",
@@ -692,7 +699,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.RemainingProgramTime.AutoCounting",
@@ -731,7 +739,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "seconds"
     },
     {
       "key": "BSH.Common.Option.WaterForecast",
@@ -741,7 +750,8 @@
         "max": 200,
         "stepsize": 1,
         "access": "readWrite"
-      }
+      },
+      "unit": "%"
     },
     {
       "key": "Cooking.Common.Option.Hood.Boost",
