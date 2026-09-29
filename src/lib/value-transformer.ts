@@ -490,6 +490,9 @@ function isWritable(key: string): boolean {
   return channel === "settings" || (channel === "programs" && id === "selectedProgram");
 }
 
+/** The keys whose text is an RGB colour (`#rrggbb`). */
+const COLOR_KEYS = new Set(["BSH.Common.Setting.AmbientLightCustomColor"]);
+
 /**
  * The value + common part of the transform (id/channel handled by the caller).
  *
@@ -627,8 +630,10 @@ function transformValue(item: BshItem): {
   // Fallback: keep the raw value as a string, so nothing is lost. An absent value
   // stays absent — `JSON.stringify` turned a key-only item into `undefined` (which
   // then overwrote a good reading) and a real `null` into the TEXT "null".
+  // A colour the user picks ("#rrggbb") is a colour, not a text (Home Assistant: the ambient light's own colour).
+  const role = COLOR_KEYS.has(key) && writable ? "level.color.rgb" : "text";
   return {
-    common: { name, desc, type: "string", role: "text", read: true, write: writable },
+    common: { name, desc, type: "string", role, read: true, write: writable },
     nameSource,
     value:
       typeof value === "string" ? value : value === undefined || value === null ? undefined : JSON.stringify(value),

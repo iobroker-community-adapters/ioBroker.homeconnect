@@ -1074,3 +1074,19 @@ describe("on/off as a switch (README: on/off as booleans)", () => {
     expect(t.value).toBe("off");
   });
 });
+
+describe("a colour is a colour", () => {
+  it("gives the ambient light's own colour the RGB colour role", () => {
+    const t = transformItem({ key: "BSH.Common.Setting.AmbientLightCustomColor", value: "#1a2b3c" });
+    expect(t.common).toMatchObject({ type: "string", role: "level.color.rgb", write: true });
+    expect(t.value).toBe("#1a2b3c");
+    // Where the appliance only shows it, it stays a text — ioBroker has no read-only colour role.
+    const shown = transformItem({
+      key: "BSH.Common.Setting.AmbientLightCustomColor",
+      value: "#1a2b3c",
+      constraints: { access: "read" },
+    });
+    expect(shown.common.role).toBe("text");
+    expect(transformItem({ key: "BSH.Common.Setting.SomeName", value: "x" }).common.role).toBe("text");
+  });
+});

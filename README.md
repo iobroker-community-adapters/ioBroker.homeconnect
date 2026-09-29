@@ -123,6 +123,9 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 
 ### **WORK IN PROGRESS**
 
+- Changed: on/off datapoints are switches — the power state, the dishwasher's time light and the oven's steam assist; switching off sends Off, or Standby where the appliance has no Off.
+- Changed: numbers show in a readable unit — durations in minutes, lifetime runtime in hours, energy in kWh, water, detergent and softener in litres, the load recommendation in kg.
+- Fixed: units read the ioBroker way (s, g) instead of the cloud's words, and the ambient light's own colour is a colour datapoint instead of a text.
 - Fixed: after an update, value lists of options the appliance was not offering kept English labels or had no list at all; they now show the installation's language from the start.
 - Fixed: the stain option for butter and oil stains was labelled "clarified butter" in every language; it now reads "butter/oil", as the manufacturer names it.
 
