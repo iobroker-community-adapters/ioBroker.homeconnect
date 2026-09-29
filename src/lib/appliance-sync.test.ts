@@ -6616,6 +6616,8 @@ describe("decoded program records (decision 40)", () => {
     const trigger = port.objects.get("wt-1.lastRun.endTrigger")?.common as ioBroker.StateCommon;
     expect(trigger.states).toMatchObject({ programfinished: "Programm beendet" });
     expect(port.states.get("wt-1.status.errorCodes")).toBe("");
+    // The adapter's own name in every language, never an English label derived from the id.
+    expect(port.objects.get("wt-1.status.errorCodes")?.common?.name).toEqual(tName("stErrorCodes"));
     expect(port.states.get("wt-1.status.faultActive")).toBe(false);
     for (const raw of [
       "programHistoryUid",
