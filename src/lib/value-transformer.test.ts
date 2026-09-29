@@ -391,6 +391,18 @@ describe("transformOptionDefinition", () => {
     expect(t.common.states).toEqual({ low: "Niedrig" });
   });
 
+  it("takes the cloud's label for an option value the adapter's table lacks", () => {
+    const t = transformOptionDefinition({
+      key: "Cooking.Oven.Option.Something",
+      type: "Cooking.Oven.EnumType.Something",
+      constraints: {
+        allowedvalues: ["Cooking.Oven.EnumType.Something.VeryNewValue"],
+        displayvalues: ["Brand-new mode"],
+      },
+    });
+    expect(t.common.states).toEqual({ verynewvalue: "Brand-new mode" });
+  });
+
   it("never labels a value with its bare short value — a value the table lacks reads as words", () => {
     const t = transformOptionDefinition({
       key: "Cooking.Oven.Option.Something",

@@ -80,19 +80,6 @@
         "pl": "Piktogramy urządzeń z wersji 1.19.0 były niewidoczne w ciemnych motywach Admina. Teraz podążają za motywem i są czytelne wszędzie; istniejące urządzenia aktualizują się przy pierwszej synchronizacji.",
         "uk": "Піктограми приладів із 1.19.0 були невидимі в темних темах адмінки. Тепер вони наслідують тему й читаються всюди; наявні прилади оновлюються під час першої синхронізації.",
         "zh-cn": "1.19.0 中的设备图标在管理界面的深色主题下不可见。现在它们跟随主题，在所有主题下都清晰可读；现有设备会在首次同步时更新。"
-      },
-      "1.19.0": {
-        "en": "Every appliance now shows a small pictogram of its type in the object tree - dishwasher, oven, washing machine and fourteen more, for the light and the dark theme.",
-        "de": "Jedes Gerät zeigt im Objektbaum jetzt ein kleines Symbol seines Typs - Geschirrspüler, Backofen, Waschmaschine und vierzehn weitere, für helles und dunkles Design.",
-        "ru": "Каждый прибор теперь показывает в дереве объектов небольшой значок своего типа: посудомоечная машина, духовка, стиральная машина и ещё четырнадцать, для светлой и тёмной темы.",
-        "pt": "Cada aparelho mostra agora um pequeno pictograma do seu tipo na árvore de objetos - máquina de lavar louça, forno, máquina de lavar roupa e mais catorze, para tema claro e escuro.",
-        "nl": "Elk apparaat toont nu een klein pictogram van zijn type in de objectboom - vaatwasser, oven, wasmachine en veertien andere, voor het lichte en het donkere thema.",
-        "fr": "Chaque appareil affiche maintenant un petit pictogramme de son type dans l'arbre des objets - lave-vaisselle, four, lave-linge et quatorze autres, pour le thème clair et sombre.",
-        "it": "Ogni apparecchio mostra ora un piccolo pittogramma del suo tipo nell'albero degli oggetti - lavastoviglie, forno, lavatrice e altri quattordici, per il tema chiaro e scuro.",
-        "es": "Cada aparato muestra ahora un pequeño pictograma de su tipo en el árbol de objetos: lavavajillas, horno, lavadora y catorce más, para el tema claro y el oscuro.",
-        "pl": "Każde urządzenie pokazuje teraz w drzewie obiektów mały piktogram swojego typu - zmywarka, piekarnik, pralka i czternaście innych, dla motywu jasnego i ciemnego.",
-        "uk": "Кожен прилад тепер показує в дереві об'єктів невелику піктограму свого типу: посудомийна машина, духовка, пральна машина та ще чотирнадцять, для світлої та темної теми.",
-        "zh-cn": "每台设备现在都会在对象树中显示一个表示其类型的小图标 — 洗碗机、烤箱、洗衣机以及另外十四种，适用于浅色和深色主题。"
       }
     },
     "titleLang": {

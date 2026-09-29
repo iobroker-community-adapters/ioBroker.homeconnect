@@ -6488,6 +6488,31 @@ describe("readable values (2026-09-28)", () => {
       ]);
     });
 
+    it("takes the fresh bounds of a numeric option, not the widened ones an older generation kept", async () => {
+      const port = oven([programA]);
+      const tempId = "ov-1.options.setpointTemperature";
+      const tempKey = "Cooking.Oven.Option.SetpointTemperature";
+      const stored = {
+        _id: `${NS}.${tempId}`,
+        type: "state",
+        common: { name: "Temperature", type: "number", role: "level", read: true, write: true, min: 0, max: 500 },
+        native: { bshKey: tempKey },
+      } as unknown as ioBroker.Object;
+      port.primeStates = { ...port.primeStates, [`${NS}.${tempId}`]: stored };
+      port.objects.set(tempId, structuredClone(stored));
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programA}`, {
+        key: programA,
+        options: [
+          ...(levelDef(programA, ["Level01"]).options as unknown[]),
+          { key: tempKey, type: "Double", unit: "°C", constraints: { min: 30, max: 250 } },
+        ],
+      });
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      expect(port.objects.get(tempId)?.common).toMatchObject({ min: 30, max: 250 });
+    });
+
     it("keeps what an earlier pass rebuilt when a later pass loads the next program", async () => {
       const port = oven([programA, programB]);
       const pathA = `/api/homeappliances/HA-O/programs/available/${programA}`;
@@ -6635,6 +6660,38 @@ describe("decoded program records (decision 40)", () => {
     port.extendCalls.length = 0;
     await sync.syncAppliances();
     expect(port.extendCalls.filter(id => /\.(history|statistics|lastRun)\b|errorCodes/.test(id))).toEqual([]);
+  });
+
+  it("keeps a learned program number over a restart", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: `${NS}.wt-1`,
+        type: "device",
+        common: { name: "Wt" },
+        native: {
+          haId: "HA-1",
+          type: "WasherDryer",
+          enumber: "Wt",
+          idScheme: 3,
+          programUids: { 31673: wd("SportShoes.SportShoes.SportShoes") },
+        },
+      } as unknown as ioBroker.Object,
+    };
+    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.syncAppliances();
+    sync.handleStreamEvent({
+      event: "STATUS",
+      id: "HA-1",
+      data: JSON.stringify({
+        items: [{ key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3u5AAEAAQAAFGQ" }],
+      }),
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(port.objects.has("wt-1.statistics.sportshoes.completed")).toBe(true);
+    expect(port.objects.has("wt-1.statistics.program31673.completed")).toBe(false);
   });
 
   it("learns a program number from the run it saw, and moves its statistics with the recording", async () => {
