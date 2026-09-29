@@ -6453,10 +6453,14 @@ describe("readable values (2026-09-28)", () => {
         native: { nameSource: "api", ...native },
       }) as unknown as ioBroker.Object;
     const objects: Record<string, ioBroker.Object> = {
-      // The catalogue knows the key; a value of the other family with the same tail stays one entry.
+      // The catalogue knows the key; a value of the other family with the same tail stays one entry,
+      // and a value the catalogue lacks joins the list.
       "wd-1.options.dryingTarget": text("wd-1.options.dryingTarget", {
         bshKey: "LaundryCare.WasherDryer.Option.DryingTarget",
-        seenValues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDry"],
+        seenValues: [
+          "LaundryCare.Dryer.EnumType.DryingTarget.CupboardDry",
+          "LaundryCare.WasherDryer.EnumType.DryingTargetWD.SuperDry",
+        ],
       }),
       // Known only from the appliance descriptions: the stored value lends the prefix.
       "wd-1.settings.timeLight": text("wd-1.settings.timeLight", {
@@ -6485,6 +6489,7 @@ describe("readable values (2026-09-28)", () => {
       cupboarddry: "Schranktrocken",
       cupboarddryplus: "Schranktrocken plus",
       extradry: "Extra trocken",
+      superdry: "Super dry",
     });
     expect(states("wd-1.settings.timeLight")).toEqual({ off: "Aus", on: "Ein" });
     expect(states("wd-1.status.programPhase")).toBeUndefined();
