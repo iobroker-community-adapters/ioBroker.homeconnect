@@ -77,9 +77,9 @@ const FIXTURE_ENV = { NODE_OPTIONS: `--require ${HOOK}` };
 async function waitForEveryAppliance(harness) {
   // Since 1.20.0 the adapter spaces its REST requests 100 ms apart (the API's
   // 10/s limit). Against the instant fixture server that spacing IS the pass:
-  // ~40 requests per appliance × 17 appliances ≈ 70 s before devicesTotal is
-  // written. Real clouds answer slower than the spacing, so users never wait
-  // for it — the fixture does.
+  // ~40 requests per appliance × 17 appliances ≈ 70 s before the last
+  // appliance is online. Real clouds answer slower than the spacing, so users
+  // never wait for it — the fixture does.
   //
   // The criterion is devicesOnline, not devicesTotal: a start stamps every known
   // appliance offline, and only THIS run's sync brings them online. devicesTotal
