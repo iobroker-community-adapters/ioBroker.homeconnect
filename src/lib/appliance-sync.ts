@@ -33,7 +33,14 @@ import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
 import { PROGRAM_UIDS } from "./program-uids";
-import { DEFAULT_LABEL_LANGUAGE, ownValueLabel, programLabels, unknownProgramLabel, valueLabel } from "./value-labels";
+import {
+  catalogValues,
+  DEFAULT_LABEL_LANGUAGE,
+  ownValueLabel,
+  programLabels,
+  unknownProgramLabel,
+  valueLabel,
+} from "./value-labels";
 import {
   decodeErrorCodes,
   decodeHistoryMinutes,
@@ -872,7 +879,7 @@ export class ApplianceSync {
     } catch (e) {
       this.port.log.debug(`priming devices from objects failed: ${errMessage(e)}`);
     }
-    /** Every datapoint with a value list: its stored `common` and what is known about it, for the label repair. */
+    /** Every text datapoint of a BSH key: its stored `common` and what is known about it, for the list repair. */
     const storedLists = new Map<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>();
     try {
       const objects = await this.port.getForeignObjects(`${this.port.namespace}.*`, "state");
@@ -908,7 +915,7 @@ export class ApplianceSync {
           nameSource: storedNameSource(native),
         };
         this.knownStates.set(rel, known);
-        if (isRecord(common.states)) {
+        if (isRecord(common.states) || (common.type === "string" && bshKey !== undefined)) {
           storedLists.set(rel, { common, known });
         }
         const parts = rel.split(".");
@@ -930,22 +937,27 @@ export class ApplianceSync {
   }
 
   /**
-   * Give every stored value list the adapter's own labels in the system language, without a single cloud
-   * request (decision 41). A list is otherwise relabelled only when a definition or an answer carries its
-   * datapoint again — and Home Connect sends an option only in the state and program it belongs to
-   * (measured 2026-09-29: the washer-dryer's definitions carried no temperature at all while it was idle), so
-   * an update left such a datapoint with the labels an older version stored ("400 rpm" on a German
-   * installation) for good. A value the table does not know keeps the label it has; the set of values is
-   * not touched — which values a list holds stays the definitions' business.
+   * Give every stored value list the adapter's own labels in the system language, and an enum an older
+   * version stored without a list the catalogue's list — without a single cloud request (decisions 41, 42).
+   * A list is otherwise rebuilt only when a definition or an answer carries its datapoint again, and Home
+   * Connect sends an option only in the state and program it belongs to (measured 2026-09-29: the
+   * washer-dryer's definitions carried no temperature at all while it was idle), so an update left such a
+   * datapoint with the labels an older version stored ("Cold" on a German installation), or with no list,
+   * for good. A value the table does not know keeps the label it has; an existing list keeps its set of
+   * values — which values a list holds stays the definitions' business.
    *
-   * @param storedLists relative id → stored `common` and known state of every datapoint with a value list
+   * @param storedLists relative id → stored `common` and known state of every text datapoint of a BSH key
    */
   private async refreshValueLabels(
     storedLists: ReadonlyMap<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>,
   ): Promise<void> {
     const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
     for (const [rel, { common, known }] of storedLists) {
-      const stored = (common.states ?? {}) as Record<string, string>;
+      if (!isRecord(common.states)) {
+        await this.fillCatalogList(rel, common, known, lang);
+        continue;
+      }
+      const stored = common.states;
       const states: Record<string, string> = { ...stored };
       let changed = false;
       const relabel = (short: string, wanted: string | undefined): void => {
@@ -980,6 +992,42 @@ export class ApplianceSync {
       } catch (e) {
         this.port.log.debug(`relabelling the values of ${rel} failed: ${errMessage(e)}`);
       }
+    }
+  }
+
+  /**
+   * The catalogue's list for an enum an older version stored without one, built the way the transformer
+   * builds it for a value without a cloud list (catalogue, then every value the datapoint carried). A key
+   * the catalogue names only in the local appliance descriptions needs the prefix of a real value; the
+   * stored full values lend it, and without one the datapoint waits for its next value.
+   *
+   * @param rel the namespace-relative state id
+   * @param common the stored `common`
+   * @param known its in-memory record
+   * @param lang the system language
+   */
+  private async fillCatalogList(
+    rel: string,
+    common: Partial<ioBroker.StateCommon>,
+    known: KnownState,
+    lang: string,
+  ): Promise<void> {
+    const key = known.bshKey ?? "";
+    const carried = [...(known.bshValues ?? []), ...(known.seenValues ?? [])];
+    const catalogue = catalogValues(key, carried[0]);
+    if (catalogue === undefined) {
+      return;
+    }
+    const full = [...catalogue, ...carried.filter(v => !catalogue.includes(v))];
+    // Options stay on the plain tail, every other list is list-unique (as in the transformer).
+    const shortOf = (v: string): string => (rel.split(".")[1] === "options" ? shortEnum(v) : shortEnumIn(v, full));
+    const states = Object.fromEntries(full.map(v => [shortOf(v), valueLabel(v, lang, undefined, key)]));
+    try {
+      await this.port.extendObject(rel, { common: { states } });
+      known.hasStates = true;
+      known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
+    } catch (e) {
+      this.port.log.debug(`giving ${rel} its list of values failed: ${errMessage(e)}`);
     }
   }
 

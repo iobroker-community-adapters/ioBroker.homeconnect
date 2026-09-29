@@ -3762,7 +3762,11 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     // own text replaces it ONCE — every key we have a name for reaches all eleven
     // languages, and the cloud answers the same key differently per appliance.
     expect(port.objects.get("washer.status.operationState")?.common?.name).toEqual(tName("stOperationState"));
-    expect(port.extendCalls).toEqual(["washer.status.operationState"]);
+    // The second write is its list: the old tree stored the enum without one, and the catalogue knows it.
+    expect(port.extendCalls).toEqual(["washer.status.operationState", "washer.status.operationState"]);
+    expect((port.objects.get("washer.status.operationState")?.common as ioBroker.StateCommon).states).toMatchObject({
+      run: "Running",
+    });
 
     // And it really is once. A RESTART primes from the repaired objects, so there
     // must be nothing left to write — otherwise every start would rewrite every
@@ -6373,6 +6377,133 @@ describe("readable values (2026-09-28)", () => {
     const before = port.extendCalls.length;
     await new ApplianceSync(port).primeFromObjects();
     expect(port.extendCalls.slice(before)).not.toContain(id);
+  });
+
+  it("the label repair at start never adds a value and leaves a label the table lacks", async () => {
+    // Which values a list holds is the definitions' business: a value only the stored full values
+    // name gets no label here, and a read-only list keeps what the table cannot improve.
+    const port = new FakePort();
+    port.language = "de";
+    const t = "LaundryCare.Washer.EnumType.Temperature";
+    port.primeDevices = {
+      [`${NS}.wm-1`]: {
+        _id: `${NS}.wm-1`,
+        type: "device",
+        common: { name: "Wm" },
+        native: { haId: "HA-1", type: "Washer", enumber: "Wm", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const option = {
+      _id: `${NS}.wm-1.options.temperature`,
+      type: "state",
+      common: { name: "T", type: "string", role: "text", read: true, write: true, states: { cold: "Kalt" } },
+      native: {
+        bshKey: "LaundryCare.Washer.Option.Temperature",
+        bshValues: [`${t}.Cold`, `${t}.GC40`],
+        nameSource: "api",
+        defGeneration: 4,
+      },
+    } as unknown as ioBroker.Object;
+    const status = {
+      _id: `${NS}.wm-1.status.somePhase`,
+      type: "state",
+      common: {
+        name: "P",
+        type: "string",
+        role: "text",
+        read: true,
+        write: false,
+        states: { ready: "Bereit", weirdphase: "Seltsam" },
+      },
+      native: { bshKey: "LaundryCare.Washer.Status.SomePhase", nameSource: "api" },
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [option._id]: option, [status._id]: status };
+    port.objects.set("wm-1.options.temperature", structuredClone(option));
+    port.objects.set("wm-1.status.somePhase", structuredClone(status));
+    await new ApplianceSync(port).primeFromObjects();
+    // The option's name is repaired at start as well, so only its list is looked at here.
+    expect(port.extendCalls).not.toContain("wm-1.status.somePhase");
+    expect((port.objects.get("wm-1.options.temperature")?.common as ioBroker.StateCommon).states).toEqual({
+      cold: "Kalt",
+    });
+    expect((port.objects.get("wm-1.status.somePhase")?.common as ioBroker.StateCommon).states).toEqual({
+      ready: "Bereit",
+      weirdphase: "Seltsam",
+    });
+  });
+
+  it("gives an enum an older version stored without a list the catalogue's list at start", async () => {
+    // Measured 2026-09-29: eight enums of krobi's appliances carried no list after the update to
+    // 1.25.0 — the definitions that would rebuild them did not name them while the appliances idled.
+    const port = new FakePort();
+    port.language = "de";
+    port.primeDevices = {
+      [`${NS}.wd-1`]: {
+        _id: `${NS}.wd-1`,
+        type: "device",
+        common: { name: "Wd" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wd", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const text = (id: string, native: Record<string, unknown>, write = true): ioBroker.Object =>
+      ({
+        _id: `${NS}.${id}`,
+        type: "state",
+        common: { name: "X", type: "string", role: "text", read: true, write },
+        native: { nameSource: "api", ...native },
+      }) as unknown as ioBroker.Object;
+    const objects: Record<string, ioBroker.Object> = {
+      // The catalogue knows the key; a value of the other family with the same tail stays one entry.
+      "wd-1.options.dryingTarget": text("wd-1.options.dryingTarget", {
+        bshKey: "LaundryCare.WasherDryer.Option.DryingTarget",
+        seenValues: ["LaundryCare.Dryer.EnumType.DryingTarget.CupboardDry"],
+      }),
+      // Known only from the appliance descriptions: the stored value lends the prefix.
+      "wd-1.settings.timeLight": text("wd-1.settings.timeLight", {
+        bshKey: "Dishcare.Dishwasher.Setting.TimeLight",
+        bshValues: ["Dishcare.Dishwasher.EnumType.TimeLight.Off"],
+      }),
+      // No value to lend a prefix: waits for its next value.
+      "wd-1.status.programPhase": text(
+        "wd-1.status.programPhase",
+        { bshKey: "Dishcare.Dishwasher.Status.ProgramPhase" },
+        false,
+      ),
+      // A plain text of a BSH key the catalogue does not know stays a plain text.
+      "wd-1.status.someText": text("wd-1.status.someText", { bshKey: "LaundryCare.Washer.Status.SomeText" }, false),
+    };
+    port.primeStates = Object.fromEntries(Object.values(objects).map(o => [o._id, o]));
+    for (const [id, o] of Object.entries(objects)) {
+      port.objects.set(id, structuredClone(o));
+    }
+    await new ApplianceSync(port).primeFromObjects();
+    expect(port.getCalls).toEqual([]);
+    const states = (id: string): unknown => (port.objects.get(id)?.common as ioBroker.StateCommon).states;
+    expect(states("wd-1.options.dryingTarget")).toEqual({
+      irondry: "Bügeltrocken",
+      gentledry: "Schonend trocken",
+      cupboarddry: "Schranktrocken",
+      cupboarddryplus: "Schranktrocken plus",
+      extradry: "Extra trocken",
+    });
+    expect(states("wd-1.settings.timeLight")).toEqual({ off: "Aus", on: "Ein" });
+    expect(states("wd-1.status.programPhase")).toBeUndefined();
+    expect(states("wd-1.status.someText")).toBeUndefined();
+    // The next start finds the lists in place.
+    const again = new FakePort();
+    again.language = "de";
+    again.primeDevices = port.primeDevices;
+    again.primeStates = Object.fromEntries(
+      Object.keys(objects).map(id => [
+        `${NS}.${id}`,
+        { ...port.objects.get(id)!, _id: `${NS}.${id}` } as ioBroker.Object,
+      ]),
+    );
+    for (const id of Object.keys(objects)) {
+      again.objects.set(id, structuredClone(port.objects.get(id)!));
+    }
+    await new ApplianceSync(again).primeFromObjects();
+    expect(again.extendCalls).toEqual([]);
   });
 
   it("a relabelled value list is no change for the next sync", async () => {
