@@ -6709,7 +6709,7 @@ describe("readable values (2026-09-28)", () => {
     expect(port.getCalls).toEqual([]);
     const power = port.objects.get("wd-1.settings.powerState")?.common as ioBroker.StateCommon;
     expect(power).toMatchObject({ type: "boolean", role: "switch.power", def: false });
-    expect(power.states).toBeFalsy();
+    expect("states" in power).toBe(false);
     // What hangs on the datapoint is the user's — it stays with it.
     expect(power.custom).toEqual({ "influxdb.0": { enabled: true } });
     expect(port.states.get("wd-1.settings.powerState")).toBe(true);
@@ -6782,25 +6782,26 @@ describe("readable values (2026-09-28)", () => {
         },
       ],
     });
-    const real = port.extendObject.bind(port);
     let failed = false;
-    port.extendObject = (id: string, obj: ioBroker.PartialObject): Promise<unknown> => {
-      // Only the change of form at start fails — the patch that makes the text a switch.
-      if (id === "wm-1.settings.powerState" && (obj.common as { states?: unknown } | undefined)?.states === null) {
+    const realSet = port.setForeignObject.bind(port);
+    port.setForeignObject = (id: string, obj: ioBroker.SettableObject): Promise<unknown> => {
+      // Only the change of form at start fails — the write that makes the text a switch.
+      if (id === `${NS}.wm-1.settings.powerState`) {
         failed = true;
         return Promise.reject(new Error("objects db down"));
       }
-      return real(id, obj);
+      return realSet(id, obj);
     };
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
     expect(failed).toBe(true);
     expect((port.objects.get("wm-1.settings.powerState")?.common as ioBroker.StateCommon).type).toBe("string");
-    port.extendObject = real;
+    port.setForeignObject = realSet;
     await sync.syncAppliances();
     const common = port.objects.get("wm-1.settings.powerState")?.common as ioBroker.StateCommon;
     expect(common).toMatchObject({ type: "boolean", role: "switch.power" });
-    expect(common.states).toBeFalsy();
+    // Gone, not a stored null — the object equals the one a fresh installation creates.
+    expect("states" in common).toBe(false);
   });
 
   it("a relabelled value list is no change for the next sync", async () => {

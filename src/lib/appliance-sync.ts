@@ -1004,14 +1004,13 @@ export class ApplianceSync {
       try {
         const patch: Partial<ioBroker.StateCommon> =
           form.kind === "switch"
-            ? {
-                type: "boolean",
-                role: switchRole(known.bshKey ?? "", common.write === true),
-                states: null as unknown as undefined,
-                def: false,
-              }
+            ? { type: "boolean", role: switchRole(known.bshKey ?? "", common.write === true), def: false }
             : shownBounds(common, form.p);
-        await this.port.extendObject(rel, { common: patch });
+        if (form.kind === "switch") {
+          await this.replaceWithoutList(rel, patch);
+        } else {
+          await this.port.extendObject(rel, { common: patch });
+        }
         const val = (await this.port.getState(rel))?.val;
         const shown =
           form.kind === "switch"
@@ -1035,6 +1034,28 @@ export class ApplianceSync {
         this.port.log.debug(`bringing ${rel} to its current form failed: ${errMessage(e)}`);
       }
     }
+  }
+
+  /**
+   * Write an object once more, whole, with the given `common` fields and without a value list. A merge can only null
+   * `common.states`, and js-controller 7.2.2 keeps the `null` — an updated switch would then differ from the one a fresh
+   * installation creates (the upgrade suite of the inventory run compares every field). Everything else on the object
+   * stays, what hangs on it (`custom`) included.
+   *
+   * @param rel the namespace-relative state id
+   * @param patch the `common` fields to set
+   */
+  private async replaceWithoutList(rel: string, patch: Partial<ioBroker.StateCommon>): Promise<void> {
+    const obj = await this.port.getObject(rel);
+    if (!obj) {
+      return;
+    }
+    const common: Partial<ioBroker.StateCommon> = { ...(obj.common as Partial<ioBroker.StateCommon>), ...patch };
+    delete common.states;
+    await this.port.setForeignObject(`${this.port.namespace}.${rel}`, {
+      ...obj,
+      common,
+    } as unknown as ioBroker.SettableObject);
   }
 
   /**
@@ -3568,10 +3589,18 @@ export class ApplianceSync {
       // Clear the two merge-proof fields first, so no stale entry survives.
       // A list goes when a new one comes, and when the value type changes — an on/off text that became a switch
       // (decision 47) keeps no list of "on"/"off" a merge would leave standing.
-      const clearCommon =
-        known.hasStates === true &&
-        (fresh.states !== undefined || (known.type !== undefined && fresh.type !== known.type));
+      const clearCommon = known.hasStates === true && fresh.states !== undefined;
       const clearNative = known.hasValues === true && native.bshValues !== undefined;
+      if (
+        known.hasStates === true &&
+        known.type !== undefined &&
+        fresh.type !== known.type &&
+        fresh.states === undefined
+      ) {
+        // An on/off text that became a switch (decision 47): its list goes with the key, not as a stored null.
+        await this.replaceWithoutList(fullId, {});
+        clearedStates = true;
+      }
       if (clearCommon || clearNative) {
         // A failure here must NOT be swallowed. Swallowing it let the second pass
         // merge the fresh values OVER the stale ones — a removed program stayed
