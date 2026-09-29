@@ -46,6 +46,7 @@ var import_sign_in_help = require("./lib/sign-in-help");
 var import_native_key_migration = require("./lib/native-key-migration");
 var import_settings_migrations = require("./lib/settings-migrations");
 var import_log_dedup = require("./lib/log-dedup");
+var import_object_mirror = require("./lib/object-mirror");
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
 const RATE_PAUSE_FALLBACK_MS = 6e4;
 const MIN_REQUEST_GAP_MS = 100;
@@ -90,6 +91,12 @@ class Homeconnect extends utils.Adapter {
    * English and never sent an Accept-Language to the cloud.
    */
   systemLanguage;
+  /**
+   * The own objects as the database holds them, read once in onReady: a write that
+   * would change nothing is left out (tooling round 61 — `extendObject` always
+   * writes and notifies every subscriber).
+   */
+  objectMirror = new import_object_mirror.ObjectMirror("");
   /** Epoch-ms of the next REST request slot (see {@link MIN_REQUEST_GAP_MS}). */
   nextRequestAt = 0;
   /**
@@ -140,6 +147,7 @@ class Homeconnect extends utils.Adapter {
       await this.setStateChangedAsync("auth.signedIn", { val: false, ack: true });
       await this.setStateChangedAsync("auth.lastError", { val: "Unknown", ack: true });
       await import_adapter_core.I18n.init((0, import_node_path.join)(this.adapterDir, "admin"), this);
+      await this.readOwnObjects();
       await this.refreshManifestObjects();
       this.systemLanguage = await this.readSystemLanguage();
       const sync = this.makeSync(this.makePort());
@@ -212,28 +220,95 @@ class Homeconnect extends utils.Adapter {
    */
   async refreshManifestObjects() {
     const t = (key) => import_adapter_core.I18n.getTranslatedObject(key);
+    const text = (name, desc) => ({
+      common: desc === void 0 ? { name: t(name) } : { name: t(name), desc: t(desc) }
+    });
+    const own = this.objectMirror;
     try {
-      await this.extendObject("auth", { common: { name: t("authChannel") } });
-      await this.extendObject("auth.session", { common: { name: t("session"), desc: t("sessionDesc") } });
-      await this.extendObject("auth.verificationUrl", {
-        common: { name: t("verificationUrl"), desc: t("verificationUrlDesc") }
-      });
-      await this.extendObject("auth.signedIn", { common: { name: t("signedIn"), desc: t("signedInDesc") } });
-      await this.extendObject("auth.lastError", { common: { name: t("lastError"), desc: t("lastErrorDesc") } });
-      await this.extendObject("info", { common: { name: t("channelInfo") } });
-      await this.extendObject("info.connection", { common: { name: t("connection"), desc: t("connectionDesc") } });
-      await this.extendObject("info.devicesTotal", {
-        common: { name: t("devicesTotal"), desc: t("devicesTotalDesc") }
-      });
-      await this.extendObject("info.devicesOnline", {
-        common: { name: t("devicesOnline"), desc: t("devicesOnlineDesc") }
-      });
-      await this.extendObject("info.devicesAllOnline", {
-        common: { name: t("devicesAllOnline"), desc: t("devicesAllOnlineDesc") }
-      });
+      let patch = text("authChannel");
+      if (!own.covers("auth", patch)) {
+        await this.extendObject("auth", patch);
+        own.wrote("auth", patch);
+      }
+      patch = text("session", "sessionDesc");
+      if (!own.covers("auth.session", patch)) {
+        await this.extendObject("auth.session", patch);
+        own.wrote("auth.session", patch);
+      }
+      patch = text("verificationUrl", "verificationUrlDesc");
+      if (!own.covers("auth.verificationUrl", patch)) {
+        await this.extendObject("auth.verificationUrl", patch);
+        own.wrote("auth.verificationUrl", patch);
+      }
+      patch = text("signedIn", "signedInDesc");
+      if (!own.covers("auth.signedIn", patch)) {
+        await this.extendObject("auth.signedIn", patch);
+        own.wrote("auth.signedIn", patch);
+      }
+      patch = text("lastError", "lastErrorDesc");
+      if (!own.covers("auth.lastError", patch)) {
+        await this.extendObject("auth.lastError", patch);
+        own.wrote("auth.lastError", patch);
+      }
+      patch = text("channelInfo");
+      if (!own.covers("info", patch)) {
+        await this.extendObject("info", patch);
+        own.wrote("info", patch);
+      }
+      patch = text("connection", "connectionDesc");
+      if (!own.covers("info.connection", patch)) {
+        await this.extendObject("info.connection", patch);
+        own.wrote("info.connection", patch);
+      }
+      patch = text("devicesTotal", "devicesTotalDesc");
+      if (!own.covers("info.devicesTotal", patch)) {
+        await this.extendObject("info.devicesTotal", patch);
+        own.wrote("info.devicesTotal", patch);
+      }
+      patch = text("devicesOnline", "devicesOnlineDesc");
+      if (!own.covers("info.devicesOnline", patch)) {
+        await this.extendObject("info.devicesOnline", patch);
+        own.wrote("info.devicesOnline", patch);
+      }
+      patch = text("devicesAllOnline", "devicesAllOnlineDesc");
+      if (!own.covers("info.devicesAllOnline", patch)) {
+        await this.extendObject("info.devicesAllOnline", patch);
+        own.wrote("info.devicesAllOnline", patch);
+      }
     } catch (e) {
       this.log.debug(`Could not refresh the manifest object names: ${(0, import_pure_helpers.errMessage)(e)}`);
     }
+  }
+  /**
+   * Read the own tree once — one list call, not a read per object — so every later
+   * write can be compared first. Unread (an error), every write goes out as before.
+   */
+  async readOwnObjects() {
+    this.objectMirror = new import_object_mirror.ObjectMirror(this.namespace);
+    try {
+      const list = await this.getObjectListAsync({
+        startkey: `${this.namespace}.`,
+        endkey: `${this.namespace}.\u9999`
+      });
+      this.objectMirror.load(list.rows);
+    } catch (e) {
+      this.log.debug(`Could not read the own objects \u2014 every object write goes out: ${(0, import_pure_helpers.errMessage)(e)}`);
+    }
+  }
+  /**
+   * `extendObject` for ApplianceSync: left out when it would change nothing.
+   *
+   * @param id the namespace-relative id
+   * @param patch what to merge into the object
+   * @returns what extendObject returned, or undefined when nothing was written
+   */
+  async extendChangedObject(id, patch) {
+    if (this.objectMirror.covers(id, patch)) {
+      return void 0;
+    }
+    const result = await this.extendObject(id, patch);
+    this.objectMirror.wrote(id, patch);
+    return result;
   }
   /** Build the port ApplianceSync talks to the adapter through. */
   makePort() {
@@ -241,18 +316,40 @@ class Homeconnect extends utils.Adapter {
       namespace: this.namespace,
       log: this.log,
       language: this.systemLanguage,
-      extendObject: (id, obj) => this.extendObject(id, obj),
+      extendObject: (id, obj) => this.extendChangedObject(id, obj),
       setState: (id, state) => this.setState(id, state),
       setStateChanged: (id, state) => this.setStateChangedAsync(id, state),
       getState: (id) => this.getStateAsync(id),
       getObject: (id) => this.getObjectAsync(id),
-      delObject: (id) => this.delObjectAsync(id),
-      delObjectRecursive: (id) => this.delObjectAsync(id, { recursive: true }),
+      delObject: async (id) => {
+        await this.delObjectAsync(id);
+        this.objectMirror.forget(id);
+      },
+      delObjectRecursive: async (id) => {
+        await this.delObjectAsync(id, { recursive: true });
+        this.objectMirror.forgetTree(id);
+      },
       getForeignObjects: (pattern, type) => this.getForeignObjectsAsync(pattern, type),
       getAdapterObjects: () => this.getAdapterObjectsAsync(),
       getForeignStates: (pattern) => this.getForeignStatesAsync(pattern),
-      setForeignObject: (id, obj) => this.setForeignObject(id, obj),
-      extendForeignObject: (id, patch) => this.extendForeignObjectAsync(id, patch),
+      setForeignObject: async (id, obj) => {
+        const result = await this.setForeignObject(id, obj);
+        if (id.startsWith(`${this.namespace}.`)) {
+          this.objectMirror.replaced(id, obj);
+        }
+        return result;
+      },
+      extendForeignObject: async (id, patch) => {
+        const own = id.startsWith(`${this.namespace}.`);
+        if (own && this.objectMirror.covers(id, patch)) {
+          return void 0;
+        }
+        const result = await this.extendForeignObjectAsync(id, patch);
+        if (own) {
+          this.objectMirror.wrote(id, patch);
+        }
+        return result;
+      },
       setForeignState: (id, state) => this.setForeignStateAsync(id, state),
       getAliases: () => this.getForeignObjectsAsync("alias.*", "state"),
       getEnums: async () => {
@@ -292,6 +389,7 @@ class Homeconnect extends utils.Adapter {
       }
     }
     await remove();
+    this.objectMirror.forgetTree(root);
     return carried.size;
   }
   /** Build the port the AuthController drives the sign-in lifecycle through. */

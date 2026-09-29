@@ -133,6 +133,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Fixed: the system language was never read, so the cloud answered in English and every value label was English, whatever language the installation uses.
 - Fixed: an option an appliance defines under two names was rewritten for every program definition — up to several hundred object writes on each start.
 - Fixed: a value that its list did not name (a process phase, a drying target) is added to the list once, so it is always shown by its name.
+- Improved: an object is written only when something about it changes — the sign-in and info datapoints were rewritten unchanged on every start of the adapter.
 
 ### 1.24.0 (2026-09-26)
 

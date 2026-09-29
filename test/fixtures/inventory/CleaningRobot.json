@@ -260,14 +260,12 @@
     },
     {
       "key": "BSH.Common.Setting.PowerState",
-      "value": "BSH.Common.EnumType.PowerState.MainsOff",
+      "value": "BSH.Common.EnumType.PowerState.On",
       "constraints": {
         "allowedvalues": [
-          "BSH.Common.EnumType.PowerState.MainsOff",
           "BSH.Common.EnumType.PowerState.Off",
           "BSH.Common.EnumType.PowerState.On",
-          "BSH.Common.EnumType.PowerState.Standby",
-          "BSH.Common.EnumType.PowerState.Undefined"
+          "BSH.Common.EnumType.PowerState.Standby"
         ],
         "access": "readWrite"
       }
@@ -780,9 +778,7 @@
       "key": "BSH.Common.Option.RemainingProgramTimeEstimationState",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "BSH.Common.EnumType.EstimationState.Inactive"
-        ],
+        "allowedvalues": ["BSH.Common.EnumType.EstimationState.Inactive"],
         "access": "readWrite"
       }
     },
@@ -848,9 +844,7 @@
       "key": "ConsumerProducts.CleaningRobot.Option.CleaningPasses",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "ConsumerProducts.CleaningRobot.EnumType.CleaningPasses.Once"
-        ],
+        "allowedvalues": ["ConsumerProducts.CleaningRobot.EnumType.CleaningPasses.Once"],
         "access": "readWrite"
       }
     },
@@ -920,9 +914,7 @@
       "key": "ConsumerProducts.CleaningRobot.Option.WaterFlowRate",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "ConsumerProducts.CleaningRobot.EnumType.WaterFlowRate.Medium"
-        ],
+        "allowedvalues": ["ConsumerProducts.CleaningRobot.EnumType.WaterFlowRate.Medium"],
         "access": "readWrite"
       }
     }

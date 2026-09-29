@@ -120,6 +120,8 @@ interface BshNative {
   bshKey?: string;
   bshValues?: string[];
   seenValues?: string[];
+  /** On an option object: the definition-cache generation that last built its list (see PROGRAM_DEF_GENERATION). */
+  defGeneration?: number;
 }
 
 /** What a known state carries: its BSH key + candidate values (for the write-back resolve). */
@@ -144,6 +146,11 @@ interface KnownState {
    * append-only): handed to every transform, so the list keeps them.
    */
   seenValues?: string[];
+  /**
+   * On an option object: the definition-cache generation that built its list (`native.defGeneration`). Below
+   * the current one, the next definition that loads rebuilds the list instead of adding to it.
+   */
+  defGeneration?: number;
 }
 
 /** The last decoded program records of one appliance. */
@@ -226,9 +233,16 @@ const FAILED_DEF_RETRY_MS = 6 * 60 * 60_000;
 
 /**
  * The current definition-cache generation — raise it when option objects or the
- * cache gain a field. 3: the per-program option keys (`keys`).
+ * cache gain a field. 3: the per-program option keys (`keys`). 4: the option
+ * value labels from the own table in the system language (decision 41) — an
+ * option object is written only when its program's definition loads, so without
+ * the raise an existing installation kept its old labels for good. An option
+ * object carries the generation that built its list (`native.defGeneration`):
+ * the first definition of a newer generation rebuilds the list from scratch, the
+ * following ones add to it — a list only ever grew before, so no update could
+ * take a value out that no program offers.
  */
-const PROGRAM_DEF_GENERATION = 3;
+const PROGRAM_DEF_GENERATION = 4;
 
 /**
  * The candidates of one option that belong to the value family of its key:
@@ -875,6 +889,7 @@ export class ApplianceSync {
         const seenValues = Array.isArray(native.seenValues)
           ? native.seenValues.filter((v): v is string => typeof v === "string")
           : undefined;
+        const defGeneration = typeof native.defGeneration === "number" ? native.defGeneration : undefined;
         // The pattern is type-filtered to states, so common is a StateCommon.
         const common = (obj.common ?? {}) as Partial<ioBroker.StateCommon>;
         this.knownStates.set(rel, {
@@ -887,6 +902,7 @@ export class ApplianceSync {
           hasStates: common.states !== undefined,
           hasValues: bshValues !== undefined,
           seenValues,
+          defGeneration,
           nameSource: storedNameSource(native),
         });
         const parts = rel.split(".");
@@ -3669,9 +3685,13 @@ export class ApplianceSync {
         "options",
         t.id,
         t.common,
-        { bshKey: opt.key, bshValues: t.bshValues },
+        { bshKey: opt.key, bshValues: t.bshValues, defGeneration: PROGRAM_DEF_GENERATION },
         t.nameSource,
       );
+      const created = this.knownStates.get(fullId);
+      if (created) {
+        created.defGeneration = PROGRAM_DEF_GENERATION;
+      }
       // The definition's default only seeds a brand-new state; a known one keeps
       // its value (the `known` check above is what does that — setStateChanged is
       // used for consistency with the rest of the value path, not as the gate).
@@ -3680,7 +3700,10 @@ export class ApplianceSync {
       }
       return t.id;
     }
-    const merged = await this.mergeOptionDefinition(fullId, known, t);
+    // The first definition of a newer generation rebuilds the list; the stored union of an older
+    // one may hold values no program offers any more (1.24.0 fixtures: tea sorts on an oven level).
+    const rebuild = (known.defGeneration ?? 0) < PROGRAM_DEF_GENERATION;
+    const merged = await this.mergeOptionDefinition(fullId, known, t, rebuild);
     // The object keeps the key it was created with. Two appliance families can
     // name one option differently (`…IDos1.Active` / `…IDos1Active`, even inside
     // ONE program definition), and both land on this state id: taking each
@@ -3693,12 +3716,18 @@ export class ApplianceSync {
     // Same rule as in the item path: a refresh that failed halfway must not be
     // remembered as done, or the option keeps an empty selection list until the
     // next adapter start.
+    // A rebuild is written even when the signature matches: the stamp has to reach the object, or
+    // the next definition would rebuild once more and drop what this one's siblings added.
     const refreshed =
-      known.metaSig === sig ||
+      (!rebuild && known.metaSig === sig) ||
       (await this.refreshStateObject(
         fullId,
         merged.common,
-        { bshKey: objectKey, bshValues: merged.bshValues },
+        {
+          bshKey: objectKey,
+          bshValues: merged.bshValues,
+          ...(rebuild ? { defGeneration: PROGRAM_DEF_GENERATION } : {}),
+        },
         known,
         t.nameSource,
       ));
@@ -3707,6 +3736,7 @@ export class ApplianceSync {
       known.bshValues = merged.bshValues;
       known.metaSig = sig;
       known.type = merged.common.type;
+      known.defGeneration = PROGRAM_DEF_GENERATION;
     }
     await this.refreshLabel(fullId, known, t.common, t.nameSource);
     return t.id;
@@ -3721,12 +3751,14 @@ export class ApplianceSync {
    * @param fullId the option's namespace-relative state id
    * @param known its in-memory entry (accumulated allowed values)
    * @param t the freshly transformed definition
+   * @param rebuild start from this definition alone — the stored list and bounds are of an older generation
    * @returns the merged common + allowed values
    */
   private async mergeOptionDefinition(
     fullId: string,
     known: KnownState,
     t: TransformedState,
+    rebuild: boolean,
   ): Promise<{ common: ioBroker.StateCommon; bshValues?: string[] }> {
     const common: ioBroker.StateCommon = { ...t.common };
     let exCommon: Partial<ioBroker.StateCommon> = {};
@@ -3735,9 +3767,14 @@ export class ApplianceSync {
     } catch (e) {
       this.port.log.debug(`reading ${fullId} for the definition merge failed: ${errMessage(e)}`);
     }
+    if (rebuild) {
+      // Labels a stored value may lend stay usable; its bounds and list do not.
+      exCommon = { states: exCommon.states };
+    }
     let bshValues = t.bshValues;
-    if ((known.bshValues?.length ?? 0) > 0 || (t.bshValues?.length ?? 0) > 0) {
-      const union = [...(known.bshValues ?? [])];
+    const base = rebuild ? [] : (known.bshValues ?? []);
+    if (base.length > 0 || (t.bshValues?.length ?? 0) > 0) {
+      const union = [...base];
       for (const v of t.bshValues ?? []) {
         if (!union.includes(v)) {
           union.push(v);

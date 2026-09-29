@@ -199,14 +199,12 @@
     },
     {
       "key": "BSH.Common.Setting.PowerState",
-      "value": "BSH.Common.EnumType.PowerState.MainsOff",
+      "value": "BSH.Common.EnumType.PowerState.On",
       "constraints": {
         "allowedvalues": [
-          "BSH.Common.EnumType.PowerState.MainsOff",
           "BSH.Common.EnumType.PowerState.Off",
           "BSH.Common.EnumType.PowerState.On",
-          "BSH.Common.EnumType.PowerState.Standby",
-          "BSH.Common.EnumType.PowerState.Undefined"
+          "BSH.Common.EnumType.PowerState.Standby"
         ],
         "access": "readWrite"
       }

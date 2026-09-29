@@ -210,14 +210,12 @@
     },
     {
       "key": "BSH.Common.Setting.PowerState",
-      "value": "BSH.Common.EnumType.PowerState.MainsOff",
+      "value": "BSH.Common.EnumType.PowerState.On",
       "constraints": {
         "allowedvalues": [
-          "BSH.Common.EnumType.PowerState.MainsOff",
           "BSH.Common.EnumType.PowerState.Off",
           "BSH.Common.EnumType.PowerState.On",
-          "BSH.Common.EnumType.PowerState.Standby",
-          "BSH.Common.EnumType.PowerState.Undefined"
+          "BSH.Common.EnumType.PowerState.Standby"
         ],
         "access": "readWrite"
       }
@@ -774,9 +772,7 @@
       "key": "BSH.Common.Option.RemainingProgramTimeEstimationState",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "BSH.Common.EnumType.EstimationState.Inactive"
-        ],
+        "allowedvalues": ["BSH.Common.EnumType.EstimationState.Inactive"],
         "access": "readWrite"
       }
     },
@@ -900,9 +896,7 @@
       "key": "Cooking.Oven.Option.MeatProbeTemperatureV2",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "Cooking.Oven.EnumType.MeatProbeTemperatureV2.Off"
-        ],
+        "allowedvalues": ["Cooking.Oven.EnumType.MeatProbeTemperatureV2.Off"],
         "access": "readWrite"
       }
     },
@@ -910,9 +904,7 @@
       "key": "Cooking.Oven.Option.MicrowavePower",
       "type": "Enum",
       "constraints": {
-        "allowedvalues": [
-          "Cooking.Oven.EnumType.MicrowavePower.Off"
-        ],
+        "allowedvalues": ["Cooking.Oven.EnumType.MicrowavePower.Off"],
         "access": "readWrite"
       }
     },
@@ -944,10 +936,7 @@
       "type": "Enum",
       "constraints": {
         "access": "readWrite",
-        "allowedvalues": [
-          "Cooking.Oven.EnumType.AddedSteam.Off",
-          "Cooking.Oven.EnumType.AddedSteam.On"
-        ]
+        "allowedvalues": ["Cooking.Oven.EnumType.AddedSteam.Off", "Cooking.Oven.EnumType.AddedSteam.On"]
       }
     },
     {

@@ -61,7 +61,7 @@ const END_TRIGGERS = [
 ];
 const RUN_PAIRING_TOLERANCE_MS = 6e4;
 const FAILED_DEF_RETRY_MS = 6 * 60 * 6e4;
-const PROGRAM_DEF_GENERATION = 3;
+const PROGRAM_DEF_GENERATION = 4;
 function familyOf(values, key) {
   if (!values || values.length === 0 || !key) {
     return values;
@@ -520,6 +520,7 @@ class ApplianceSync {
         const bshKey = typeof native.bshKey === "string" ? native.bshKey : void 0;
         const bshValues = Array.isArray(native.bshValues) ? native.bshValues.filter((v) => typeof v === "string") : void 0;
         const seenValues = Array.isArray(native.seenValues) ? native.seenValues.filter((v) => typeof v === "string") : void 0;
+        const defGeneration = typeof native.defGeneration === "number" ? native.defGeneration : void 0;
         const common = (_e = obj.common) != null ? _e : {};
         this.knownStates.set(rel, {
           bshKey,
@@ -531,6 +532,7 @@ class ApplianceSync {
           hasStates: common.states !== void 0,
           hasValues: bshValues !== void 0,
           seenValues,
+          defGeneration,
           nameSource: storedNameSource(native)
         });
         const parts = rel.split(".");
@@ -2879,7 +2881,7 @@ class ApplianceSync {
    * @returns the option's state id, or undefined if it had no key
    */
   async applyOptionDefinition(deviceId, raw) {
-    var _a;
+    var _a, _b;
     if (this.stopped || typeof raw.key !== "string") {
       return void 0;
     }
@@ -2900,21 +2902,30 @@ class ApplianceSync {
         "options",
         t.id,
         t.common,
-        { bshKey: opt.key, bshValues: t.bshValues },
+        { bshKey: opt.key, bshValues: t.bshValues, defGeneration: PROGRAM_DEF_GENERATION },
         t.nameSource
       );
+      const created = this.knownStates.get(fullId);
+      if (created) {
+        created.defGeneration = PROGRAM_DEF_GENERATION;
+      }
       if (t.value !== void 0) {
         await this.port.setStateChanged(fullId, { val: t.value, ack: true });
       }
       return t.id;
     }
-    const merged = await this.mergeOptionDefinition(fullId, known, t);
-    const objectKey = (_a = known.bshKey) != null ? _a : opt.key;
+    const rebuild = ((_a = known.defGeneration) != null ? _a : 0) < PROGRAM_DEF_GENERATION;
+    const merged = await this.mergeOptionDefinition(fullId, known, t, rebuild);
+    const objectKey = (_b = known.bshKey) != null ? _b : opt.key;
     const sig = metaSignature(merged.common, { bshKey: objectKey, bshValues: merged.bshValues });
-    const refreshed = known.metaSig === sig || await this.refreshStateObject(
+    const refreshed = !rebuild && known.metaSig === sig || await this.refreshStateObject(
       fullId,
       merged.common,
-      { bshKey: objectKey, bshValues: merged.bshValues },
+      {
+        bshKey: objectKey,
+        bshValues: merged.bshValues,
+        ...rebuild ? { defGeneration: PROGRAM_DEF_GENERATION } : {}
+      },
       known,
       t.nameSource
     );
@@ -2923,6 +2934,7 @@ class ApplianceSync {
       known.bshValues = merged.bshValues;
       known.metaSig = sig;
       known.type = merged.common.type;
+      known.defGeneration = PROGRAM_DEF_GENERATION;
     }
     await this.refreshLabel(fullId, known, t.common, t.nameSource);
     return t.id;
@@ -2936,10 +2948,11 @@ class ApplianceSync {
    * @param fullId the option's namespace-relative state id
    * @param known its in-memory entry (accumulated allowed values)
    * @param t the freshly transformed definition
+   * @param rebuild start from this definition alone — the stored list and bounds are of an older generation
    * @returns the merged common + allowed values
    */
-  async mergeOptionDefinition(fullId, known, t) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+  async mergeOptionDefinition(fullId, known, t, rebuild) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const common = { ...t.common };
     let exCommon = {};
     try {
@@ -2947,10 +2960,14 @@ class ApplianceSync {
     } catch (e) {
       this.port.log.debug(`reading ${fullId} for the definition merge failed: ${(0, import_pure_helpers.errMessage)(e)}`);
     }
+    if (rebuild) {
+      exCommon = { states: exCommon.states };
+    }
     let bshValues = t.bshValues;
-    if (((_d = (_c = known.bshValues) == null ? void 0 : _c.length) != null ? _d : 0) > 0 || ((_f = (_e = t.bshValues) == null ? void 0 : _e.length) != null ? _f : 0) > 0) {
-      const union = [...(_g = known.bshValues) != null ? _g : []];
-      for (const v of (_h = t.bshValues) != null ? _h : []) {
+    const base = rebuild ? [] : (_c = known.bshValues) != null ? _c : [];
+    if (base.length > 0 || ((_e = (_d = t.bshValues) == null ? void 0 : _d.length) != null ? _e : 0) > 0) {
+      const union = [...base];
+      for (const v of (_f = t.bshValues) != null ? _f : []) {
         if (!union.includes(v)) {
           union.push(v);
         }
@@ -2958,12 +2975,12 @@ class ApplianceSync {
       bshValues = union;
       const exStates = (0, import_pure_helpers.isRecord)(exCommon.states) ? exCommon.states : {};
       const newStates = (0, import_pure_helpers.isRecord)(common.states) ? common.states : {};
-      const lang = (_i = this.port.language) != null ? _i : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+      const lang = (_g = this.port.language) != null ? _g : import_value_labels.DEFAULT_LABEL_LANGUAGE;
       const states = {};
       for (const v of union) {
         const short = (0, import_value_transformer.shortEnum)(v);
         const stored = exStates[short];
-        states[short] = (_l = (_k = (_j = (0, import_value_labels.ownValueLabel)(v, lang)) != null ? _j : newStates[short]) != null ? _k : typeof stored === "string" && stored !== short ? stored : void 0) != null ? _l : (0, import_value_labels.valueLabel)(v, lang, void 0, known.bshKey);
+        states[short] = (_j = (_i = (_h = (0, import_value_labels.ownValueLabel)(v, lang)) != null ? _h : newStates[short]) != null ? _i : typeof stored === "string" && stored !== short ? stored : void 0) != null ? _j : (0, import_value_labels.valueLabel)(v, lang, void 0, known.bshKey);
       }
       common.states = states;
     }

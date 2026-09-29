@@ -1973,7 +1973,7 @@ describe("ApplianceSync definition cache across restarts", () => {
             "LaundryCare.Washer.Program.Cotton": {
               ids: ["spinSpeed"],
               keys: { spinSpeed: "LaundryCare.Washer.Option.SpinSpeed" },
-              v: 3,
+              v: 4,
             },
           },
         },
@@ -2021,7 +2021,7 @@ describe("ApplianceSync definition cache across restarts", () => {
     // A merge on top of the old list would leave a list carrying extra fields —
     // it must be a plain entry, not an array in disguise.
     expect(Array.isArray(stored["P.A"])).toBe(false);
-    expect(stored).toEqual({ "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 3 } });
+    expect(stored).toEqual({ "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 4 } });
     expect(port.objects.get("washer")?.native).toMatchObject({ haId: "HA-1" });
     // The write gate stays armed on the same option id.
     await sync.activateProgramOptions("washer", "HA-1", "P.A");
@@ -2038,7 +2038,7 @@ describe("ApplianceSync definition cache across restarts", () => {
     await sync.activateProgramOptions("washer", "HA-1", "P.A");
     const device = port.objects.get("washer");
     expect((device?.native as { programOptions: Record<string, unknown> }).programOptions).toEqual({
-      "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 3 },
+      "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 4 },
     });
     // haId survived the partial native update (merge, not replace).
     expect((device?.native as { haId: string }).haId).toBe("HA-1");
@@ -5303,7 +5303,7 @@ describe("findings of the 2026-09-24 audit — program list (B10)", () => {
           type: "Dishwasher",
           enumber: "Spueler",
           // The cache still knows a program from an earlier firmware.
-          programOptions: Object.fromEntries([a, b, gone].map(k => [k, { ids: [], keys: {}, v: 3 }])),
+          programOptions: Object.fromEntries([a, b, gone].map(k => [k, { ids: [], keys: {}, v: 4 }])),
         },
       } as unknown as ioBroker.Object,
     };
@@ -6221,9 +6221,68 @@ describe("readable values (2026-09-28)", () => {
     expect(spin.states).toEqual({ rpm1400: "1400 U/min" });
   });
 
+  it("reloads a definition cached by 1.24.0 once, so its options get the adapter's labels", async () => {
+    // Generation 3 stood on every installation before 1.25.0: its option objects carried the cloud's labels
+    // and are written only when a definition loads — without the raise they kept them for good.
+    const port = new FakePort();
+    port.language = "de";
+    const p = "LaundryCare.Washer.Program.Cotton";
+    const id = "wm-1.options.spinSpeed";
+    const device = {
+      _id: `${NS}.wm-1`,
+      type: "device",
+      common: { name: "Wm" },
+      native: {
+        haId: "HA-1",
+        type: "Washer",
+        enumber: "Wm",
+        idScheme: 3,
+        programOptions: {
+          [p]: { ids: ["spinSpeed"], keys: { spinSpeed: "LaundryCare.Washer.Option.SpinSpeed" }, v: 3 },
+        },
+      },
+    } as unknown as ioBroker.Object;
+    port.primeDevices = { [`${NS}.wm-1`]: device };
+    port.objects.set("wm-1", structuredClone(device));
+    const stored = {
+      _id: `${NS}.${id}`,
+      type: "state",
+      common: { name: "Spin", type: "string", role: "text", read: true, write: true, states: { rpm1400: "1400 rpm" } },
+      native: {
+        bshKey: "LaundryCare.Washer.Option.SpinSpeed",
+        bshValues: ["LaundryCare.Washer.EnumType.SpinSpeed.RPM1400"],
+      },
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [`${NS}.${id}`]: stored };
+    port.objects.set(id, structuredClone(stored));
+    appliance(port, "HA-1", "Wm", { type: "Washer", status: [], available: [p] });
+    const defPath = `${base}/programs/available/${p}`;
+    port.getResponses.set(defPath, {
+      key: p,
+      options: [
+        {
+          key: "LaundryCare.Washer.Option.SpinSpeed",
+          type: "LaundryCare.Washer.EnumType.SpinSpeed",
+          constraints: {
+            allowedvalues: ["LaundryCare.Washer.EnumType.SpinSpeed.RPM1400"],
+            displayvalues: ["1400 rpm"],
+          },
+        },
+      ],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.syncAppliances();
+    expect(port.getCalls.filter(c => c === defPath)).toHaveLength(1);
+    expect((port.objects.get(id)?.common as ioBroker.StateCommon).states).toEqual({ rpm1400: "1400 U/min" });
+    // Reloaded once: the next pass answers from the cache again.
+    await sync.syncAppliances();
+    expect(port.getCalls.filter(c => c === defPath)).toHaveLength(1);
+  });
+
   it("relabels a stored cloud label even for a value the current definition no longer lists", async () => {
-    // An older version stored the cloud's English label; this definition brings a
-    // different speed, so the merge keeps the stored value — with the adapter's label.
+    // Another program of this generation brought the speed with the cloud's English label; this
+    // definition brings a different one, so the union keeps the stored value — with the adapter's label.
     const port = new FakePort();
     port.language = "de";
     const p = "LaundryCare.Washer.Program.Cotton";
@@ -6243,6 +6302,7 @@ describe("readable values (2026-09-28)", () => {
       native: {
         bshKey: "LaundryCare.Washer.Option.SpinSpeed",
         bshValues: ["LaundryCare.Washer.EnumType.SpinSpeed.RPM1400"],
+        defGeneration: 4,
       },
     } as unknown as ioBroker.Object;
     port.primeStates = { [`${NS}.${id}`]: stored };
@@ -6263,6 +6323,193 @@ describe("readable values (2026-09-28)", () => {
     await sync.syncAppliances();
     const spin = port.objects.get(id)?.common as ioBroker.StateCommon;
     expect(spin.states).toEqual({ rpm1400: "1400 U/min", rpm1200: "1200 U/min" });
+  });
+
+  describe("an option list of an older definition generation is rebuilt once", () => {
+    const programA = "Cooking.Oven.Program.HeatingMode.HotAir";
+    const programB = "Cooking.Oven.Program.HeatingMode.PizzaSetting";
+    const levelKey = "Cooking.Oven.Option.Level";
+    const id = "ov-1.options.level";
+
+    /**
+     * An oven whose level option an older version built with values no program offers.
+     *
+     * @param programs the programs the appliance lists
+     * @returns the port
+     */
+    function oven(programs: string[]): FakePort {
+      const port = new FakePort();
+      port.language = "de";
+      const device = {
+        _id: `${NS}.ov-1`,
+        type: "device",
+        common: { name: "Ov" },
+        native: {
+          haId: "HA-O",
+          type: "Oven",
+          enumber: "Ov",
+          idScheme: 3,
+          programOptions: Object.fromEntries(
+            programs.map(k => [k, { ids: ["level"], keys: { level: levelKey }, v: 3 }]),
+          ),
+        },
+      } as unknown as ioBroker.Object;
+      port.primeDevices = { [`${NS}.ov-1`]: device };
+      port.objects.set("ov-1", structuredClone(device));
+      const stored = {
+        _id: `${NS}.${id}`,
+        type: "state",
+        common: {
+          name: "Level",
+          type: "string",
+          role: "text",
+          read: true,
+          write: true,
+          states: { level01: "Level 1", whitetea: "White tea", greentea: "Green tea" },
+        },
+        native: {
+          bshKey: levelKey,
+          bshValues: [
+            "Cooking.Oven.EnumType.Level.Level01",
+            "Cooking.Hob.EnumType.HotWaterTemperature.WhiteTea",
+            "Cooking.Hob.EnumType.HotWaterTemperature.GreenTea",
+          ],
+        },
+      } as unknown as ioBroker.Object;
+      port.primeStates = { [`${NS}.${id}`]: stored };
+      port.objects.set(id, structuredClone(stored));
+      appliance(port, "HA-O", "Ov", { type: "Oven", status: [], available: programs });
+      return port;
+    }
+
+    /**
+     * A level definition offering the given levels.
+     *
+     * @param program the program key
+     * @param levels the level names
+     * @returns the definition
+     */
+    function levelDef(program: string, levels: string[]): Record<string, unknown> {
+      return {
+        key: program,
+        options: [
+          {
+            key: levelKey,
+            type: "Cooking.Oven.EnumType.Level",
+            constraints: { allowedvalues: levels.map(l => `Cooking.Oven.EnumType.Level.${l}`) },
+          },
+        ],
+      };
+    }
+
+    it("ends with exactly the fresh union, in the dropdown and in the resolvable values", async () => {
+      const port = oven([programA, programB]);
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programA}`, levelDef(programA, ["Level01"]));
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programB}`, levelDef(programB, ["Level02"]));
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      const obj = port.objects.get(id) as ioBroker.StateObject;
+      expect(Object.keys(obj.common.states as Record<string, string>).sort()).toEqual(["level01", "level02"]);
+      expect(obj.native.bshValues).toEqual([
+        "Cooking.Oven.EnumType.Level.Level01",
+        "Cooking.Oven.EnumType.Level.Level02",
+      ]);
+      expect(obj.native.defGeneration).toBe(4);
+    });
+
+    /**
+     * The level option as a first pass over program A leaves it: rebuilt and stamped.
+     *
+     * @returns the stored option object
+     */
+    async function rebuiltByA(): Promise<ioBroker.Object> {
+      const port = oven([programA]);
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programA}`, levelDef(programA, ["Level01"]));
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      return structuredClone(port.objects.get(id) as ioBroker.Object);
+    }
+
+    /**
+     * Put an option object in place of the stale one of {@link oven}.
+     *
+     * @param port the port of {@link oven}
+     * @param obj the option object
+     * @param cached the programs the definition cache holds at generation 4
+     */
+    function withOption(port: FakePort, obj: ioBroker.Object, cached: string[]): void {
+      port.primeStates = { [`${NS}.${id}`]: obj };
+      port.objects.set(id, structuredClone(obj));
+      const device = port.primeDevices?.[`${NS}.ov-1`];
+      const options = (device.native as { programOptions: Record<string, { v: number }> }).programOptions;
+      for (const k of cached) {
+        options[k] = { ...options[k], v: 4 };
+      }
+    }
+
+    it("writes the stamp even when the rebuilt list equals the stored one", async () => {
+      // The same list as a rebuild brings, but from before the stamp existed: without the stamp written now,
+      // the next program's definition would rebuild once more and drop program A's level.
+      const unstamped = await rebuiltByA();
+      delete (unstamped.native as Record<string, unknown>).defGeneration;
+      const port = oven([programA, programB]);
+      withOption(port, unstamped, []);
+      const pathB = `/api/homeappliances/HA-O/programs/available/${programB}`;
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programA}`, levelDef(programA, ["Level01"]));
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      // A restart: the next instance knows only what the database holds.
+      port.primeStates = { [`${NS}.${id}`]: structuredClone(port.objects.get(id) as ioBroker.Object) };
+      port.primeDevices = { [`${NS}.ov-1`]: structuredClone(port.objects.get("ov-1") as ioBroker.Object) };
+      port.getResponses.set(pathB, levelDef(programB, ["Level02"]));
+      const next = new ApplianceSync(port);
+      await next.primeFromObjects();
+      await next.syncAppliances();
+      expect((port.objects.get(id) as ioBroker.StateObject).native.bshValues).toEqual([
+        "Cooking.Oven.EnumType.Level.Level01",
+        "Cooking.Oven.EnumType.Level.Level02",
+      ]);
+    });
+
+    it("keeps the stamp over a restart, so a new program adds to the list", async () => {
+      const stamped = await rebuiltByA();
+      const port = oven([programA, programB]);
+      withOption(port, stamped, [programA]);
+      port.getResponses.set(`/api/homeappliances/HA-O/programs/available/${programB}`, levelDef(programB, ["Level02"]));
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      expect((port.objects.get(id) as ioBroker.StateObject).native.bshValues).toEqual([
+        "Cooking.Oven.EnumType.Level.Level01",
+        "Cooking.Oven.EnumType.Level.Level02",
+      ]);
+    });
+
+    it("keeps what an earlier pass rebuilt when a later pass loads the next program", async () => {
+      const port = oven([programA, programB]);
+      const pathA = `/api/homeappliances/HA-O/programs/available/${programA}`;
+      const pathB = `/api/homeappliances/HA-O/programs/available/${programB}`;
+      port.getResponses.set(pathA, levelDef(programA, ["Level01"]));
+      // Program B cannot be read in the first pass.
+      const sync = new ApplianceSync(port);
+      await sync.primeFromObjects();
+      await sync.syncAppliances();
+      expect((port.objects.get(id) as ioBroker.StateObject).native.bshValues).toEqual([
+        "Cooking.Oven.EnumType.Level.Level01",
+      ]);
+      port.getResponses.set(pathB, levelDef(programB, ["Level02"]));
+      await sync.syncAppliances();
+      const obj = port.objects.get(id) as ioBroker.StateObject;
+      expect(obj.native.bshValues).toEqual([
+        "Cooking.Oven.EnumType.Level.Level01",
+        "Cooking.Oven.EnumType.Level.Level02",
+      ]);
+      expect(Object.keys(obj.common.states as Record<string, string>).sort()).toEqual(["level01", "level02"]);
+      expect(port.getCalls.filter(c => c === pathA)).toHaveLength(1);
+    });
   });
 });
 

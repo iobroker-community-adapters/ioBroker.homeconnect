@@ -81,6 +81,12 @@ vi.mock("@iobroker/adapter-core", () => {
       this.objects.set(this.key(id), { ...(this.objects.get(this.key(id)) ?? {}), ...obj });
       return Promise.resolve();
     });
+    /** One list call over the namespace, like the controller's `getObjectList` (rows by full id). */
+    public getObjectListAsync = vi.fn(() =>
+      Promise.resolve({
+        rows: [...this.objects].map(([k, v]) => ({ id: `${this.namespace}.${k}`, value: structuredClone(v) })),
+      }),
+    );
     public getAdapterObjectsAsync = vi.fn(() => {
       const out: Record<string, unknown> = {};
       for (const [k, v] of this.objects) {
@@ -245,6 +251,12 @@ function internalOf(adapter: Homeconnect): {
   clearTimeout: ReturnType<typeof vi.fn>;
   resyncTimer: unknown;
   subscribeStatesAsync: ReturnType<typeof vi.fn>;
+  extendObject: ReturnType<typeof vi.fn>;
+  extendForeignObjectAsync: ReturnType<typeof vi.fn>;
+  delObjectAsync: ReturnType<typeof vi.fn>;
+  getObjectListAsync: ReturnType<typeof vi.fn>;
+  readOwnObjects(): Promise<void>;
+  refreshManifestObjects(): Promise<void>;
 } {
   return adapter as never;
 }
@@ -2406,5 +2418,136 @@ describe("Homeconnect findings of the 2026-09-24 audit (write path and connectio
     expect(httpMock.putJson).not.toHaveBeenCalled();
     expect(ctx.i.log.warn).not.toHaveBeenCalledWith(expect.stringContaining("not signed in"));
     expect(ctx.i.log.debug).not.toHaveBeenCalledWith(expect.stringContaining("not signed in"));
+  });
+});
+
+describe("Homeconnect writes an object only when it changes (tooling round 61)", () => {
+  /**
+   * The ids of the objects extendObject was called for.
+   *
+   * @param ctx the test context
+   * @returns the ids, in call order
+   */
+  function extended(ctx: Ctx): string[] {
+    return ctx.i.extendObject.mock.calls.map(c => String(c[0]));
+  }
+
+  it("leaves a manifest object alone when it already carries its texts", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    // js-controller extends every manifest object before onReady — on the next start the texts are there.
+    await ctx.i.readOwnObjects();
+    ctx.i.extendObject.mockClear();
+    await ctx.i.refreshManifestObjects();
+    expect(extended(ctx)).toEqual([]);
+  });
+
+  it("writes the one manifest object whose text differs", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    (ctx.i.objects.get("info.connection") as { common: Record<string, unknown> }).common.name = { en: "Old name" };
+    await ctx.i.readOwnObjects();
+    ctx.i.extendObject.mockClear();
+    await ctx.i.refreshManifestObjects();
+    expect(extended(ctx)).toEqual(["info.connection"]);
+  });
+
+  it("gives the appliance sync a write that is left out when it would change nothing", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      extendObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+    };
+    const channel = { type: "channel", common: { name: "Status" }, native: {} };
+    await port.extendObject("wm-1.status", channel);
+    await port.extendObject("wm-1.status", structuredClone(channel));
+    expect(extended(ctx).filter(id => id === "wm-1.status")).toHaveLength(1);
+    await port.extendObject("wm-1.status", { common: { name: "State" } });
+    expect(extended(ctx).filter(id => id === "wm-1.status")).toHaveLength(2);
+  });
+
+  it("writes an object again after the sync deleted it", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      extendObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+      delObject(id: string): Promise<unknown>;
+      delObjectRecursive(id: string): Promise<unknown>;
+    };
+    const state = { type: "state", common: { name: "Door" }, native: {} };
+    await port.extendObject("wm-1.status.door", state);
+    await port.delObject("wm-1.status.door");
+    await port.extendObject("wm-1.status.door", structuredClone(state));
+    await port.delObjectRecursive("wm-1");
+    await port.extendObject("wm-1.status.door", structuredClone(state));
+    expect(extended(ctx).filter(id => id === "wm-1.status.door")).toHaveLength(3);
+    expect(ctx.i.objects.get("wm-1.status.door")).toBeDefined();
+  });
+
+  it("leaves out an unchanged foreign-call write to an own object, never one to a room or an alias", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      extendForeignObject(id: string, patch: Record<string, unknown>): Promise<unknown>;
+      setForeignObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+    };
+    const foreignWrites = ctx.i.extendForeignObjectAsync;
+    const custom = { common: { custom: { "influxdb.0": { enabled: true } } } };
+    await port.setForeignObject("homeconnect.0.wm-1.status.door", {
+      type: "state",
+      common: { name: "Door" },
+      native: {},
+    });
+    await port.extendForeignObject("homeconnect.0.wm-1.status.door", custom);
+    await port.extendForeignObject("homeconnect.0.wm-1.status.door", structuredClone(custom));
+    // The object written whole is held too: the same name again is no write.
+    await port.extendForeignObject("homeconnect.0.wm-1.status.door", { common: { name: "Door" } });
+    const members = { common: { members: ["homeconnect.0.wm-1.status.door"] } };
+    await port.extendForeignObject("enum.rooms.kitchen", members);
+    await port.extendForeignObject("enum.rooms.kitchen", structuredClone(members));
+    expect(foreignWrites.mock.calls.map(c => String(c[0]))).toEqual([
+      "homeconnect.0.wm-1.status.door",
+      "enum.rooms.kitchen",
+      "enum.rooms.kitchen",
+    ]);
+  });
+
+  it("never lets a written alias make an own object of the same path look written", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      extendObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+      setForeignObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+    };
+    const door = { type: "state", common: { name: "Door" }, native: {} };
+    await port.setForeignObject("alias.0.kitchen.door", door);
+    await port.extendObject("alias.0.kitchen.door", structuredClone(door));
+    expect(extended(ctx)).toContain("alias.0.kitchen.door");
+  });
+
+  it("writes an object again after its tree was deleted carrying rooms and functions", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const port = ctx.syncs[0].port as unknown as {
+      extendObject(id: string, obj: Record<string, unknown>): Promise<unknown>;
+      deleteTreeCarryingEnums(root: string, carry: ReadonlyMap<string, readonly string[]>): Promise<number>;
+    };
+    const state = { type: "state", common: { name: "Door" }, native: {} };
+    await port.extendObject("old-1.status.door", state);
+    await port.deleteTreeCarryingEnums("old-1", new Map());
+    await port.extendObject("old-1.status.door", structuredClone(state));
+    expect(extended(ctx).filter(id => id === "old-1.status.door")).toHaveLength(2);
+  });
+
+  it("writes everything when the own tree could not be read", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    // The objects carry their texts, but this start could not read them: nothing may be left out.
+    ctx.i.getObjectListAsync.mockImplementation(() => Promise.reject(new Error("objects db down")));
+    await ctx.i.readOwnObjects();
+    ctx.i.extendObject.mockClear();
+    await ctx.i.refreshManifestObjects();
+    expect(extended(ctx)).toHaveLength(10);
+    expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("Could not read the own objects"));
   });
 });
