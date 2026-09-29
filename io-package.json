@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.24.0",
+    "version": "1.25.0",
     "news": {
+      "1.25.0": {
+        "en": "Values are shown by name in the installation's language; the encoded history, program statistics and last run become readable datapoints, and water counters show litres.",
+        "de": "Werte erscheinen mit Namen in der Sprache der Installation; kodierter Verlauf, Programmstatistik und letzter Lauf werden lesbare Datenpunkte, Wasserzähler zeigen Liter.",
+        "ru": "Значения показываются по названию на языке установки; закодированная история, статистика программ и последний запуск стали понятными точками данных, вода — в литрах.",
+        "pt": "Os valores aparecem pelo nome no idioma da instalação; histórico codificado, estatísticas e última execução tornam-se pontos de dados legíveis; a água em litros.",
+        "nl": "Waarden verschijnen met naam in de taal van de installatie; gecodeerde geschiedenis, programmastatistiek en laatste run worden leesbare datapunten, water in liter.",
+        "fr": "Les valeurs s'affichent par leur nom dans la langue de l'installation ; historique codé, statistiques et dernier cycle deviennent lisibles, l'eau est en litres.",
+        "it": "I valori appaiono per nome nella lingua dell'installazione; cronologia codificata, statistiche e ultimo ciclo diventano punti dati leggibili, l'acqua in litri.",
+        "es": "Los valores aparecen por su nombre en el idioma de la instalación; historial codificado, estadísticas y último ciclo pasan a ser datos legibles, el agua en litros.",
+        "pl": "Wartości są pokazywane z nazwą w języku instalacji; zakodowana historia, statystyki programów i ostatni cykl stają się czytelne, liczniki wody w litrach.",
+        "uk": "Значення показуються за назвою мовою встановлення; закодовані історія, статистика програм і останній запуск стали зрозумілими, лічильники води — у літрах.",
+        "zh-cn": "数值以安装所用语言按名称显示；编码的历史记录、程序统计和上次运行变为可读的数据点，用水量以升显示。"
+      },
       "1.24.0": {
         "en": "Device ids are now model plus last four characters of the appliance number; the tree moves once with values, recordings, rooms and aliases. Clearer sign-in with Home Connect's reason.",
         "de": "Geräte-Ids sind jetzt Modell plus die letzten vier Zeichen der Gerätenummer; der Baum zieht einmal um, samt Werten, Aufzeichnung, Räumen, Aliasen. Anmeldung nennt Home Connects Grund.",

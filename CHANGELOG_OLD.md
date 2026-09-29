@@ -1,5 +1,21 @@
 # Older changes
 
+## 1.20.0 (2026-09-15)
+
+- Fixed: a short cloud hiccup while reading the selected or active program no longer marks the appliance as having no program and no longer blocks option writes.
+- Fixed: stopping the adapter while it is still reading the appliances no longer leaves some of them shown as online while the adapter is off.
+- Fixed: an error during start-up was reported as a failed sign-in and could ask you for a brand-new sign-in link; it is now reported for what it is.
+- Fixed: a brief network problem while you confirm the sign-in code no longer throws that code away and asks you for a new one.
+- Fixed: in rare cases the adapter kept an outdated login and asked for a new sign-in after the next restart; the current login is now always the one it keeps.
+- Fixed: door, running and event data points no longer turn to false when the appliance sends a message without a value; the last reading stays.
+- Fixed: when the appliance rejects a change, the data point shows the appliance's real value again instead of the value that was refused.
+- Improved: the adapter starts faster on large installations - it no longer reads every data point's value on every start.
+- Improved: live updates resume right after you sign in again while the adapter is running, instead of waiting out a pause of up to five minutes.
+- Improved: writing a setting from a script now accepts any capitalisation and the full Home Connect value, such as "On" or the complete key.
+- Improved: a large installation no longer risks a one-minute cloud pause during a cold start; the adapter now paces its requests to the Home Connect limit.
+- Improved: the sign-in page in the instance settings keeps updating when it is opened before the adapter has run for the first time.
+- Changed: the data point auth.session is now named "Stored login" and explains that it holds the encrypted account login.
+
 ## 1.19.1 (2026-09-14)
 
 - Fixed: the appliance pictograms of 1.19.0 were invisible in the dark Admin themes. They now follow the theme and read everywhere; existing devices get the corrected icon on the first sync.

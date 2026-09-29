@@ -121,7 +121,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 1.25.0 (2026-09-29)
 
 - Changed: value lists speak the system language — programs, phases and settings show names like "Cotton" or "Running" instead of short values or English labels.
 - Changed: the encoded program history, program details and run summary become readable datapoints: the last programs with their duration, counters per program and the last run.
@@ -173,22 +173,6 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 
 - Fixed: the error code list of an appliance now carries a translated name and an explanation instead of an English label derived from its identifier.
 - Fixed: a data point's selection list no longer keeps values the appliance stopped offering after the cloud answered without them once.
-
-### 1.20.0 (2026-09-15)
-
-- Fixed: a short cloud hiccup while reading the selected or active program no longer marks the appliance as having no program and no longer blocks option writes.
-- Fixed: stopping the adapter while it is still reading the appliances no longer leaves some of them shown as online while the adapter is off.
-- Fixed: an error during start-up was reported as a failed sign-in and could ask you for a brand-new sign-in link; it is now reported for what it is.
-- Fixed: a brief network problem while you confirm the sign-in code no longer throws that code away and asks you for a new one.
-- Fixed: in rare cases the adapter kept an outdated login and asked for a new sign-in after the next restart; the current login is now always the one it keeps.
-- Fixed: door, running and event data points no longer turn to false when the appliance sends a message without a value; the last reading stays.
-- Fixed: when the appliance rejects a change, the data point shows the appliance's real value again instead of the value that was refused.
-- Improved: the adapter starts faster on large installations - it no longer reads every data point's value on every start.
-- Improved: live updates resume right after you sign in again while the adapter is running, instead of waiting out a pause of up to five minutes.
-- Improved: writing a setting from a script now accepts any capitalisation and the full Home Connect value, such as "On" or the complete key.
-- Improved: a large installation no longer risks a one-minute cloud pause during a cold start; the adapter now paces its requests to the Home Connect limit.
-- Improved: the sign-in page in the instance settings keeps updating when it is opened before the adapter has run for the first time.
-- Changed: the data point auth.session is now named "Stored login" and explains that it holds the encrypted account login.
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 
