@@ -128,12 +128,11 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Changed: programs chosen at the appliance appear in both program lists by name; choosing one remotely is refused with a message, because Home Connect does not allow it.
 - New: program numbers in the history and statistics are named from the appliances' own descriptions; numbers they lack are learned from the runs the adapter sees.
 - New: the last run shows its water, energy, detergent and softener use and whether it finished or was aborted, decoded from the appliance's run summary.
-- New: `status.faultActive` tells whether the appliance reports a fault, next to the fault codes as readable text; the raw code list and the other raw datapoints are removed.
+- New: a fault indicator tells whether the appliance reports a fault, next to the fault codes as readable text; the raw code list and other raw datapoints are removed.
 - Fixed: the water counters showed millilitres as litres — 12 million litres on a washer-dryer; they now show litres, as their unit says.
 - Fixed: the system language was never read, so the cloud answered in English and every value label was English, whatever language the installation uses.
-- Fixed: an option an appliance defines under two names was rewritten for every program definition — up to several hundred object writes on each start.
 - Fixed: a value that its list did not name (a process phase, a drying target) is added to the list once, so it is always shown by its name.
-- Improved: objects and read-only datapoints are written only when they change, compared in memory; the sign-in and info datapoints were rewritten on every start.
+- Improved: a start no longer rewrites hundreds of unchanged datapoints, and status values are written only when they change, so history adapters record no repeated entries.
 
 ### 1.24.0 (2026-09-26)
 
