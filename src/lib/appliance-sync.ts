@@ -3992,6 +3992,10 @@ export class ApplianceSync {
         }
       }
       bshValues = union;
+    }
+    // A switch keeps its On/Off values for the write path, but shows no list (decision 47).
+    if (bshValues && bshValues.length > 0 && common.type === "string") {
+      const union = bshValues;
       const exStates = isRecord(exCommon.states) ? exCommon.states : {};
       const newStates = isRecord(common.states) ? common.states : {};
       const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;

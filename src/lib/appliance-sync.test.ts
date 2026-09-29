@@ -6148,6 +6148,34 @@ describe("readable values (2026-09-28)", () => {
   const base = "/api/homeappliances/HA-1";
   const wd = (v: string): string => `LaundryCare.WasherDryer.Program.${v}`;
 
+  it("keeps an on/off option a plain switch across the definitions of several programs, written once", async () => {
+    // Measured on the inventory run: the oven's steam assist came out a boolean carrying an on/off list, and the
+    // second program's definition rewrote it on a fresh installation.
+    const port = new FakePort();
+    const programs = ["Cooking.Oven.Program.HeatingMode.HotAir", "Cooking.Oven.Program.HeatingMode.PizzaSetting"];
+    appliance(port, "HA-1", "Oven", { type: "Oven", status: [], available: programs });
+    const steam = "Cooking.Oven.EnumType.AddedSteam";
+    for (const [i, p] of programs.entries()) {
+      port.getResponses.set(`${base}/programs/available/${p}`, {
+        key: p,
+        options: [
+          {
+            key: "Cooking.Oven.Option.SteamAssistLevel",
+            type: "Cooking.Oven.EnumType.AddedSteam",
+            constraints: { allowedvalues: i === 0 ? [`${steam}.Off`, `${steam}.On`] : [`${steam}.On`, `${steam}.Off`] },
+          },
+        ],
+      });
+    }
+    await new ApplianceSync(port).syncAppliances();
+    const id = "oven-1.options.steamAssistLevel";
+    const obj = port.objects.get(id);
+    expect(obj?.common).toMatchObject({ type: "boolean", role: "switch" });
+    expect((obj?.common as ioBroker.StateCommon).states).toBeUndefined();
+    expect((obj?.native as { bshValues: string[] }).bshValues).toHaveLength(2);
+    expect(port.extendCalls.filter(c => c === id)).toHaveLength(1);
+  });
+
   it("writes value labels in the system language", async () => {
     const port = new FakePort();
     port.language = "de";
