@@ -1,5 +1,14 @@
 # Older changes
 
+## 1.22.0 (2026-09-23)
+
+- Fixed: an appliance that was just switched on now shows its current data by itself once it is ready, without waiting for a later reconnect.
+- Fixed: programs chosen at the appliance that the Home Connect interface does not offer no longer cause warnings, also while such a program runs.
+- Fixed: a new problem reading an appliance is reported right away again instead of staying hidden for days after an idle appliance answered.
+- Improved: when live updates cannot connect, the message now says whether Home Connect or the login is the cause.
+- Improved: a catch-up after interrupted live updates now tells how long it had to wait for the daily request limit.
+- Improved: network errors now name their cause, for example an unknown host or a refused connection, instead of just "fetch failed".
+
 ## 1.21.0 (2026-09-17)
 
 - Fixed: the error code list of an appliance now carries a translated name and an explanation instead of an English label derived from its identifier.

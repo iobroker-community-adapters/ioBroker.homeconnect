@@ -121,7 +121,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 1.25.2 (2026-09-29)
 
 - Changed: the program history names each run — latest, previous, third-to-last … — instead of numbering its datapoints; existing ones move along with their settings.
 - Changed: firmware identifiers and the appliance's own connection datapoints (cloud connection, switching Wi-Fi off) are no longer created, on any appliance type.
@@ -174,15 +174,6 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Fixed: after a reconnect, a value that arrived by live update is no longer overwritten by an older value read at the same time.
 - Improved: after a crash or power cut all appliances show as offline right at start, also while the sign-in is not configured yet.
 - Improved: the guide now explains the three steps of the Home Connect developer account, and the connection test in the settings no longer waits forever.
-
-### 1.22.0 (2026-09-23)
-
-- Fixed: an appliance that was just switched on now shows its current data by itself once it is ready, without waiting for a later reconnect.
-- Fixed: programs chosen at the appliance that the Home Connect interface does not offer no longer cause warnings, also while such a program runs.
-- Fixed: a new problem reading an appliance is reported right away again instead of staying hidden for days after an idle appliance answered.
-- Improved: when live updates cannot connect, the message now says whether Home Connect or the login is the cause.
-- Improved: a catch-up after interrupted live updates now tells how long it had to wait for the daily request limit.
-- Improved: network errors now name their cause, for example an unknown host or a refused connection, instead of just "fetch failed".
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 

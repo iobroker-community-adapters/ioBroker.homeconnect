@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.25.1",
+    "version": "1.25.2",
     "news": {
+      "1.25.2": {
+        "en": "The program history names each run (latest, previous …); firmware and connection datapoints are gone; remaining time and progress stay empty while nothing runs.",
+        "de": "Der Programmverlauf benennt jeden Lauf (letzter, vorletzter …); Firmware- und Verbindungs-Datenpunkte entfallen; Restzeit und Fortschritt bleiben ohne Lauf leer.",
+        "ru": "История программ называет каждый цикл (последний, предпоследний …); точки прошивки и связи убраны; остаток и прогресс пусты, пока ничего не работает.",
+        "pt": "O histórico nomeia cada ciclo (último, penúltimo …); pontos de firmware e ligação removidos; tempo restante e progresso ficam vazios sem programa.",
+        "nl": "De programmageschiedenis benoemt elke run (laatste, voorlaatste …); firmware- en verbindingspunten vervallen; resttijd en voortgang blijven leeg zonder run.",
+        "fr": "L'historique nomme chaque cycle (dernier, avant-dernier …) ; points firmware et connexion supprimés ; temps restant et progression vides hors cycle.",
+        "it": "La cronologia nomina ogni ciclo (ultimo, penultimo …); punti firmware e connessione rimossi; tempo residuo e avanzamento vuoti senza programma.",
+        "es": "El historial nombra cada ciclo (último, penúltimo …); se quitan los puntos de firmware y conexión; tiempo restante y progreso vacíos sin programa.",
+        "pl": "Historia programów nazywa każdy cykl (ostatni, przedostatni …); punkty firmware i połączenia usunięte; czas i postęp puste, gdy nic nie działa.",
+        "uk": "Історія програм називає кожен цикл (останній, передостанній …); точки прошивки та зв'язку прибрано; залишок і прогрес порожні без програми.",
+        "zh-cn": "程序历史为每次运行命名（最近、倒数第二……）；移除固件和连接数据点；无程序运行时剩余时间和进度保持为空。"
+      },
       "1.25.1": {
         "en": "On/off datapoints are switches, durations show in minutes, runtime in hours, energy in kWh and water in litres; option lists show the installation's language.",
         "de": "An/Aus-Datenpunkte sind Schalter, Dauern in Minuten, Laufzeit in Stunden, Energie in kWh, Wasser in Litern; Optionslisten zeigen die Sprache der Installation.",
@@ -80,19 +93,6 @@
         "pl": "Lista kodów błędów urządzenia ma teraz przetłumaczoną nazwę i wyjaśnienie, a lista wyboru punktu danych nie zachowuje już wartości, których urządzenie przestało oferować.",
         "uk": "Список кодів помилок приладу тепер має перекладену назву та пояснення, а список вибору точки даних більше не зберігає значень, які прилад уже не пропонує.",
         "zh-cn": "家电的故障代码列表现在有了翻译后的名称和说明，数据点的选择列表也不再保留家电已不再提供的值。"
-      },
-      "1.20.0": {
-        "en": "A short cloud hiccup while reading the selected or active program no longer marks the appliance as having no program and no longer blocks option writes.",
-        "de": "Ein kurzer Cloud-Aussetzer beim Lesen des gewählten oder aktiven Programms meldet das Gerät nicht mehr als „ohne Programm“ und blockiert keine Optionen mehr.",
-        "ru": "Кратковременный сбой облака при чтении выбранной или активной программы больше не помечает прибор как «без программы» и не блокирует запись опций.",
-        "pt": "Uma breve falha da nuvem ao ler o programa selecionado ou ativo já não marca o aparelho como «sem programa» nem bloqueia a escrita de opções.",
-        "nl": "Een korte cloudstoring bij het lezen van het gekozen of actieve programma markeert het apparaat niet meer als „zonder programma” en blokkeert geen opties meer.",
-        "fr": "Une brève coupure du cloud lors de la lecture du programme choisi ou actif ne marque plus l'appareil comme « sans programme » et ne bloque plus les options.",
-        "it": "Una breve interruzione del cloud durante la lettura del programma scelto o attivo non segna più l'apparecchio come «senza programma» e non blocca più le opzioni.",
-        "es": "Un breve fallo de la nube al leer el programa elegido o activo ya no marca el aparato como «sin programa» ni bloquea la escritura de opciones.",
-        "pl": "Krótka przerwa w chmurze podczas odczytu wybranego lub aktywnego programu nie oznacza już urządzenia jako „bez programu” i nie blokuje zapisu opcji.",
-        "uk": "Короткий збій хмари під час читання вибраної або активної програми більше не позначає прилад як «без програми» і не блокує запис опцій.",
-        "zh-cn": "读取所选或运行中程序时的短暂云端故障不再把设备标记为“无程序”，也不再阻止写入选项。"
       }
     },
     "titleLang": {
