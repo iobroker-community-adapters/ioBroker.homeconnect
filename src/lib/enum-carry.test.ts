@@ -98,6 +98,21 @@ describe("moveWithEnums", () => {
     );
   });
 
+  it("skips an enum that is gone by the time of the write — no warning, no write", async () => {
+    const { adapter, order, store, warn } = fakeStore({
+      "enum.rooms.gone": { common: { members: ["a.0.old"] } },
+      "enum.rooms.living": { common: { members: ["a.0.old"] } },
+    });
+    const remove = vi.fn(() => {
+      delete store["enum.rooms.gone"];
+      return Promise.resolve();
+    });
+    await expect(moveWithEnums(adapter, "a.0.old", "a.0.new", remove, errText)).resolves.toEqual(["enum.rooms.living"]);
+    expect(warn).not.toHaveBeenCalled();
+    expect(order).not.toContain("write enum.rooms.gone");
+    expect(store["enum.rooms.gone"]).toBeUndefined();
+  });
+
   it("lets a failed delete surface to the caller", async () => {
     const { adapter } = fakeStore({ "enum.rooms.living": { common: { members: ["a.0.old"] } } });
     await expect(

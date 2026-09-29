@@ -30,6 +30,10 @@ on:
   pull_request:
     branches:
       - main
+  # The prover's own trigger (round 51): the repochecker judges the LATEST run on the default branch (E3031).
+  # After a red run, a fix that only touches filtered files (a README the standard checks read) starts no run,
+  # and main stays red. The release run then starts this workflow on HEAD by hand — nothing else uses it.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}

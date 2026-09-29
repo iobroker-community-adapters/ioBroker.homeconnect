@@ -2,7 +2,7 @@
 //
 // js-controller has no `extendObjectChanged`: `extendObject` always writes, stamps `ts` anew and sends an
 // `objectChange` to every subscriber (7.2.2) — on every start of a real installation, also when nothing
-// changed. The fleet recipe (Entwicklung/CLAUDE_PATTERNS.md § "Objekte nur bei Unterschied schreiben", tooling
+// changed. The fleet recipe (Entwicklung/CLAUDE_PATTERNS.md, section on writing objects only on a difference, tooling
 // round 61): read the own tree ONCE at start, compare every write against it (`coveredBy`), write only on a
 // difference, and afterwards hold what the write left behind.
 
@@ -174,7 +174,7 @@ interface HeldState {
 
 /**
  * The own states' last values, by full id — for the read-only ones the adapter alone writes (tooling round 62,
- * Entwicklung/CLAUDE_PATTERNS.md § "Anzeigen nur bei Änderung schreiben"). `setStateChangedAsync` reads the state
+ * Entwicklung/CLAUDE_PATTERNS.md, section on writing indicators only on a change). `setStateChangedAsync` reads the state
  * from the database on EVERY call; comparing here costs no database command. Filled once at start with one bulk
  * read; a state it does not hold is always written.
  */
