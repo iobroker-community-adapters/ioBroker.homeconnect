@@ -5,8 +5,7 @@ import { HomeConnectAuth, extractRefreshToken, type StoredToken } from "./lib/oa
 import { getJson, postForm, putJson, deleteJson, type JsonResult } from "./lib/http";
 import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
 import { AuthController, type AuthPort } from "./lib/auth-controller";
-import { enumMembersUnder } from "./lib/device-move";
-import { moveWithEnums } from "./lib/enum-carry";
+import { moveAllWithEnums } from "./lib/enum-carry";
 import type { WriteRequest } from "./lib/command-dispatch";
 import { EventStream } from "./lib/event-stream";
 import { errMessage, isRecord } from "./lib/pure-helpers";
@@ -514,24 +513,16 @@ export class Homeconnect extends utils.Adapter {
    * @returns how many room/function entries now list one of the new ids
    */
   private async deleteTreeCarryingEnums(root: string, carry: ReadonlyMap<string, readonly string[]>): Promise<number> {
-    const members = enumMembersUnder(await this.getForeignObjectsAsync("enum.*", "enum"), `${this.namespace}.${root}`);
-    const carried = new Set<string>();
-    // One carry per moved member and new id, nested so that every one reads before the single delete runs.
-    let remove = async (): Promise<unknown> => this.delObjectAsync(root, { recursive: true });
-    for (const oldId of members) {
-      for (const newId of carry.get(oldId) ?? []) {
-        const inner = remove;
-        remove = async () => {
-          for (const enumId of await moveWithEnums(this, oldId, newId, inner, errMessage)) {
-            carried.add(`${enumId}|${newId}`);
-          }
-        };
-      }
-    }
-    await remove();
+    // Reads the enums once, deletes the tree once, writes every affected enum once with all its new ids.
+    const carried = await moveAllWithEnums(
+      this,
+      oldId => carry.get(oldId) ?? [],
+      () => this.delObjectAsync(root, { recursive: true }),
+      errMessage,
+    );
     this.objectMirror.forgetTree(root);
     this.stateMirror.forget(this.objectMirror.fullId(root), true);
-    return carried.size;
+    return carried.reduce((n, c) => n + c.newIds.length, 0);
   }
 
   /** Build the port the AuthController drives the sign-in lifecycle through. */
