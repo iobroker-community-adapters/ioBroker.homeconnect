@@ -38,7 +38,6 @@ var import_oauth = require("./lib/oauth");
 var import_http = require("./lib/http");
 var import_appliance_sync = require("./lib/appliance-sync");
 var import_auth_controller = require("./lib/auth-controller");
-var import_device_move = require("./lib/device-move");
 var import_enum_carry = require("./lib/enum-carry");
 var import_event_stream = require("./lib/event-stream");
 var import_pure_helpers = require("./lib/pure-helpers");
@@ -431,24 +430,18 @@ class Homeconnect extends utils.Adapter {
    * @returns how many room/function entries now list one of the new ids
    */
   async deleteTreeCarryingEnums(root, carry) {
-    var _a;
-    const members = (0, import_device_move.enumMembersUnder)(await this.getForeignObjectsAsync("enum.*", "enum"), `${this.namespace}.${root}`);
-    const carried = /* @__PURE__ */ new Set();
-    let remove = async () => this.delObjectAsync(root, { recursive: true });
-    for (const oldId of members) {
-      for (const newId of (_a = carry.get(oldId)) != null ? _a : []) {
-        const inner = remove;
-        remove = async () => {
-          for (const enumId of await (0, import_enum_carry.moveWithEnums)(this, oldId, newId, inner, import_pure_helpers.errMessage)) {
-            carried.add(`${enumId}|${newId}`);
-          }
-        };
-      }
-    }
-    await remove();
+    const carried = await (0, import_enum_carry.moveAllWithEnums)(
+      this,
+      (oldId) => {
+        var _a;
+        return (_a = carry.get(oldId)) != null ? _a : [];
+      },
+      () => this.delObjectAsync(root, { recursive: true }),
+      import_pure_helpers.errMessage
+    );
     this.objectMirror.forgetTree(root);
     this.stateMirror.forget(this.objectMirror.fullId(root), true);
-    return carried.size;
+    return carried.reduce((n, c) => n + c.newIds.length, 0);
   }
   /** Build the port the AuthController drives the sign-in lifecycle through. */
   makeAuthPort() {

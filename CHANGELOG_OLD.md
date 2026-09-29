@@ -1,5 +1,10 @@
 # Older changes
 
+## 1.21.0 (2026-09-17)
+
+- Fixed: the error code list of an appliance now carries a translated name and an explanation instead of an English label derived from its identifier.
+- Fixed: a data point's selection list no longer keeps values the appliance stopped offering after the cloud answered without them once.
+
 ## 1.20.0 (2026-09-15)
 
 - Fixed: a short cloud hiccup while reading the selected or active program no longer marks the appliance as having no program and no longer blocks option writes.

@@ -20,15 +20,18 @@ var command_dispatch_exports = {};
 __export(command_dispatch_exports, {
   ambiguousCandidates: () => ambiguousCandidates,
   resolveEnum: () => resolveEnum,
+  resolveValue: () => resolveValue,
   resolveWrite: () => resolveWrite
 });
 module.exports = __toCommonJS(command_dispatch_exports);
 var import_value_transformer = require("./value-transformer");
+var import_switch_values = require("./switch-values");
+var import_value_units = require("./value-units");
 function resolveWrite(ctx) {
   const base = `/api/homeappliances/${encodeURIComponent(ctx.haId)}`;
   const key = ctx.bshKey === void 0 ? void 0 : encodeURIComponent(ctx.bshKey);
   if (ctx.channel === "settings" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === void 0) {
       return null;
     }
@@ -38,7 +41,7 @@ function resolveWrite(ctx) {
     return ctx.value === true ? { method: "PUT", path: `${base}/commands/${key}`, body: { key: ctx.bshKey, value: true } } : null;
   }
   if (ctx.channel === "options" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === void 0) {
       return null;
     }
@@ -65,11 +68,15 @@ function resolveWrite(ctx) {
   }
   return null;
 }
-function resolveValue(value, bshValues, collapse = false) {
+function resolveValue(value, bshValues, collapse = false, key) {
+  if (typeof value === "boolean" && bshValues && bshValues.length > 0) {
+    return (0, import_switch_values.switchValue)(value, bshValues);
+  }
   if (bshValues && bshValues.length > 0) {
     return resolveEnum(value, bshValues, collapse);
   }
-  return value;
+  const p = typeof value === "number" ? (0, import_value_units.shownPresentation)(key) : void 0;
+  return p && typeof value === "number" ? (0, import_value_units.fromShown)(value, p) : value;
 }
 function resolveEnum(value, bshValues, collapse = false) {
   if (typeof value !== "string" || !bshValues || bshValues.length === 0) {
@@ -103,6 +110,7 @@ function ambiguousCandidates(value, bshValues) {
 0 && (module.exports = {
   ambiguousCandidates,
   resolveEnum,
+  resolveValue,
   resolveWrite
 });
 //# sourceMappingURL=command-dispatch.js.map

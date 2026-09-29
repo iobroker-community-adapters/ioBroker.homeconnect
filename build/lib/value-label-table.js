@@ -1473,17 +1473,17 @@ const VALUE_LABELS = {
     "\u5546\u52A1\u886C\u886B"
   ],
   butteroil: [
-    "Clarified butter",
-    "Butterschmalz",
-    "\u0422\u043E\u043F\u043B\u0451\u043D\u043E\u0435 \u043C\u0430\u0441\u043B\u043E",
-    "Manteiga clarificada",
-    "Geklaarde boter",
-    "Beurre clarifi\xE9",
-    "Burro chiarificato",
-    "Mantequilla clarificada",
-    "Mas\u0142o klarowane",
-    "\u0422\u043E\u043F\u043B\u0435\u043D\u0435 \u043C\u0430\u0441\u043B\u043E",
-    "\u6F84\u6E05\u9EC4\u6CB9"
+    "Butter/oil",
+    "Butter/\xD6l",
+    "\u041C\u0430\u0441\u043B\u043E/\u0436\u0438\u0440",
+    "Manteiga/\xF3leo",
+    "Boter/olie",
+    "Beurre/huile",
+    "Burro/olio",
+    "Mantequilla/aceite",
+    "Mas\u0142o/olej",
+    "\u041C\u0430\u0441\u043B\u043E/\u043E\u043B\u0456\u044F",
+    "\u9EC4\u6CB9/\u6CB9"
   ],
   cafeaulait: [
     "Caf\xE9 au lait",

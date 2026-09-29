@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.25.0",
+    "version": "1.25.1",
     "news": {
+      "1.25.1": {
+        "en": "On/off datapoints are switches, durations show in minutes, runtime in hours, energy in kWh and water in litres; option lists show the installation's language.",
+        "de": "An/Aus-Datenpunkte sind Schalter, Dauern in Minuten, Laufzeit in Stunden, Energie in kWh, Wasser in Litern; Optionslisten zeigen die Sprache der Installation.",
+        "ru": "Точки вкл/выкл стали переключателями, длительность в минутах, время работы в часах, энергия в кВт·ч, вода в литрах; списки опций на языке установки.",
+        "pt": "Pontos liga/desliga são interruptores, durações em minutos, tempo de funcionamento em horas, energia em kWh e água em litros; listas no idioma da instalação.",
+        "nl": "Aan/uit-datapunten zijn schakelaars, duur in minuten, looptijd in uren, energie in kWh en water in liters; optielijsten tonen de taal van de installatie.",
+        "fr": "Les points marche/arrêt sont des interrupteurs, durées en minutes, temps de marche en heures, énergie en kWh, eau en litres ; listes dans la langue installée.",
+        "it": "I punti acceso/spento sono interruttori, durate in minuti, tempo di funzionamento in ore, energia in kWh e acqua in litri; elenchi nella lingua installata.",
+        "es": "Los puntos encendido/apagado son interruptores, duraciones en minutos, tiempo de uso en horas, energía en kWh y agua en litros; listas en el idioma instalado.",
+        "pl": "Punkty wł./wył. są przełącznikami, czasy w minutach, czas pracy w godzinach, energia w kWh, woda w litrach; listy opcji w języku instalacji.",
+        "uk": "Точки ввімк/вимк стали перемикачами, тривалість у хвилинах, час роботи в годинах, енергія в кВт·год, вода в літрах; списки опцій мовою встановлення.",
+        "zh-cn": "开/关数据点改为开关，时长以分钟、总运行时间以小时、能耗以千瓦时、用水以升显示；选项列表使用安装语言。"
+      },
       "1.25.0": {
         "en": "Values are shown by name in the installation's language; the encoded history, program statistics and last run become readable datapoints, and water counters show litres.",
         "de": "Werte erscheinen mit Namen in der Sprache der Installation; kodierter Verlauf, Programmstatistik und letzter Lauf werden lesbare Datenpunkte, Wasserzähler zeigen Liter.",
@@ -80,19 +93,6 @@
         "pl": "Krótka przerwa w chmurze podczas odczytu wybranego lub aktywnego programu nie oznacza już urządzenia jako „bez programu” i nie blokuje zapisu opcji.",
         "uk": "Короткий збій хмари під час читання вибраної або активної програми більше не позначає прилад як «без програми» і не блокує запис опцій.",
         "zh-cn": "读取所选或运行中程序时的短暂云端故障不再把设备标记为“无程序”，也不再阻止写入选项。"
-      },
-      "1.19.1": {
-        "en": "The appliance pictograms of 1.19.0 were invisible in the dark Admin themes. They now follow the theme and read everywhere; existing devices are updated on the first sync.",
-        "de": "Die Gerätesymbole aus 1.19.0 waren in den dunklen Admin-Designs unsichtbar. Sie folgen jetzt dem Design und sind überall lesbar; bestehende Geräte werden beim ersten Abgleich aktualisiert.",
-        "ru": "Значки приборов из 1.19.0 были невидимы в тёмных темах админки. Теперь они следуют теме и читаются везде; существующие приборы обновляются при первой синхронизации.",
-        "pt": "Os pictogramas dos aparelhos da 1.19.0 eram invisíveis nos temas escuros do Admin. Agora seguem o tema e são legíveis em todos; os aparelhos existentes são atualizados na primeira sincronização.",
-        "nl": "De apparaatpictogrammen uit 1.19.0 waren onzichtbaar in de donkere Admin-thema's. Ze volgen nu het thema en zijn overal leesbaar; bestaande apparaten worden bij de eerste synchronisatie bijgewerkt.",
-        "fr": "Les pictogrammes d'appareils de la 1.19.0 étaient invisibles dans les thèmes sombres de l'Admin. Ils suivent maintenant le thème ; les appareils existants sont mis à jour à la première synchro.",
-        "it": "I pittogrammi degli apparecchi della 1.19.0 erano invisibili nei temi scuri dell'Admin. Ora seguono il tema e si leggono ovunque; gli apparecchi esistenti si aggiornano alla prima sincronizzazione.",
-        "es": "Los pictogramas de aparatos de la 1.19.0 eran invisibles en los temas oscuros del Admin. Ahora siguen el tema y se leen en todos; los aparatos existentes se actualizan en la primera sincronización.",
-        "pl": "Piktogramy urządzeń z wersji 1.19.0 były niewidoczne w ciemnych motywach Admina. Teraz podążają za motywem i są czytelne wszędzie; istniejące urządzenia aktualizują się przy pierwszej synchronizacji.",
-        "uk": "Піктограми приладів із 1.19.0 були невидимі в темних темах адмінки. Тепер вони наслідують тему й читаються всюди; наявні прилади оновлюються під час першої синхронізації.",
-        "zh-cn": "1.19.0 中的设备图标在管理界面的深色主题下不可见。现在它们跟随主题，在所有主题下都清晰可读；现有设备会在首次同步时更新。"
       }
     },
     "titleLang": {

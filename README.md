@@ -121,7 +121,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
-### **WORK IN PROGRESS**
+### 1.25.1 (2026-09-29)
 
 - Changed: on/off datapoints are switches — the power state, the dishwasher's time light and the oven's steam assist; switching off sends Off, or Standby where the appliance has no Off.
 - Changed: numbers show in a readable unit — durations in minutes, lifetime runtime in hours, energy in kWh, water, detergent and softener in litres, the load recommendation in kg.
@@ -176,11 +176,6 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - Improved: when live updates cannot connect, the message now says whether Home Connect or the login is the cause.
 - Improved: a catch-up after interrupted live updates now tells how long it had to wait for the daily request limit.
 - Improved: network errors now name their cause, for example an unknown host or a refused connection, instead of just "fetch failed".
-
-### 1.21.0 (2026-09-17)
-
-- Fixed: the error code list of an appliance now carries a translated name and an explanation instead of an English label derived from its identifier.
-- Fixed: a data point's selection list no longer keeps values the appliance stopped offering after the cloud answered without them once.
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 

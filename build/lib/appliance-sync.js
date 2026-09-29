@@ -33,6 +33,8 @@ var import_legacy_cleanup = require("./legacy-cleanup");
 var import_i18n = require("./i18n");
 var import_state_texts = require("./state-texts");
 var import_program_uids = require("./program-uids");
+var import_switch_values = require("./switch-values");
+var import_value_units = require("./value-units");
 var import_value_labels = require("./value-labels");
 var import_program_records = require("./program-records");
 const HISTORY_PROGRAM_NAMES = ["histProgram1", "histProgram2", "histProgram3", "histProgram4"];
@@ -61,7 +63,7 @@ const END_TRIGGERS = [
 ];
 const RUN_PAIRING_TOLERANCE_MS = 6e4;
 const FAILED_DEF_RETRY_MS = 6 * 60 * 6e4;
-const PROGRAM_DEF_GENERATION = 4;
+const PROGRAM_DEF_GENERATION = 5;
 function familyOf(values, key) {
   if (!values || values.length === 0 || !key) {
     return values;
@@ -76,7 +78,7 @@ function familyOf(values, key) {
 }
 function confirmedValue(channel, stateId, req, bshValues, written) {
   var _a, _b;
-  if (!bshValues || bshValues.length === 0) {
+  if (!bshValues || bshValues.length === 0 || typeof written === "boolean") {
     return written;
   }
   if (channel === "programs" && stateId === "selectedProgram") {
@@ -116,10 +118,32 @@ function storedNameSource(native) {
 function stringOrUndef(v) {
   return typeof v === "string" ? v : void 0;
 }
-function hasRecording(obj) {
+function storedForm(key, common, rel) {
   var _a;
-  const custom = (_a = obj.common) == null ? void 0 : _a.custom;
-  return (0, import_pure_helpers.isRecord)(custom) && Object.keys(custom).length > 0;
+  if (rel.endsWith(".lastRun.energy") && common.type === "number" && import_value_units.RUN_ENERGY.from.includes((_a = common.unit) != null ? _a : "")) {
+    return { kind: "unit", p: import_value_units.RUN_ENERGY };
+  }
+  if (key === void 0) {
+    return void 0;
+  }
+  if (common.type === "string" && (0, import_switch_values.isSwitchKey)(key)) {
+    return { kind: "switch" };
+  }
+  const p = common.type === "number" ? (0, import_value_units.presentationFor)(key, common.unit) : void 0;
+  return p ? { kind: "unit", p } : void 0;
+}
+function shownBounds(common, p) {
+  const patch = { unit: p.unit };
+  if (typeof common.min === "number") {
+    patch.min = (0, import_value_units.boundShown)(common.min, p, "min");
+  }
+  if (typeof common.max === "number") {
+    patch.max = (0, import_value_units.boundShown)(common.max, p, "max");
+  }
+  if (typeof common.step === "number") {
+    patch.step = (0, import_value_units.boundShown)(common.step, p, "step");
+  }
+  return patch;
 }
 const OWNED_COMMON_KEYS = ["type", "role", "read", "write", "unit", "min", "max", "step", "states", "def"];
 function metaSignature(common, native) {
@@ -509,6 +533,8 @@ class ApplianceSync {
     } catch (e) {
       this.port.log.debug(`priming devices from objects failed: ${(0, import_pure_helpers.errMessage)(e)}`);
     }
+    const storedLists = /* @__PURE__ */ new Map();
+    const oldForms = /* @__PURE__ */ new Map();
     try {
       const objects = await this.port.getForeignObjects(`${this.port.namespace}.*`, "state");
       for (const [fullId, obj] of Object.entries(objects)) {
@@ -522,7 +548,7 @@ class ApplianceSync {
         const seenValues = Array.isArray(native.seenValues) ? native.seenValues.filter((v) => typeof v === "string") : void 0;
         const defGeneration = typeof native.defGeneration === "number" ? native.defGeneration : void 0;
         const common = (_e = obj.common) != null ? _e : {};
-        this.knownStates.set(rel, {
+        const known = {
           bshKey,
           bshValues,
           metaSig: metaSignature(common, { bshKey, bshValues }),
@@ -534,7 +560,13 @@ class ApplianceSync {
           seenValues,
           defGeneration,
           nameSource: storedNameSource(native)
-        });
+        };
+        this.knownStates.set(rel, known);
+        if (storedForm(bshKey, common, rel) !== void 0) {
+          oldForms.set(rel, { common, known });
+        } else if ((0, import_pure_helpers.isRecord)(common.states) || common.type === "string" && bshKey !== void 0) {
+          storedLists.set(rel, { common, known });
+        }
         const parts = rel.split(".");
         if (parts.length === 3 && parts[1] === "options" && ((_f = obj.common) == null ? void 0 : _f.write) === true) {
           const deviceId = parts[0];
@@ -547,7 +579,153 @@ class ApplianceSync {
       this.port.log.debug(`priming known states from objects failed: ${(0, import_pure_helpers.errMessage)(e)}`);
     }
     await this.refreshLegacyLabels();
+    await this.bringOldFormsUpToDate(oldForms);
+    await this.refreshValueLabels(storedLists);
     await this.refreshChannelNames();
+  }
+  /**
+   * Bring every datapoint an older version stored in another form to the current one, object and value, without a
+   * single cloud request (decision 47): an on/off text becomes a switch ("on" → true), a number in the appliance's
+   * unit its shown unit (2,011,440 s → 558.7 h). The same datapoint lives on — its id, and what hangs on it, stay. An
+   * appliance that is off reports nothing for hours; without this its tree would show the old number under the new
+   * unit, or a text in a boolean, until it does.
+   *
+   * @param oldForms relative id → stored `common` and known state of every datapoint in an older form
+   */
+  async bringOldFormsUpToDate(oldForms) {
+    var _a, _b;
+    for (const [rel, { common, known }] of oldForms) {
+      const form = storedForm(known.bshKey, common, rel);
+      if (form === void 0) {
+        continue;
+      }
+      try {
+        const patch = form.kind === "switch" ? { type: "boolean", role: (0, import_switch_values.switchRole)((_a = known.bshKey) != null ? _a : "", common.write === true), def: false } : shownBounds(common, form.p);
+        if (form.kind === "switch") {
+          await this.replaceWithoutList(rel, patch);
+        } else {
+          await this.port.extendObject(rel, { common: patch });
+        }
+        const val = (_b = await this.port.getState(rel)) == null ? void 0 : _b.val;
+        const shown = form.kind === "switch" ? typeof val === "string" ? (0, import_switch_values.switchState)(val) : void 0 : typeof val === "number" ? (0, import_value_units.toShown)(val, form.p) : void 0;
+        if (shown !== void 0) {
+          await this.port.setState(rel, { val: shown, ack: true });
+        }
+        const now = { ...common, ...patch };
+        if (form.kind === "switch") {
+          delete now.states;
+          known.hasStates = false;
+        }
+        known.type = now.type;
+        known.metaSig = metaSignature(now, { bshKey: known.bshKey, bshValues: known.bshValues });
+      } catch (e) {
+        this.port.log.debug(`bringing ${rel} to its current form failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+      }
+    }
+  }
+  /**
+   * Write an object once more, whole, with the given `common` fields and without a value list. A merge can only null
+   * `common.states`, and js-controller 7.2.2 keeps the `null` — an updated switch would then differ from the one a fresh
+   * installation creates (the upgrade suite of the inventory run compares every field). Everything else on the object
+   * stays, what hangs on it (`custom`) included.
+   *
+   * @param rel the namespace-relative state id
+   * @param patch the `common` fields to set
+   */
+  async replaceWithoutList(rel, patch) {
+    const obj = await this.port.getObject(rel);
+    if (!obj) {
+      return;
+    }
+    const common = { ...obj.common, ...patch };
+    delete common.states;
+    await this.port.setForeignObject(`${this.port.namespace}.${rel}`, {
+      ...obj,
+      common
+    });
+  }
+  /**
+   * Give every stored value list the adapter's own labels in the system language, and an enum an older
+   * version stored without a list the catalogue's list — without a single cloud request (decisions 41, 42).
+   * A list is otherwise rebuilt only when a definition or an answer carries its datapoint again, and Home
+   * Connect sends an option only in the state and program it belongs to (measured 2026-09-29: the
+   * washer-dryer's definitions carried no temperature at all while it was idle), so an update left such a
+   * datapoint with the labels an older version stored ("Cold" on a German installation), or with no list,
+   * for good. A value the table does not know keeps the label it has; an existing list keeps its set of
+   * values — which values a list holds stays the definitions' business.
+   *
+   * @param storedLists relative id → stored `common` and known state of every text datapoint of a BSH key
+   */
+  async refreshValueLabels(storedLists) {
+    var _a, _b;
+    const lang = (_a = this.port.language) != null ? _a : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+    for (const [rel, { common, known }] of storedLists) {
+      if (!(0, import_pure_helpers.isRecord)(common.states)) {
+        await this.fillCatalogList(rel, common, known, lang);
+        continue;
+      }
+      const stored = common.states;
+      const states = { ...stored };
+      let changed = false;
+      const relabel = (short, wanted) => {
+        if (wanted !== void 0 && typeof stored[short] === "string" && stored[short] !== wanted) {
+          states[short] = wanted;
+          changed = true;
+        }
+      };
+      const values = (_b = known.bshValues) != null ? _b : [];
+      if (values.length > 0) {
+        for (const v of values) {
+          for (const short of /* @__PURE__ */ new Set([(0, import_value_transformer.shortEnumIn)(v, values), (0, import_value_transformer.shortEnum)(v)])) {
+            const label = stored[short];
+            relabel(short, (0, import_value_labels.valueLabel)(v, lang, label !== short ? label : void 0, known.bshKey));
+          }
+        }
+      } else {
+        for (const short of Object.keys(stored)) {
+          relabel(short, (0, import_value_labels.ownValueLabel)(short, lang));
+        }
+      }
+      if (!changed) {
+        continue;
+      }
+      try {
+        await this.port.extendObject(rel, { common: { states } });
+        known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
+      } catch (e) {
+        this.port.log.debug(`relabelling the values of ${rel} failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+      }
+    }
+  }
+  /**
+   * The catalogue's list for an enum an older version stored without one, built the way the transformer
+   * builds it for a value without a cloud list (catalogue, then every value the datapoint carried). A key
+   * the catalogue names only in the local appliance descriptions needs the prefix of a real value; the
+   * stored full values lend it, and without one the datapoint waits for its next value.
+   *
+   * @param rel the namespace-relative state id
+   * @param common the stored `common`
+   * @param known its in-memory record
+   * @param lang the system language
+   */
+  async fillCatalogList(rel, common, known, lang) {
+    var _a, _b, _c;
+    const key = (_a = known.bshKey) != null ? _a : "";
+    const carried = [...(_b = known.bshValues) != null ? _b : [], ...(_c = known.seenValues) != null ? _c : []];
+    const catalogue = (0, import_value_labels.catalogValues)(key, carried[0]);
+    if (catalogue === void 0) {
+      return;
+    }
+    const full = [...catalogue, ...carried.filter((v) => !catalogue.includes(v))];
+    const shortOf = (v) => rel.split(".")[1] === "options" ? (0, import_value_transformer.shortEnum)(v) : (0, import_value_transformer.shortEnumIn)(v, full);
+    const states = Object.fromEntries(full.map((v) => [shortOf(v), (0, import_value_labels.valueLabel)(v, lang, void 0, key)]));
+    try {
+      await this.port.extendObject(rel, { common: { states } });
+      known.hasStates = true;
+      known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
+    } catch (e) {
+      this.port.log.debug(`giving ${rel} its list of values failed: ${(0, import_pure_helpers.errMessage)(e)}`);
+    }
   }
   /**
    * Bring datapoints an older version created up to the current naming, without
@@ -645,11 +823,12 @@ class ApplianceSync {
   }
   /**
    * Sort out the trees the previous adapter generation (community 1.6.x) left behind — an update
-   * cleans up after itself, the user never deletes objects by hand. A tree nobody attached anything
-   * to goes right away. A tree with a recording, a room or function assignment or an alias pointing
-   * into it waits for its appliance: once the appliance list has created the new tree and the
-   * appliance has been read in full, {@link adoptLegacyTree} carries those over and deletes the old
-   * tree. Runs first at start, so no tree pass ever sees a legacy state.
+   * cleans up after itself, the user never deletes objects by hand. A tree without a room or function
+   * assignment and without an alias pointing into it goes right away. A tree with one waits for its
+   * appliance: once the appliance list has created the new tree and the appliance has been read in
+   * full, {@link adoptLegacyTree} carries those over and deletes the old tree. A recording decides
+   * nothing here — it belongs to the user and goes on only with the same datapoint. Runs first at
+   * start, so no tree pass ever sees a legacy state.
    */
   async sortOutLegacyTrees() {
     try {
@@ -669,9 +848,7 @@ class ApplianceSync {
       let removed = 0;
       for (const root of roots) {
         const rootFull = `${this.port.namespace}.${root}`;
-        const holds = Object.entries(all).some(
-          ([id, obj]) => (id === rootFull || id.startsWith(`${rootFull}.`)) && (attached.has(id) || (obj == null ? void 0 : obj.type) === "state" && hasRecording(obj))
-        );
+        const holds = [...attached].some((id) => id === rootFull || id.startsWith(`${rootFull}.`));
         if (holds) {
           this.pendingLegacyRoots.add(root);
           continue;
@@ -691,7 +868,7 @@ class ApplianceSync {
       }
       if (this.pendingLegacyRoots.size > 0) {
         this.port.log.info(
-          `${this.pendingLegacyRoots.size} object tree(s) of the previous adapter generation carry recordings, rooms or aliases \u2014 they move to the new datapoints once the appliance has been read.`
+          `${this.pendingLegacyRoots.size} object tree(s) of the previous adapter generation carry rooms or aliases \u2014 they move to the new datapoints once the appliance has been read.`
         );
       }
     } catch (e) {
@@ -752,11 +929,12 @@ class ApplianceSync {
     );
   }
   /**
-   * Hand a legacy tree over to its appliance's new tree and delete it: every recording moves to the
-   * datapoint that takes its place — continuing its series under the old id (`aliasId`) where the
-   * value type stays the same, as a new series where it changed (a door text became yes/no) — the
-   * room and function assignments and the aliases follow. A legacy datapoint without a counterpart
-   * goes with the tree; the log line says how many of them carried something.
+   * Hand a legacy tree over to its appliance's new tree and delete it: the room and function
+   * assignments and the aliases follow to the datapoints that take the old ones' place. A recording
+   * goes on only where the SAME datapoint lives on — one successor of the same value type, its series
+   * continued under the old id (`aliasId`); a datapoint replaced by several, or by one of another
+   * type (a door text became yes/no), is a new datapoint and starts without the user's settings. A
+   * legacy datapoint without a counterpart goes with the tree.
    *
    * @param deviceId the appliance's new device id
    * @param haId its haId
@@ -773,7 +951,6 @@ class ApplianceSync {
       const all = await this.port.getAdapterObjects();
       const attached = await this.attachedIds();
       const carry = /* @__PURE__ */ new Map();
-      let recordings = 0;
       let lost = 0;
       for (const [id, obj] of Object.entries(all)) {
         if (!obj || obj.type !== "state" || !id.startsWith(`${rootFull}.`)) {
@@ -783,29 +960,20 @@ class ApplianceSync {
           var _a2;
           return ((_a2 = all[full]) == null ? void 0 : _a2.type) === "state";
         });
-        const recorded = hasRecording(obj);
         if (targets.length === 0) {
-          if (recorded || attached.has(id)) {
+          if (attached.has(id)) {
             lost++;
           }
           continue;
         }
         carry.set(id, targets);
-        if (!recorded) {
-          continue;
+        const own = obj.common;
+        const successor = (_a = all[targets[0]]) == null ? void 0 : _a.common;
+        if (targets.length === 1 && (0, import_pure_helpers.isRecord)(own.custom) && (successor == null ? void 0 : successor.type) === own.type && !((0, import_pure_helpers.isRecord)(successor == null ? void 0 : successor.custom) && Object.keys(successor.custom).length > 0)) {
+          const custom = JSON.parse(JSON.stringify(own.custom));
+          (0, import_device_move.keepHistoryUnder)(custom, id);
+          await this.port.extendForeignObject(targets[0], { common: { custom } });
         }
-        for (const target of targets) {
-          const existing = (_a = all[target]) == null ? void 0 : _a.common;
-          if ((0, import_pure_helpers.isRecord)(existing == null ? void 0 : existing.custom) && Object.keys(existing.custom).length > 0) {
-            continue;
-          }
-          const custom = JSON.parse(JSON.stringify(obj.common.custom));
-          if ((existing == null ? void 0 : existing.type) === obj.common.type) {
-            (0, import_device_move.keepHistoryUnder)(custom, id);
-          }
-          await this.port.extendForeignObject(target, { common: { custom } });
-        }
-        recordings++;
       }
       const aliases = await (0, import_device_move.retargetAliases)(
         await this.port.getAliases(),
@@ -818,12 +986,11 @@ class ApplianceSync {
       const enums = await this.port.deleteTreeCarryingEnums(root, carry);
       this.forgetWritten(root);
       const carried = [
-        ...recordings > 0 ? [`${recordings} recording(s)`] : [],
         ...enums > 0 ? [`${enums} room/function entr${enums === 1 ? "y" : "ies"}`] : [],
         ...aliases > 0 ? [`${aliases} alias(es)`] : []
       ];
       this.port.log.info(
-        `${this.label(deviceId)}: took over the object tree ${root} of the previous adapter generation${carried.length > 0 ? ` \u2014 ${carried.join(", ")} carried to the new datapoints` : ""}${lost > 0 ? `; ${lost} datapoint(s) with a recording, room or alias have no counterpart and are gone` : ""}.`
+        `${this.label(deviceId)}: took over the object tree ${root} of the previous adapter generation${carried.length > 0 ? ` \u2014 ${carried.join(", ")} carried to the new datapoints` : ""}${lost > 0 ? `; ${lost} datapoint(s) with a room or alias have no counterpart and are gone` : ""}.`
       );
     } catch (e) {
       this.pendingLegacyRoots.add(root);
@@ -971,7 +1138,7 @@ class ApplianceSync {
         ...report.aliases > 0 ? [`${report.aliases} alias(es)`] : []
       ];
       this.port.log.info(
-        `${fillOnly ? `Appliance "${name}": finished the interrupted move of ${from} to ${to} \u2014 moved ${report.datapoints} more datapoint(s)` : `Appliance "${name}": device id is now ${to} (was ${from}) \u2014 moved ${report.datapoints} datapoint(s)`}${carried.length > 0 ? ` with ${carried.join(", ")}` : ""}${report.history > 0 ? `; ${report.history} recording(s) keep their history` : ""}`
+        `${fillOnly ? `Appliance "${name}": finished the interrupted move of ${from} to ${to} \u2014 moved ${report.datapoints} more datapoint(s)` : `Appliance "${name}": device id is now ${to} (was ${from}) \u2014 moved ${report.datapoints} datapoint(s)`}${carried.length > 0 ? ` with ${carried.join(", ")}` : ""}`
       );
     } catch (e) {
       this.port.log.warn(
@@ -1032,7 +1199,6 @@ class ApplianceSync {
       const drainedCandidates = /* @__PURE__ */ new Set();
       const moved = /* @__PURE__ */ new Map();
       let migrated = 0;
-      let history = 0;
       for (const [fullId, obj] of Object.entries(states)) {
         const rel = this.relId(fullId);
         const parts = rel.split(".");
@@ -1070,7 +1236,7 @@ class ApplianceSync {
             Object.assign(common, oldCommon);
             if (oldCommon.custom) {
               const custom = JSON.parse(JSON.stringify(oldCommon.custom));
-              history += (0, import_device_move.keepHistoryUnder)(custom, fullId);
+              (0, import_device_move.keepHistoryUnder)(custom, fullId);
               common.custom = custom;
             }
             if (t.channel === "settings") {
@@ -1118,7 +1284,7 @@ class ApplianceSync {
       }
       if (migrated > 0) {
         this.port.log.info(
-          `Migrated ${migrated} datapoint(s) to the corrected tree layout${aliases > 0 ? ` with ${aliases} alias(es)` : ""}${history > 0 ? `; ${history} recording(s) keep their history` : ""}.`
+          `Migrated ${migrated} datapoint(s) to the corrected tree layout${aliases > 0 ? ` with ${aliases} alias(es)` : ""}.`
         );
       }
     } catch (e) {
@@ -2379,7 +2545,15 @@ class ApplianceSync {
     );
     const figures = [
       ["water", import_program_records.RUN_DETAIL.waterMl, "lrWater", "lrWaterDesc", "l", "value", (v) => v / 1e3],
-      ["energy", import_program_records.RUN_DETAIL.energyWh, "lrEnergy", "lrEnergyDesc", "Wh", "value.energy.consumed", (v) => v],
+      [
+        "energy",
+        import_program_records.RUN_DETAIL.energyWh,
+        "lrEnergy",
+        "lrEnergyDesc",
+        "kWh",
+        "value.energy.consumed",
+        (v) => (0, import_value_units.toShown)(v, import_value_units.RUN_ENERGY)
+      ],
       ["detergent", import_program_records.RUN_DETAIL.detergentMl, "lrDetergent", "lrDetergentDesc", "ml", "value", (v) => v],
       ["softener", import_program_records.RUN_DETAIL.softenerMl, "lrSoftener", "lrSoftenerDesc", "ml", "value", (v) => v]
     ];
@@ -2652,6 +2826,10 @@ class ApplianceSync {
       }
       const clearCommon = known.hasStates === true && fresh.states !== void 0;
       const clearNative = known.hasValues === true && native.bshValues !== void 0;
+      if (known.hasStates === true && known.type !== void 0 && fresh.type !== known.type && fresh.states === void 0) {
+        await this.replaceWithoutList(fullId, {});
+        clearedStates = true;
+      }
       if (clearCommon || clearNative) {
         await this.port.extendObject(fullId, {
           ...clearCommon ? { common: { states: null } } : {},
@@ -2664,7 +2842,7 @@ class ApplianceSync {
       known.name = fresh.name;
       known.nameSource = nameSource;
       known.desc = fresh.desc;
-      known.hasStates = fresh.states !== void 0 || known.hasStates === true;
+      known.hasStates = fresh.states !== void 0 || known.hasStates === true && !clearedStates;
       known.hasValues = native.bshValues !== void 0 || known.hasValues === true;
       known.seenValues = (_a = native.seenValues) != null ? _a : known.seenValues;
       this.port.log.debug(`refreshed object metadata of ${fullId}`);
@@ -2973,6 +3151,9 @@ class ApplianceSync {
         }
       }
       bshValues = union;
+    }
+    if (bshValues && bshValues.length > 0 && common.type === "string") {
+      const union = bshValues;
       const exStates = (0, import_pure_helpers.isRecord)(exCommon.states) ? exCommon.states : {};
       const newStates = (0, import_pure_helpers.isRecord)(common.states) ? common.states : {};
       const lang = (_g = this.port.language) != null ? _g : import_value_labels.DEFAULT_LABEL_LANGUAGE;
@@ -3119,6 +3300,11 @@ class ApplianceSync {
           `Write to ${rel} not sent: "${String(value)}" can only be chosen at the appliance \u2014 Home Connect does not offer it for remote selection.`
         );
         await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta == null ? void 0 : meta.bshKey);
+      } else if (typeof value === "boolean" && ctx.bshValues && ctx.bshValues.length > 0) {
+        this.port.log.info(
+          `Write to ${rel} not sent: the appliance cannot be switched ${value ? "on" : "off"} remotely.`
+        );
+        await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta == null ? void 0 : meta.bshKey);
       } else {
         const both = (0, import_command_dispatch.ambiguousCandidates)(value, ctx.bshValues);
         if (both.length > 0 && channel !== "options") {
@@ -3258,7 +3444,7 @@ class ApplianceSync {
         continue;
       }
       const values = familyOf(meta == null ? void 0 : meta.bshValues, key);
-      const value = values && values.length > 0 ? (0, import_command_dispatch.resolveEnum)(st.val, values, true) : st.val;
+      const value = (0, import_command_dispatch.resolveValue)(st.val, values, true, key);
       if (value !== void 0 && value !== null) {
         result.push({ key, value });
       }

@@ -34,6 +34,8 @@ var import_i18n = require("./i18n");
 var import_state_texts = require("./state-texts");
 var import_value_labels = require("./value-labels");
 var import_program_records = require("./program-records");
+var import_value_units = require("./value-units");
+var import_switch_values = require("./switch-values");
 const EVENT_PRESENT = "BSH.Common.EnumType.EventPresentState.Present";
 const UNNAMED_EVENT_KEY = "BSH.Common.EnumType.EventPresentState";
 const KIND_TO_CHANNEL = {
@@ -202,29 +204,19 @@ function transformOptionDefinition(opt) {
     return { channel, id, common: common2, nameSource, value: typeof (c == null ? void 0 : c.default) === "boolean" ? c.default : void 0 };
   }
   if (opt.type === "Int" || opt.type === "Double") {
-    const common2 = {
-      name,
-      desc,
-      type: "number",
-      role: writable ? "level" : "value",
-      read: true,
-      write: writable
-    };
-    if (opt.unit) {
-      common2.unit = opt.unit;
-    }
-    if (typeof (c == null ? void 0 : c.min) === "number") {
-      common2.min = c.min;
-    }
-    if (typeof (c == null ? void 0 : c.max) === "number") {
-      common2.max = c.max;
-    }
-    if (typeof (c == null ? void 0 : c.stepsize) === "number") {
-      common2.step = c.stepsize;
-    }
-    return { channel, id, common: common2, nameSource, value: typeof (c == null ? void 0 : c.default) === "number" ? c.default : void 0 };
+    const common2 = numberCommon(name, desc, writable, opt.key, opt.unit, c);
+    const p = (0, import_value_units.presentationFor)(opt.key, opt.unit);
+    const def = typeof (c == null ? void 0 : c.default) === "number" ? c.default : void 0;
+    return { channel, id, common: common2, nameSource, value: def !== void 0 && p ? (0, import_value_units.toShown)(def, p) : def };
   }
   const allowed = (_a = c == null ? void 0 : c.allowedvalues) == null ? void 0 : _a.filter((v) => v.length > 0);
+  if ((0, import_switch_values.isSwitchKey)(opt.key) && allowed && allowed.length > 0) {
+    const common2 = {
+      ...booleanCommon(name, (0, import_switch_values.switchRole)(opt.key, writable), writable),
+      desc
+    };
+    return { channel, id, common: common2, nameSource, value: (0, import_switch_values.switchState)(c == null ? void 0 : c.default), bshValues: allowed };
+  }
   const common = { name, desc, type: "string", role: "text", read: true, write: writable };
   let bshValues;
   if (allowed && allowed.length > 0) {
@@ -246,8 +238,9 @@ function isWritable(key) {
   const { channel, id } = stateIdForKey(key);
   return channel === "settings" || channel === "programs" && id === "selectedProgram";
 }
+const COLOR_KEYS = /* @__PURE__ */ new Set(["BSH.Common.Setting.AmbientLightCustomColor"]);
 function transformValue(item) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  var _a, _b, _c, _d, _e, _f;
   const { key, value } = item;
   const { name, nameSource, desc } = itemLabel(key, item.name, stateIdForKey(key).id);
   const writable = isWritable(key) && ((_a = item.constraints) == null ? void 0 : _a.access) !== "read";
@@ -260,28 +253,19 @@ function transformValue(item) {
     };
   }
   if (typeof value === "number") {
-    const shown = /\.Water\.Consumed$/.test(key) && item.unit === "l" ? value / 1e3 : value;
-    const common = {
-      name,
-      desc,
-      type: "number",
-      role: writable ? "level" : "value",
-      read: true,
-      write: writable
+    const p = (0, import_value_units.presentationFor)(key, item.unit);
+    const common = numberCommon(name, desc, writable, key, item.unit, item.constraints);
+    return { common, nameSource, value: p ? (0, import_value_units.toShown)(value, p) : value };
+  }
+  if ((0, import_switch_values.isSwitchKey)(key)) {
+    const catalogue2 = (0, import_value_labels.catalogValues)(key, value);
+    const bshValues = !writable ? void 0 : allowed && allowed.length > 0 ? allowed : catalogue2 && catalogue2.length > 0 ? [...catalogue2] : typeof value === "string" && value.length > 0 ? [value] : void 0;
+    return {
+      common: { ...booleanCommon(name, (0, import_switch_values.switchRole)(key, writable), writable), desc },
+      nameSource,
+      value: (0, import_switch_values.switchState)(value),
+      bshValues
     };
-    if (item.unit) {
-      common.unit = item.unit;
-    }
-    if (typeof ((_d = item.constraints) == null ? void 0 : _d.min) === "number") {
-      common.min = item.constraints.min;
-    }
-    if (typeof ((_e = item.constraints) == null ? void 0 : _e.max) === "number") {
-      common.max = item.constraints.max;
-    }
-    if (typeof ((_f = item.constraints) == null ? void 0 : _f.stepsize) === "number") {
-      common.step = item.constraints.stepsize;
-    }
-    return { common, nameSource, value: shown };
   }
   if (typeof value === "boolean") {
     return {
@@ -294,7 +278,7 @@ function transformValue(item) {
   const catalogue = allowed && allowed.length > 0 ? void 0 : (0, import_value_labels.catalogValues)(key, value);
   if (isEnumString || allowed && allowed.length > 0 || catalogue !== void 0) {
     const base = allowed && allowed.length > 0 ? allowed : [...catalogue != null ? catalogue : []];
-    const seenValues = [...(_g = item.seen) != null ? _g : []];
+    const seenValues = [...(_d = item.seen) != null ? _d : []];
     if (typeof value === "string" && value.length > 0 && !base.includes(value) && !seenValues.includes(value)) {
       seenValues.push(value);
     }
@@ -303,8 +287,8 @@ function transformValue(item) {
     const shortOf = (v) => inList ? shortEnumIn(v, inList) : shortEnum(v);
     const short = typeof value === "string" ? value.length > 0 ? shortOf(value) : "" : void 0;
     const common = { name, desc, type: "string", role: "text", read: true, write: writable };
-    const lang = (_h = item.lang) != null ? _h : import_value_labels.DEFAULT_LABEL_LANGUAGE;
-    const display = (_i = item.constraints) == null ? void 0 : _i.displayvalues;
+    const lang = (_e = item.lang) != null ? _e : import_value_labels.DEFAULT_LABEL_LANGUAGE;
+    const display = (_f = item.constraints) == null ? void 0 : _f.displayvalues;
     const cloudLabels = allowed && display && display.length === allowed.length ? display : void 0;
     const states = {};
     if (PROGRAM_ITEM_NAMES[key]) {
@@ -326,11 +310,37 @@ function transformValue(item) {
       ...seenValues.length > 0 ? { seenValues } : {}
     };
   }
+  const role = COLOR_KEYS.has(key) && writable ? "level.color.rgb" : "text";
   return {
-    common: { name, desc, type: "string", role: "text", read: true, write: writable },
+    common: { name, desc, type: "string", role, read: true, write: writable },
     nameSource,
     value: typeof value === "string" ? value : value === void 0 || value === null ? void 0 : JSON.stringify(value)
   };
+}
+function numberCommon(name, desc, writable, key, unit, constraints) {
+  const common = {
+    name,
+    desc,
+    type: "number",
+    role: writable ? "level" : "value",
+    read: true,
+    write: writable
+  };
+  const p = (0, import_value_units.presentationFor)(key, unit);
+  const shown = (0, import_value_units.shownUnit)(key, unit);
+  if (shown) {
+    common.unit = shown;
+  }
+  if (typeof (constraints == null ? void 0 : constraints.min) === "number") {
+    common.min = p ? (0, import_value_units.boundShown)(constraints.min, p, "min") : constraints.min;
+  }
+  if (typeof (constraints == null ? void 0 : constraints.max) === "number") {
+    common.max = p ? (0, import_value_units.boundShown)(constraints.max, p, "max") : constraints.max;
+  }
+  if (typeof (constraints == null ? void 0 : constraints.stepsize) === "number") {
+    common.step = p ? (0, import_value_units.boundShown)(constraints.stepsize, p, "step") : constraints.stepsize;
+  }
+  return common;
 }
 function booleanCommon(name, role, writable) {
   return { name, type: "boolean", role, read: true, write: writable, def: false };
