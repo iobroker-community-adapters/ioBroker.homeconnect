@@ -1,3 +1,4 @@
+/* global it, before, after */
 "use strict";
 // Generates the adapter's complete object inventory from fixtures and proves that
 // an update reaches every object of an existing installation.
@@ -89,10 +90,10 @@ function adapterEnv(...hooks) {
  * its first write; the known content comes from the database, a seed included.
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
- * @returns {Promise<{writes: Map<string, number>, unchanged: string[], deleted: string[], times: Array<[string, number]>}>} the watch
+ * @returns {Promise<object>} the watch
  */
 async function watchObjectWrites(harness) {
-  const watch = { writes: new Map(), unchanged: [], deleted: [], times: [], unchangedIndicators: [] };
+  const watch = { writes: new Map(), peak: new Map(), unchanged: [], deleted: [], times: [], unchangedIndicators: [] };
   const known = new Map();
   const roles = new Map();
   const states = new Map();
@@ -120,6 +121,7 @@ async function watchObjectWrites(harness) {
     if (obj.from === `system.adapter.${ADAPTER}.0`) {
       const n = (watch.writes.get(id) ?? 0) + 1;
       watch.writes.set(id, n);
+      watch.peak.set(id, Math.max(watch.peak.get(id) ?? 0, n));
       watch.times.push([id, Date.now()]);
       if (known.get(id) === now && !(n === 1 && INSTANCE_OBJECTS.has(id))) {
         watch.unchanged.push(id);
@@ -141,6 +143,12 @@ async function watchObjectWrites(harness) {
     }
     states.set(id, now);
   });
+  // Round 64: a restart the harness plays (playControllerRestarts) is a new start — the per-start counts begin again,
+  // the known object content stays (it is the database's).
+  watch.newStart = () => {
+    watch.writes.clear();
+    states.clear();
+  };
   const list = await harness.objects.getObjectListAsync({ startkey: NS, endkey: `${NS}香` });
   for (const row of list.rows) {
     if (row.value) {
@@ -169,7 +177,7 @@ const FIXTURE_NATIVE = {
  * still only have their skeleton" — a green inventory without the very datapoints
  * the gate exists for.
  *
- * @param {import("@iobroker/testing").TestHarness} harness the running harness
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
  */
 async function waitForEveryAppliance(harness) {
   // Since 1.20.0 the adapter spaces its REST requests 100 ms apart (the API's
@@ -209,7 +217,7 @@ async function waitForEveryAppliance(harness) {
 /**
  * Adapter-specific: make the adapter create every object it can create.
  *
- * @param {import("@iobroker/testing").TestHarness} harness the running harness
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
  */
 async function feedFixtures(harness) {
   await waitForEveryAppliance(harness);
@@ -245,7 +253,7 @@ async function waitForAdapterWork(harness) {
 /**
  * Dump every object of the instance in the object-structure bot's format.
  *
- * @param {import("@iobroker/testing").TestHarness} harness the running harness
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
  * @returns {Promise<Record<string, unknown>>} id → object, sorted, without volatile fields
  */
 async function dumpObjects(harness) {
@@ -292,20 +300,115 @@ async function dumpStates(harness) {
   return out;
 }
 
+/**
+ * The throwaway js-controller keeps its instance object between runs, and changeAdapterConfig only
+ * EXTENDS native — a key that an older version of this adapter wrote would survive and trigger the
+ * start-up key migration and with it a host restart (played since round 64) in every suite. Null every key the
+ * fixture does not know, then apply the fixture (null is the post-migration state of a renamed key).
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
+ */
+async function resetInstanceNative(harness) {
+  const instance = await harness.objects.getObjectAsync(`system.adapter.${ADAPTER}.0`);
+  const stale = {};
+  for (const key of Object.keys(instance?.native ?? {})) {
+    if (!Object.hasOwn(FIXTURE_NATIVE, key)) {
+      stale[key] = null;
+    }
+  }
+  await harness.changeAdapterConfig(ADAPTER, { native: { ...stale, ...FIXTURE_NATIVE } });
+}
+
+/**
+ * js-controller 7.2.2 restarts an instance on EVERY change of its instance object while it runs (controller main.ts,
+ * objects `change` handler: `stopInstance`, then `startInstance` after `stopTimeout` + 2.5 s) — whoever wrote it, the
+ * adapter's own settings migration or device table included. The harness has no host; this plays it (round 64): the
+ * first change while the adapter runs stops it and starts it once more with the same hooks, so what the adapter did
+ * after that write in the same start is cut off here as it is on a real host. A change after that restart is a finding:
+ * on a host the instance would restart again, for good.
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
+ * @param {object | null} watch the suite's write watcher (watchObjectWrites), null in a suite without one
+ * @param {...string} hooks the test hooks the suite starts the adapter with (as for adapterEnv)
+ * @returns {{count: number, again: number[], done: Promise<void>}} the restart record
+ */
+function playControllerRestarts(harness, watch, ...hooks) {
+  const restarts = { count: 0, again: [], done: Promise.resolve() };
+  harness.on("objectChange", id => {
+    if (id !== `system.adapter.${ADAPTER}.0` || !harness.isAdapterRunning()) {
+      return;
+    }
+    if (restarts.count > 0) {
+      restarts.again.push(Date.now());
+      return;
+    }
+    restarts.count++;
+    restarts.done = (async () => {
+      await harness.stopAdapter();
+      watch?.newStart();
+      // What the host does when the process exits: `alive` false (a start that still sees it true ends with
+      // ADAPTER_ALREADY_RUNNING, exit code 7), then the start after stopTimeout + 2.5 s.
+      await harness.states.setState(`system.adapter.${ADAPTER}.0.alive`, {
+        val: false,
+        ack: true,
+        from: "system.host.testing",
+      });
+      await new Promise(resolve => setTimeout(resolve, RESTART_DELAY_MS));
+      // @iobroker/testing refuses a second start of one harness ("already been used"); the host starts the same
+      // instance again — reset the exit marker, and fail loudly should the harness no longer keep it there.
+      harness._adapterExit = undefined;
+      assert.ok(
+        !harness.didAdapterStop(),
+        "@iobroker/testing changed its exit marker — the restart play needs a new form",
+      );
+      await harness.startAdapterAndWait(false, adapterEnv(...hooks));
+    })();
+  });
+  return restarts;
+}
+
+/** Round 64: the host's wait before it starts a stopped instance again (controller main.ts, `stopTimeout || 500` + 2.5 s). */
+const RESTART_DELAY_MS = (require(path.join(ADAPTER_DIR, "io-package.json")).common.stopTimeout || 500) + 2500;
+/** Round 64: the recording marker every seeded state carries in `common.custom`, naming the id it was seeded under. */
+const RECORDING = "inventory-recording.0";
+
+/**
+ * Seed the previous release's objects before the start. Every state carries a recording marker (round 64): what hangs
+ * on a datapoint is the user's — it goes on with the SAME datapoint (its id, or the one id a move gives it), never onto
+ * a new datapoint, and never decides what the adapter creates, keeps or deletes (that shows up as a leftover or a
+ * missing object against the committed inventory).
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness the running harness
+ * @param {Record<string, any>} previous the previous release's inventory
+ */
+async function seedPrevious(harness, previous) {
+  for (const [id, obj] of Object.entries(previous)) {
+    const common =
+      obj.type === "state"
+        ? { ...obj.common, custom: { ...obj.common?.custom, [RECORDING]: { enabled: true, origin: id } } }
+        : obj.common;
+    await harness.objects.setObjectAsync(id, { ...obj, common });
+  }
+}
+
 tests.integration(ADAPTER_DIR, {
   controllerVersion: "stable",
   defineAdditionalTests({ suite }) {
     suite("object inventory", getHarness => {
       let harness;
       let watch;
+      let restarts;
       before(async function () {
         this.timeout(360000);
         harness = getHarness();
         watch = await watchObjectWrites(harness);
-        await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
+        await resetInstanceNative(harness);
         await setSystemLanguage(harness, FIRST_LANGUAGE);
+        restarts = playControllerRestarts(harness, watch, HOOK);
         await harness.startAdapterAndWait(false, adapterEnv(HOOK));
         await feedFixtures(harness);
+        await restarts.done;
+        await waitForAdapterWork(harness);
       });
 
       it("writes test/objects.inventory.json", async function () {
@@ -323,7 +426,7 @@ tests.integration(ADAPTER_DIR, {
       });
 
       it("writes no object more than MAX_OBJECT_WRITES times", function () {
-        const churn = [...watch.writes].filter(([, n]) => n > MAX_OBJECT_WRITES).map(([id, n]) => `${id} ×${n}`);
+        const churn = [...watch.peak].filter(([, n]) => n > MAX_OBJECT_WRITES).map(([id, n]) => `${id} ×${n}`);
         assert.deepStrictEqual(churn, [], `objects written more than ${MAX_OBJECT_WRITES} times in one start`);
       });
 
@@ -335,6 +438,10 @@ tests.integration(ADAPTER_DIR, {
       it("rewrites no indicator state unchanged", function () {
         const idle = [...new Set(watch.unchangedIndicators)];
         assert.deepStrictEqual(idle, [], `indicator states written without a change:\n${idle.join("\n")}`);
+      });
+
+      it("restarts at most once for its own instance object", function () {
+        assert.deepStrictEqual(restarts.again, [], "the instance object changed again after the restart it caused");
       });
 
       it("covers every appliance type Home Connect knows", async function () {
@@ -353,13 +460,21 @@ tests.integration(ADAPTER_DIR, {
     // translated. A suite of its own — the harness starts an adapter only once per suite.
     suite("second system language", getHarness => {
       let harness;
+      let restarts;
       before(async function () {
         this.timeout(360000);
         harness = getHarness();
-        await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
+        await resetInstanceNative(harness);
         await setSystemLanguage(harness, SECOND_LANGUAGE);
+        restarts = playControllerRestarts(harness, null, HOOK);
         await harness.startAdapterAndWait(false, adapterEnv(HOOK));
         await feedFixtures(harness);
+        await restarts.done;
+        await waitForAdapterWork(harness);
+      });
+
+      it("restarts at most once for its own instance object", function () {
+        assert.deepStrictEqual(restarts.again, [], "the instance object changed again after the restart it caused");
       });
 
       it("writes test/objects.inventory.de.json", async function () {
@@ -375,6 +490,7 @@ tests.integration(ADAPTER_DIR, {
       suite("upgrade from the previous release", getHarness => {
         let harness;
         let watch;
+        let restarts;
         let verdictAt;
         const previous = JSON.parse(fs.readFileSync(previousFile, "utf8"));
         before(async function () {
@@ -383,15 +499,18 @@ tests.integration(ADAPTER_DIR, {
           watch = await watchObjectWrites(harness);
           // The harness registers its own before() (fresh DB) ahead of this one,
           // so the seed survives and the adapter starts on top of the OLD objects.
-          for (const [id, obj] of Object.entries(previous)) {
-            await harness.objects.setObjectAsync(id, obj);
-          }
-          await harness.changeAdapterConfig(ADAPTER, { native: FIXTURE_NATIVE });
+          await seedPrevious(harness, previous);
+          await resetInstanceNative(harness);
           // The inventory was written in FIRST_LANGUAGE: labels the adapter localises itself (`states`) only
           // compare in the same language.
           await setSystemLanguage(harness, FIRST_LANGUAGE);
+          restarts = playControllerRestarts(harness, watch, HOOK);
           await harness.startAdapterAndWait(false, adapterEnv(HOOK));
           await feedFixtures(harness);
+          await waitForAdapterWork(harness);
+          // A migration that wrote the instance object restarts the instance (round 64) — the verdict comes after
+          // the second start has done its work.
+          await restarts.done;
           await waitForAdapterWork(harness);
           verdictAt = Date.now();
           fs.writeFileSync(
@@ -414,6 +533,9 @@ tests.integration(ADAPTER_DIR, {
             // Every field of `common`, not a chosen few: the adapter writes only what differs (round 61), so
             // every changed field must reach an existing installation.
             for (const f of new Set([...Object.keys(obj.common ?? {}), ...Object.keys(got.common ?? {})])) {
+              if (f === "custom") {
+                continue; // the user's recording — judged on its own below (round 64)
+              }
               if (canonical(got.common?.[f]) !== canonical(obj.common?.[f])) {
                 stale.push(`${id}: ${f} still ${JSON.stringify(got.common?.[f])}`);
               }
@@ -453,6 +575,49 @@ tests.integration(ADAPTER_DIR, {
           const current = JSON.parse(fs.readFileSync(INVENTORY, "utf8"));
           const lost = [...new Set(watch.deleted)].filter(id => id in previous && id in current);
           assert.deepStrictEqual(lost, [], `kept objects deleted during the upgrade:\n${lost.join("\n")}`);
+        });
+
+        it("a recording goes on only with its own datapoint", async function () {
+          this.timeout(60000);
+          const live = await dumpObjects(harness);
+          const carriers = new Map();
+          for (const [id, obj] of Object.entries(live)) {
+            const origin = obj.common?.custom?.[RECORDING]?.origin;
+            if (origin) {
+              carriers.set(origin, [...(carriers.get(origin) ?? []), id]);
+            }
+          }
+          const wrong = [];
+          for (const [origin, ids] of carriers) {
+            if (ids.length > 1) {
+              wrong.push(`${origin} → ${ids.join(", ")}: one recording on several datapoints`);
+            } else if (ids[0] !== origin && origin in live) {
+              wrong.push(`${origin} → ${ids[0]}: copied while ${origin} lives on`);
+            } else if (ids[0] !== origin && live[ids[0]].common?.type !== previous[origin]?.common?.type) {
+              wrong.push(`${origin} → ${ids[0]}: another value type — a new datapoint, not the same one moved`);
+            }
+          }
+          // A state that lives on keeps what hangs on it — the recording is the user's, never destroyed.
+          for (const [id, obj] of Object.entries(previous)) {
+            if (obj.type === "state" && live[id]?.type === "state" && !carriers.get(id)?.includes(id)) {
+              wrong.push(`${id}: its recording is gone although the datapoint lives on`);
+            }
+          }
+          assert.deepStrictEqual(wrong, [], `recordings that left their datapoint:\n${wrong.join("\n")}`);
+        });
+
+        // What a fresh installation does not have, an upgrade must not have either — whatever made it (round 64:
+        // a datapoint created because the old one was recorded is exactly that).
+        it("creates nothing a fresh installation lacks", async function () {
+          this.timeout(60000);
+          const current = JSON.parse(fs.readFileSync(INVENTORY, "utf8"));
+          const live = await dumpObjects(harness);
+          const extra = Object.keys(live).filter(id => !(id in current));
+          assert.deepStrictEqual(extra, [], `objects a fresh installation does not have:\n${extra.join("\n")}`);
+        });
+
+        it("restarts at most once for its own instance object", function () {
+          assert.deepStrictEqual(restarts.again, [], "the instance object changed again after the restart it caused");
         });
 
         // Last in the suite: a write after the verdict means waitForAdapterWork ended before the adapter did.
