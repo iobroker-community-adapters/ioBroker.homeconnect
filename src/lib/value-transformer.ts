@@ -11,6 +11,8 @@ import { tName } from "./i18n";
 import { stateText, DOOR_COMPARTMENT_NAMES } from "./state-texts";
 import { catalogValues, DEFAULT_LABEL_LANGUAGE, noProgramLabel, valueLabel } from "./value-labels";
 import { isProgramRecordKey } from "./program-records";
+import { boundShown, presentationFor, shownUnit, toShown } from "./value-units";
+import { isSwitchKey, switchRole, switchState } from "./switch-values";
 
 /**
  * Where a state's display name came from — decides whether a later label may
@@ -423,31 +425,21 @@ export function transformOptionDefinition(opt: BshOptionDefinition): Transformed
   }
 
   if (opt.type === "Int" || opt.type === "Double") {
-    const common: ioBroker.StateCommon = {
-      name,
-      desc,
-      type: "number",
-      role: writable ? "level" : "value",
-      read: true,
-      write: writable,
-    };
-    if (opt.unit) {
-      common.unit = opt.unit;
-    }
-    if (typeof c?.min === "number") {
-      common.min = c.min;
-    }
-    if (typeof c?.max === "number") {
-      common.max = c.max;
-    }
-    if (typeof c?.stepsize === "number") {
-      common.step = c.stepsize;
-    }
-    return { channel, id, common, nameSource, value: typeof c?.default === "number" ? c.default : undefined };
+    const common = numberCommon(name, desc, writable, opt.key, opt.unit, c);
+    const p = presentationFor(opt.key, opt.unit);
+    const def = typeof c?.default === "number" ? c.default : undefined;
+    return { channel, id, common, nameSource, value: def !== undefined && p ? toShown(def, p) : def };
   }
 
   // Enum (allowedvalues) or plain string option.
   const allowed = c?.allowedvalues?.filter(v => v.length > 0);
+  if (isSwitchKey(opt.key) && allowed && allowed.length > 0) {
+    const common: ioBroker.StateCommon = {
+      ...booleanCommon(name, switchRole(opt.key, writable), writable),
+      desc,
+    };
+    return { channel, id, common, nameSource, value: switchState(c?.default), bshValues: allowed };
+  }
   const common: ioBroker.StateCommon = { name, desc, type: "string", role: "text", read: true, write: writable };
   let bshValues: string[] | undefined;
   if (allowed && allowed.length > 0) {
@@ -527,34 +519,33 @@ function transformValue(item: BshItem): {
     };
   }
 
-  // Numeric values → number, carrying unit + min/max when the API supplied them.
+  // Numeric values → number, carrying unit + min/max when the API supplied them, in the unit a user reads
+  // (value-units.ts, decision 47).
   if (typeof value === "number") {
-    // The water counters come in millilitres although the cloud calls them "l"
-    // (12,171,000 "l" after 339 runs on a washer-dryer, 786,000 after 20 on
-    // another — 36 and 39 litres a run; the appliances' own descriptions declare
-    // them `liquidVolume`, millilitres). Shown as what the unit says: litres.
-    const shown = /\.Water\.Consumed$/.test(key) && item.unit === "l" ? value / 1000 : value;
-    const common: ioBroker.StateCommon = {
-      name,
-      desc,
-      type: "number",
-      role: writable ? "level" : "value",
-      read: true,
-      write: writable,
+    const p = presentationFor(key, item.unit);
+    const common = numberCommon(name, desc, writable, key, item.unit, item.constraints);
+    return { common, nameSource, value: p ? toShown(value, p) : value };
+  }
+
+  // On/off keys (PowerState, TimeLight, …) → a switch (switch-values.ts). The appliance's own values stay on a
+  // writable one for the write path: On, and Off or Standby — whichever it offers.
+  if (isSwitchKey(key)) {
+    const catalogue = catalogValues(key, value);
+    const bshValues = !writable
+      ? undefined
+      : allowed && allowed.length > 0
+        ? allowed
+        : catalogue && catalogue.length > 0
+          ? [...catalogue]
+          : typeof value === "string" && value.length > 0
+            ? [value]
+            : undefined;
+    return {
+      common: { ...booleanCommon(name, switchRole(key, writable), writable), desc },
+      nameSource,
+      value: switchState(value),
+      bshValues,
     };
-    if (item.unit) {
-      common.unit = item.unit;
-    }
-    if (typeof item.constraints?.min === "number") {
-      common.min = item.constraints.min;
-    }
-    if (typeof item.constraints?.max === "number") {
-      common.max = item.constraints.max;
-    }
-    if (typeof item.constraints?.stepsize === "number") {
-      common.step = item.constraints.stepsize;
-    }
-    return { common, nameSource, value: shown };
   }
 
   // Native booleans (RemoteControlActive, ChildLock, …).
@@ -642,6 +633,51 @@ function transformValue(item: BshItem): {
     value:
       typeof value === "string" ? value : value === undefined || value === null ? undefined : JSON.stringify(value),
   };
+}
+
+/**
+ * A number `common` in the unit a user reads: the unit, bounds and step of the appliance, converted where the
+ * datapoint shows another unit (value-units.ts), the cloud's unit word in ioBroker's spelling otherwise.
+ *
+ * @param name the state name
+ * @param desc the explanation
+ * @param writable whether the state is writable
+ * @param key the fully-qualified BSH key
+ * @param unit the unit the appliance sent
+ * @param constraints the appliance's bounds and step
+ * @returns the number common fragment
+ */
+function numberCommon(
+  name: ioBroker.StringOrTranslated,
+  desc: ioBroker.StringOrTranslated | undefined,
+  writable: boolean,
+  key: string,
+  unit: string | undefined,
+  constraints: ParsedConstraints | undefined,
+): ioBroker.StateCommon {
+  const common: ioBroker.StateCommon = {
+    name,
+    desc,
+    type: "number",
+    role: writable ? "level" : "value",
+    read: true,
+    write: writable,
+  };
+  const p = presentationFor(key, unit);
+  const shown = shownUnit(key, unit);
+  if (shown) {
+    common.unit = shown;
+  }
+  if (typeof constraints?.min === "number") {
+    common.min = p ? boundShown(constraints.min, p, "min") : constraints.min;
+  }
+  if (typeof constraints?.max === "number") {
+    common.max = p ? boundShown(constraints.max, p, "max") : constraints.max;
+  }
+  if (typeof constraints?.stepsize === "number") {
+    common.step = p ? boundShown(constraints.stepsize, p, "step") : constraints.stepsize;
+  }
+  return common;
 }
 
 /**

@@ -4,6 +4,8 @@
 // unit-testable like oauth / http / value-transformer / sse-parser.
 
 import { shortEnum, shortEnumIn } from "./value-transformer";
+import { switchValue } from "./switch-values";
+import { fromShown, shownPresentation } from "./value-units";
 
 /** The context of a single writable-state change, gathered by the adapter from the state + its object. */
 export interface WriteContext {
@@ -60,7 +62,7 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
   const key = ctx.bshKey === undefined ? undefined : encodeURIComponent(ctx.bshKey);
 
   if (ctx.channel === "settings" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
       return null;
     }
@@ -78,7 +80,7 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
   // a start). Writing to the active program is state-gated by the appliance and 409s
   // in most states, so a single predictable target is correct for v1.
   if (ctx.channel === "options" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
       return null;
     }
@@ -109,24 +111,31 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
 }
 
 /**
- * Resolve a written value to what the API expects: for an enum (candidates present),
- * map the short value back to its full BSH value; otherwise pass the value through
- * (booleans and numbers go as-is).
+ * Resolve a written value to what the API expects: a switch (a boolean with candidates)
+ * to the appliance's On or off value, an enum (candidates present) from its short value
+ * to its full BSH value, a number shown in another unit back to the appliance's unit
+ * (value-units.ts); anything else goes as-is.
  *
  * @param value the written value
- * @param bshValues the full candidate values, if this is an enum
+ * @param bshValues the full candidate values, if this is an enum or a switch
  * @param collapse whether several matching candidates mean the same thing
- * @returns the API value, or undefined to ignore the write (unknown enum value)
+ * @param key the BSH key the value goes out with
+ * @returns the API value, or undefined to ignore the write (unknown enum value, no off value)
  */
-function resolveValue(
+export function resolveValue(
   value: ioBroker.StateValue,
   bshValues?: string[],
   collapse = false,
+  key?: string,
 ): ioBroker.StateValue | undefined {
+  if (typeof value === "boolean" && bshValues && bshValues.length > 0) {
+    return switchValue(value, bshValues);
+  }
   if (bshValues && bshValues.length > 0) {
     return resolveEnum(value, bshValues, collapse);
   }
-  return value;
+  const p = typeof value === "number" ? shownPresentation(key) : undefined;
+  return p && typeof value === "number" ? fromShown(value, p) : value;
 }
 
 /**

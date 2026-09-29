@@ -985,7 +985,8 @@ describe("ApplianceSync metadata refresh", () => {
     await flush();
     const obj = port.objects.get("oven-1.settings.powerState");
     expect((obj?.native as { bshValues: string[] }).bshValues).toHaveLength(2);
-    expect(port.states.get("oven-1.settings.powerState")).toBe("standby");
+    // The power state is a switch: Standby is off.
+    expect(port.states.get("oven-1.settings.powerState")).toBe(false);
     expect(port.deleted).toHaveLength(0);
   });
 });
@@ -1274,25 +1275,57 @@ describe("ApplianceSync write results", () => {
     return { port, sync: new ApplianceSync(port) };
   }
 
+  it("switches the power off with the appliance's Off and confirms the switch as false", async () => {
+    const { port, sync } = washer();
+    await sync.primeFromObjects();
+    await sync.handleWrite(`${NS}.washer.settings.powerState`, false);
+    expect(port.writes.at(-1)?.body).toEqual({
+      key: "BSH.Common.Setting.PowerState",
+      value: "BSH.Common.EnumType.PowerState.Off",
+    });
+    expect(port.states.get("washer.settings.powerState")).toBe(false);
+  });
+
+  it("says on info that an appliance without an off value cannot be switched off remotely", async () => {
+    const { port, sync } = washer();
+    port.primeStates[`${NS}.washer.settings.powerState`] = {
+      _id: "",
+      type: "state",
+      common: { write: true, type: "boolean" },
+      native: { bshKey: "BSH.Common.Setting.PowerState", bshValues: ["BSH.Common.EnumType.PowerState.On"] },
+    } as unknown as ioBroker.Object;
+    port.getResponses.set("/api/homeappliances/HA-1/settings/BSH.Common.Setting.PowerState", {
+      key: "BSH.Common.Setting.PowerState",
+      value: "BSH.Common.EnumType.PowerState.On",
+    });
+    await sync.primeFromObjects();
+    await sync.handleWrite(`${NS}.washer.settings.powerState`, false);
+    expect(port.writes).toHaveLength(0);
+    expect(port.logs).toContain(
+      `info: Write to washer.settings.powerState not sent: the appliance cannot be switched off remotely.`,
+    );
+    expect(port.states.get("washer.settings.powerState")).toBe(true);
+  });
+
   it("does not confirm a value the appliance rejected — it restores the real one", async () => {
     const { port, sync } = washer();
     await sync.primeFromObjects();
     // The user's write already sits in the database (ack:false) when the
     // adapter reacts to it — exactly what the read-back has to overwrite.
-    port.states.set("washer.settings.powerState", "on");
+    port.states.set("washer.settings.powerState", true);
     port.writeResult = { status: 409, ok: false, data: undefined, error: "wrong state" };
     port.getResponses.set("/api/homeappliances/HA-1/settings/BSH.Common.Setting.PowerState", {
       key: "BSH.Common.Setting.PowerState",
       value: "BSH.Common.EnumType.PowerState.Off",
     });
 
-    await sync.handleWrite(`${NS}.washer.settings.powerState`, "on");
+    await sync.handleWrite(`${NS}.washer.settings.powerState`, true);
     // Acking a rejected write shows the user's wish as if the appliance had done
     // it — and without a read-back the wish stayed there with ack:false, the
     // tree disagreeing with the machine until the next sync (measured: "on" in
     // the database for an appliance that was off). One targeted read fixes it.
-    expect(port.stateWrites.filter(w => w.id === "washer.settings.powerState").map(w => w.val)).toEqual(["off"]);
-    expect(port.states.get("washer.settings.powerState")).toBe("off");
+    expect(port.stateWrites.filter(w => w.id === "washer.settings.powerState").map(w => w.val)).toEqual([false]);
+    expect(port.states.get("washer.settings.powerState")).toBe(false);
     expect(port.getCalls.filter(p => p.endsWith("/settings/BSH.Common.Setting.PowerState"))).toHaveLength(1);
   });
 
@@ -1973,7 +2006,7 @@ describe("ApplianceSync definition cache across restarts", () => {
             "LaundryCare.Washer.Program.Cotton": {
               ids: ["spinSpeed"],
               keys: { spinSpeed: "LaundryCare.Washer.Option.SpinSpeed" },
-              v: 4,
+              v: 5,
             },
           },
         },
@@ -2021,7 +2054,7 @@ describe("ApplianceSync definition cache across restarts", () => {
     // A merge on top of the old list would leave a list carrying extra fields —
     // it must be a plain entry, not an array in disguise.
     expect(Array.isArray(stored["P.A"])).toBe(false);
-    expect(stored).toEqual({ "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 4 } });
+    expect(stored).toEqual({ "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 5 } });
     expect(port.objects.get("washer")?.native).toMatchObject({ haId: "HA-1" });
     // The write gate stays armed on the same option id.
     await sync.activateProgramOptions("washer", "HA-1", "P.A");
@@ -2038,7 +2071,7 @@ describe("ApplianceSync definition cache across restarts", () => {
     await sync.activateProgramOptions("washer", "HA-1", "P.A");
     const device = port.objects.get("washer");
     expect((device?.native as { programOptions: Record<string, unknown> }).programOptions).toEqual({
-      "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 4 },
+      "P.A": { ids: ["one"], keys: { one: "X.Option.One" }, v: 5 },
     });
     // haId survived the partial native update (merge, not replace).
     expect((device?.native as { haId: string }).haId).toBe("HA-1");
@@ -3830,13 +3863,18 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
   it("does not remember a metadata refresh that failed halfway", async () => {
     const port = new FakePort();
     const sync = new ApplianceSync(port);
-    appliance(port, "HA-1", "Dishwasher", {
+    appliance(port, "HA-1", "FridgeFreezer", {
       settings: [
         {
-          key: "BSH.Common.Setting.PowerState",
-          name: "Power",
-          value: "BSH.Common.EnumType.PowerState.On",
-          constraints: { allowedvalues: ["BSH.Common.EnumType.PowerState.On", "BSH.Common.EnumType.PowerState.Off"] },
+          key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+          name: "Door assistant",
+          value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+          constraints: {
+            allowedvalues: [
+              "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+              "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+            ],
+          },
         },
       ],
       status: [],
@@ -3848,14 +3886,14 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     port.getResponses.set("/api/homeappliances/HA-1/settings", {
       settings: [
         {
-          key: "BSH.Common.Setting.PowerState",
-          name: "Power",
-          value: "BSH.Common.EnumType.PowerState.On",
+          key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+          name: "Door assistant",
+          value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
           constraints: {
             allowedvalues: [
-              "BSH.Common.EnumType.PowerState.On",
-              "BSH.Common.EnumType.PowerState.Off",
-              "BSH.Common.EnumType.PowerState.Standby",
+              "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+              "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+              "Refrigeration.Common.EnumType.Door.AssistantTrigger.PushPull",
             ],
           },
         },
@@ -3864,7 +3902,11 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     const real = port.extendObject.bind(port);
     port.extendObject = (id: string, obj: ioBroker.PartialObject): Promise<unknown> => {
       const common = (obj as { common?: Record<string, unknown> }).common;
-      if (id === "dishwasher-1.settings.powerState" && common?.states !== null && common?.type !== undefined) {
+      if (
+        id === "fridgefreezer-1.settings.doorAssistantTriggerFridge" &&
+        common?.states !== null &&
+        common?.type !== undefined
+      ) {
         return Promise.reject(new Error("objects db down"));
       }
       return real(id, obj);
@@ -3872,22 +3914,25 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     await sync.syncAppliances();
 
     // Halfway: the selection list and the write candidates are gone.
-    expect((port.objects.get("dishwasher-1.settings.powerState")?.common as ioBroker.StateCommon).states).toBeNull();
+    expect(
+      (port.objects.get("fridgefreezer-1.settings.doorAssistantTriggerFridge")?.common as ioBroker.StateCommon).states,
+    ).toBeNull();
 
     // The next sync of the SAME run must put them back — remembering the new
     // signature for a failed refresh left the datapoint unusable until a restart.
     port.extendObject = real;
     await sync.syncAppliances();
-    expect((port.objects.get("dishwasher-1.settings.powerState")?.common as ioBroker.StateCommon).states).toMatchObject(
-      {
-        on: "On",
-        off: "Off",
-        standby: "Standby",
-      },
-    );
     expect(
-      (port.objects.get("dishwasher-1.settings.powerState")?.native as { bshValues: string[] }).bshValues,
-    ).toContain("BSH.Common.EnumType.PowerState.Standby");
+      (port.objects.get("fridgefreezer-1.settings.doorAssistantTriggerFridge")?.common as ioBroker.StateCommon).states,
+    ).toMatchObject({
+      push: "Push",
+      pull: "Pull",
+      pushpull: "Push and pull",
+    });
+    expect(
+      (port.objects.get("fridgefreezer-1.settings.doorAssistantTriggerFridge")?.native as { bshValues: string[] })
+        .bshValues,
+    ).toContain("Refrigeration.Common.EnumType.Door.AssistantTrigger.PushPull");
   });
 
   it("does not remember a failed refresh of an option definition either", async () => {
@@ -5307,7 +5352,7 @@ describe("findings of the 2026-09-24 audit — program list (B10)", () => {
           type: "Dishwasher",
           enumber: "Spueler",
           // The cache still knows a program from an earlier firmware.
-          programOptions: Object.fromEntries([a, b, gone].map(k => [k, { ids: [], keys: {}, v: 4 }])),
+          programOptions: Object.fromEntries([a, b, gone].map(k => [k, { ids: [], keys: {}, v: 5 }])),
         },
       } as unknown as ioBroker.Object,
     };
@@ -6328,7 +6373,7 @@ describe("readable values (2026-09-28)", () => {
       native: {
         bshKey: "LaundryCare.Washer.Option.SpinSpeed",
         bshValues: ["LaundryCare.Washer.EnumType.SpinSpeed.RPM1400"],
-        defGeneration: 4,
+        defGeneration: 5,
       },
     } as unknown as ioBroker.Object;
     port.primeStates = { [`${NS}.${id}`]: stored };
@@ -6380,7 +6425,7 @@ describe("readable values (2026-09-28)", () => {
       native: {
         bshKey: "LaundryCare.Washer.Option.Temperature",
         bshValues: [`${t}.Cold`, `${t}.GC20`, `${t}.MysteryValue`, `${t}.OtherValue`],
-        defGeneration: 4,
+        defGeneration: 5,
       },
     } as unknown as ioBroker.Object;
     port.primeStates = { [`${NS}.${id}`]: stored };
@@ -6423,7 +6468,7 @@ describe("readable values (2026-09-28)", () => {
         bshKey: "LaundryCare.Washer.Option.Temperature",
         bshValues: [`${t}.Cold`, `${t}.GC40`],
         nameSource: "api",
-        defGeneration: 4,
+        defGeneration: 5,
       },
     } as unknown as ioBroker.Object;
     const status = {
@@ -6485,9 +6530,9 @@ describe("readable values (2026-09-28)", () => {
         ],
       }),
       // Known only from the appliance descriptions: the stored value lends the prefix.
-      "wd-1.settings.timeLight": text("wd-1.settings.timeLight", {
-        bshKey: "Dishcare.Dishwasher.Setting.TimeLight",
-        bshValues: ["Dishcare.Dishwasher.EnumType.TimeLight.Off"],
+      "wd-1.settings.sensitivityTurbidity": text("wd-1.settings.sensitivityTurbidity", {
+        bshKey: "Dishcare.Dishwasher.Setting.SensitivityTurbidity",
+        bshValues: ["Dishcare.Dishwasher.EnumType.SensitivityTurbidity.Standard"],
       }),
       // No value to lend a prefix: waits for its next value.
       "wd-1.status.programPhase": text(
@@ -6513,7 +6558,11 @@ describe("readable values (2026-09-28)", () => {
       extradry: "Extra trocken",
       superdry: "Super dry",
     });
-    expect(states("wd-1.settings.timeLight")).toEqual({ off: "Aus", on: "Ein" });
+    expect(states("wd-1.settings.sensitivityTurbidity")).toEqual({
+      standard: "Standard",
+      sensitive: "Sensitiv",
+      verysensitive: "Sehr empfindlich",
+    });
     expect(states("wd-1.status.programPhase")).toBeUndefined();
     expect(states("wd-1.status.someText")).toBeUndefined();
     // The next start finds the lists in place.
@@ -6531,6 +6580,110 @@ describe("readable values (2026-09-28)", () => {
     }
     await new ApplianceSync(again).primeFromObjects();
     expect(again.extendCalls).toEqual([]);
+  });
+
+  it("brings datapoints an older version stored in another form to the current one at start, once", async () => {
+    // Decision 47 on an existing installation: the object and its stored value change form, the datapoint stays.
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wd-1`]: {
+        _id: `${NS}.wd-1`,
+        type: "device",
+        common: { name: "Wd" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wd", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const P = "BSH.Common.EnumType.PowerState";
+    const objects: Record<string, ioBroker.Object> = {
+      "wd-1.settings.powerState": {
+        _id: `${NS}.wd-1.settings.powerState`,
+        type: "state",
+        common: {
+          name: "Power",
+          type: "string",
+          role: "text",
+          read: true,
+          write: true,
+          states: { off: "Aus", on: "Ein" },
+          custom: { "influxdb.0": { enabled: true } },
+        },
+        native: { bshKey: "BSH.Common.Setting.PowerState", bshValues: [`${P}.Off`, `${P}.On`], nameSource: "i18n" },
+      } as unknown as ioBroker.Object,
+      "wd-1.status.programAllTimeEffective": {
+        _id: `${NS}.wd-1.status.programAllTimeEffective`,
+        type: "state",
+        common: { name: "Runtime", type: "number", role: "value", read: true, write: false, unit: "seconds" },
+        native: { bshKey: "BSH.Common.Status.Program.All.Time.Effective", nameSource: "i18n" },
+      } as unknown as ioBroker.Object,
+      "wd-1.options.finishInRelative": {
+        _id: `${NS}.wd-1.options.finishInRelative`,
+        type: "state",
+        common: {
+          name: "Finish in",
+          type: "number",
+          role: "level",
+          read: true,
+          write: true,
+          unit: "seconds",
+          min: 0,
+          max: 86400,
+          step: 60,
+        },
+        native: { bshKey: "BSH.Common.Option.FinishInRelative", nameSource: "i18n", defGeneration: 5 },
+      } as unknown as ioBroker.Object,
+    };
+    port.primeStates = Object.fromEntries(Object.values(objects).map(o => [o._id, o]));
+    for (const [id, o] of Object.entries(objects)) {
+      port.objects.set(id, structuredClone(o));
+    }
+    objects["wd-1.lastRun.energy"] = {
+      _id: `${NS}.wd-1.lastRun.energy`,
+      type: "state",
+      common: { name: "Energy", type: "number", role: "value.energy.consumed", read: true, write: false, unit: "Wh" },
+      native: {},
+    } as unknown as ioBroker.Object;
+    port.primeStates[objects["wd-1.lastRun.energy"]._id] = objects["wd-1.lastRun.energy"];
+    port.objects.set("wd-1.lastRun.energy", structuredClone(objects["wd-1.lastRun.energy"]));
+    port.states.set("wd-1.lastRun.energy", 412);
+    port.states.set("wd-1.settings.powerState", "on");
+    port.states.set("wd-1.status.programAllTimeEffective", 2011440);
+    port.states.set("wd-1.options.finishInRelative", 14160);
+    await new ApplianceSync(port).primeFromObjects();
+    expect(port.getCalls).toEqual([]);
+    const power = port.objects.get("wd-1.settings.powerState")?.common as ioBroker.StateCommon;
+    expect(power).toMatchObject({ type: "boolean", role: "switch.power", def: false });
+    expect(power.states).toBeFalsy();
+    // What hangs on the datapoint is the user's — it stays with it.
+    expect(power.custom).toEqual({ "influxdb.0": { enabled: true } });
+    expect(port.states.get("wd-1.settings.powerState")).toBe(true);
+    expect(port.objects.get("wd-1.status.programAllTimeEffective")?.common).toMatchObject({ unit: "h" });
+    expect(port.states.get("wd-1.status.programAllTimeEffective")).toBe(558.7);
+    expect(port.objects.get("wd-1.options.finishInRelative")?.common).toMatchObject({
+      unit: "min",
+      min: 0,
+      max: 1440,
+      step: 1,
+    });
+    expect(port.states.get("wd-1.options.finishInRelative")).toBe(236);
+    // The run summary's energy carries no key — its id says what it is.
+    expect((port.objects.get("wd-1.lastRun.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe("kWh");
+    expect(port.states.get("wd-1.lastRun.energy")).toBe(0.41);
+    // The next start finds everything in its current form.
+    const again = new FakePort();
+    again.primeDevices = port.primeDevices;
+    again.primeStates = Object.fromEntries(
+      Object.keys(objects).map(id => [
+        `${NS}.${id}`,
+        { ...port.objects.get(id)!, _id: `${NS}.${id}` } as ioBroker.Object,
+      ]),
+    );
+    for (const id of Object.keys(objects)) {
+      again.objects.set(id, structuredClone(port.objects.get(id)!));
+      again.states.set(id, port.states.get(id)!);
+    }
+    await new ApplianceSync(again).primeFromObjects();
+    expect(again.extendCalls).toEqual([]);
+    expect(again.stateWrites).toEqual([]);
   });
 
   it("a relabelled value list is no change for the next sync", async () => {
@@ -6667,7 +6820,7 @@ describe("readable values (2026-09-28)", () => {
         "Cooking.Oven.EnumType.Level.Level01",
         "Cooking.Oven.EnumType.Level.Level02",
       ]);
-      expect(obj.native.defGeneration).toBe(4);
+      expect(obj.native.defGeneration).toBe(5);
     });
 
     /**
@@ -6697,7 +6850,7 @@ describe("readable values (2026-09-28)", () => {
       const device = port.primeDevices?.[`${NS}.ov-1`];
       const options = (device.native as { programOptions: Record<string, { v: number }> }).programOptions;
       for (const k of cached) {
-        options[k] = { ...options[k], v: 4 };
+        options[k] = { ...options[k], v: 5 };
       }
     }
 
@@ -6886,7 +7039,8 @@ describe("decoded program records (decision 40)", () => {
     expect(port.states.get("wt-1.lastRun.duration")).toBe(12);
     // The run's own figures — water in litres, not the millilitres the appliance counts.
     expect(port.states.get("wt-1.lastRun.water")).toBe(35.9);
-    expect(port.states.get("wt-1.lastRun.energy")).toBe(40);
+    expect(port.states.get("wt-1.lastRun.energy")).toBe(0.04);
+    expect((port.objects.get("wt-1.lastRun.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe("kWh");
     expect(port.states.get("wt-1.lastRun.detergent")).toBe(21);
     expect(port.objects.has("wt-1.lastRun.softener")).toBe(false);
     expect(port.states.get("wt-1.lastRun.endTrigger")).toBe("programabortedbyuser");

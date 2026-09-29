@@ -95,15 +95,53 @@ describe("resolveWrite", () => {
     });
   });
 
-  it("writes a numeric option through as-is", () => {
+  it("writes a duration shown in minutes back in the appliance's seconds", () => {
     const req = resolveWrite({
       haId: HA,
       channel: "options",
       id: "startInRelative",
       bshKey: "BSH.Common.Option.StartInRelative",
-      value: 3600,
+      value: 60,
     });
     expect(req?.body).toEqual({ key: "BSH.Common.Option.StartInRelative", value: 3600 });
+  });
+
+  it("writes a number the table does not convert through as-is", () => {
+    const req = resolveWrite({
+      haId: HA,
+      channel: "settings",
+      id: "setpointTemperatureRefrigerator",
+      bshKey: "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator",
+      value: 6,
+    });
+    expect(req?.body).toEqual({ key: "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator", value: 6 });
+  });
+
+  it("switches with the appliance's own values: On, and Off where offered, else Standby", () => {
+    const power = (value: boolean, bshValues: string[]): unknown =>
+      resolveWrite({
+        haId: HA,
+        channel: "settings",
+        id: "powerState",
+        bshKey: "BSH.Common.Setting.PowerState",
+        bshValues,
+        value,
+      })?.body?.value;
+    const p = "BSH.Common.EnumType.PowerState";
+    expect(power(true, [`${p}.Off`, `${p}.On`])).toBe(`${p}.On`);
+    expect(power(false, [`${p}.On`, `${p}.Off`, `${p}.Standby`])).toBe(`${p}.Off`);
+    expect(power(false, [`${p}.On`, `${p}.Standby`])).toBe(`${p}.Standby`);
+    // An appliance that cannot be switched off remotely gets nothing.
+    expect(
+      resolveWrite({
+        haId: HA,
+        channel: "settings",
+        id: "powerState",
+        bshKey: "BSH.Common.Setting.PowerState",
+        bshValues: [`${p}.On`],
+        value: false,
+      }),
+    ).toBeNull();
   });
 
   it("starts the currently selected program", () => {

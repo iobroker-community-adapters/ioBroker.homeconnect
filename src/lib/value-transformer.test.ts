@@ -118,16 +118,19 @@ describe("transformItem", () => {
     // then supply the LABELS only. Using it whole put values into common.states
     // that the appliance rejects: a dishwasher offered `standby` and `mainsoff`,
     // and picking one did nothing at all.
-    const power = transformItem({
-      key: "BSH.Common.Setting.PowerState",
-      value: "BSH.Common.EnumType.PowerState.Off",
+    const door = transformItem({
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
       constraints: {
-        allowedvalues: ["BSH.Common.EnumType.PowerState.Off", "BSH.Common.EnumType.PowerState.On"],
+        allowedvalues: [
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+        ],
         access: "readWrite",
       },
     });
-    expect(power.common.states).toEqual({ off: "Off", on: "On" });
-    expect(power.bshValues).toHaveLength(2);
+    expect(door.common.states).toEqual({ push: "Push", pull: "Pull" });
+    expect(door.bshValues).toHaveLength(2);
   });
 
   it("keeps the full curated map when the appliance declares no allowed values", () => {
@@ -213,25 +216,42 @@ describe("transformItem", () => {
     expect(t.common.states).toEqual({ "": "Kein Programm", auto2: "Auto 45-65 °C" });
   });
 
-  it("keeps a number and carries unit + constraints", () => {
+  it("keeps a number and carries unit + constraints, a duration in whole minutes", () => {
     const t = transformItem({
       key: "BSH.Common.Option.RemainingProgramTime",
-      value: 3600,
+      value: 9060,
       unit: "seconds",
       constraints: { min: 0, max: 86400 },
     });
-    expect(t).toMatchObject({ channel: "options", id: "remainingProgramTime", value: 3600 });
-    expect(t.common).toMatchObject({ type: "number", role: "value", unit: "seconds", min: 0, max: 86400 });
+    expect(t).toMatchObject({ channel: "options", id: "remainingProgramTime", value: 151 });
+    expect(t.common).toMatchObject({ type: "number", role: "value", unit: "min", min: 0, max: 1440 });
+    // A number the table does not convert keeps its value; the cloud's unit word reads the ioBroker way.
+    const kept = transformItem({ key: "BSH.Common.Option.ProgramProgress", value: 40, unit: "%" });
+    expect(kept.value).toBe(40);
+    expect(kept.common.unit).toBe("%");
+    const word = transformItem({ key: "LaundryCare.Washer.Option.SomeWeight", value: 500, unit: "gram" });
+    expect(word.value).toBe(500);
+    expect(word.common.unit).toBe("g");
   });
 
-  it("shows the water counters in litres although the cloud sends millilitres labelled l", () => {
-    // 12,171,000 "l" after 339 runs on a washer-dryer — 36 litres a run.
-    const t = transformItem({ key: "BSH.Common.Status.Program.All.Water.Consumed", value: 12171000, unit: "l" });
-    expect(t.value).toBe(12171);
-    expect(t.common.unit).toBe("l");
-    // Any other unit is taken as it comes.
-    const ml = transformItem({ key: "BSH.Common.Status.Program.All.Water.Consumed", value: 5000, unit: "ml" });
-    expect(ml.value).toBe(5000);
+  it("shows every datapoint krobi chose in its readable unit (2026-09-29)", () => {
+    const shown = (key: string, value: number, unit: string): [unknown, unknown] => {
+      const t = transformItem({ key, value, unit });
+      return [t.value, t.common.unit];
+    };
+    expect(shown("BSH.Common.Status.Program.All.Time.Effective", 2011440, "seconds")).toEqual([558.7, "h"]);
+    expect(shown("BSH.Common.Status.Program.All.Energy.Consumed", 139858, "Wh")).toEqual([139.86, "kWh"]);
+    expect(shown("BSH.Common.Status.Program.All.Water.Consumed", 12256000, "ml")).toEqual([12256, "l"]);
+    expect(shown("LaundryCare.Washer.Status.Detergent.All.Consumed", 7313, "ml")).toEqual([7.3, "l"]);
+    expect(shown("LaundryCare.Washer.Status.Softener.All.Consumed", 5574, "ml")).toEqual([5.6, "l"]);
+    expect(shown("LaundryCare.Common.Option.LoadRecommendation", 10500, "gram")).toEqual([10.5, "kg"]);
+    expect(shown("BSH.Common.Status.RemoteControlStartAllowedSince", 20074, "seconds")).toEqual([335, "min"]);
+    expect(shown("BSH.Common.Option.EstimatedTotalProgramTime", 14160, "seconds")).toEqual([236, "min"]);
+    expect(shown("BSH.Common.Setting.AlarmClock", 600, "seconds")).toEqual([10, "min"]);
+    // Decision 45: millilitres the cloud labels "l" read as litres all the same.
+    expect(shown("BSH.Common.Status.Program.All.Water.Consumed", 12171000, "l")).toEqual([12171, "l"]);
+    // A unit the table does not expect is taken as it comes — nothing is guessed.
+    expect(shown("BSH.Common.Status.Program.All.Energy.Consumed", 140, "kWh")).toEqual([140, "kWh"]);
   });
 
   it("keeps a native boolean", () => {
@@ -298,13 +318,21 @@ describe("transformItem", () => {
 
   it("makes a setting enum writable with states + candidate values from allowedvalues", () => {
     const t = transformItem({
-      key: "BSH.Common.Setting.PowerState",
-      value: "BSH.Common.EnumType.PowerState.On",
-      constraints: { allowedvalues: ["BSH.Common.EnumType.PowerState.On", "BSH.Common.EnumType.PowerState.Standby"] },
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+      constraints: {
+        allowedvalues: [
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.PushPull",
+        ],
+      },
     });
-    expect(t).toMatchObject({ channel: "settings", id: "powerState", value: "on" });
-    expect(t.common).toMatchObject({ role: "text", write: true, states: { on: "On", standby: "Standby" } });
-    expect(t.bshValues).toEqual(["BSH.Common.EnumType.PowerState.On", "BSH.Common.EnumType.PowerState.Standby"]);
+    expect(t).toMatchObject({ channel: "settings", id: "doorAssistantTriggerFridge", value: "pull" });
+    expect(t.common).toMatchObject({ role: "text", write: true, states: { pull: "Pull", pushpull: "Push and pull" } });
+    expect(t.bshValues).toEqual([
+      "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+      "Refrigeration.Common.EnumType.Door.AssistantTrigger.PushPull",
+    ]);
   });
 
   it("makes the selected program writable and keeps the full program keys for write-back", () => {
@@ -353,10 +381,26 @@ describe("transformOptionDefinition", () => {
       name: "Start in",
       type: "Int",
       unit: "seconds",
-      constraints: { min: 0, max: 86400, default: 3600 },
+      constraints: { min: 0, max: 86400, stepsize: 1800, default: 3600 },
     });
-    expect(t.common).toMatchObject({ type: "number", role: "level", write: true, unit: "seconds", min: 0, max: 86400 });
-    expect(t.value).toBe(3600);
+    expect(t.common).toMatchObject({
+      type: "number",
+      role: "level",
+      write: true,
+      unit: "min",
+      min: 0,
+      max: 1440,
+      step: 30,
+    });
+    expect(t.value).toBe(60);
+    // A step below one shown unit is one shown unit.
+    const fine = transformOptionDefinition({
+      key: "BSH.Common.Option.Duration",
+      type: "Int",
+      unit: "seconds",
+      constraints: { min: 1, max: 86340, stepsize: 1 },
+    });
+    expect(fine.common).toMatchObject({ unit: "min", min: 1, max: 1439, step: 1 });
   });
 
   it("labels an enum option from the parallel displayvalues and keeps full values for write-back", () => {
@@ -443,10 +487,13 @@ describe("value-transformer edge inputs", () => {
     // A settings enum whose constraints the API omitted still has to resolve a
     // short write back to its full BSH value.
     // The catalogue knows the key's values; without it, the value itself.
-    const t = transformItem({ key: "BSH.Common.Setting.PowerState", value: "BSH.Common.EnumType.PowerState.On" });
-    expect(t.value).toBe("on");
-    expect(t.bshValues).toContain("BSH.Common.EnumType.PowerState.On");
-    expect(t.bshValues).toContain("BSH.Common.EnumType.PowerState.Standby");
+    const t = transformItem({
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+    });
+    expect(t.value).toBe("push");
+    expect(t.bshValues).toContain("Refrigeration.Common.EnumType.Door.AssistantTrigger.Push");
+    expect(t.bshValues).toContain("Refrigeration.Common.EnumType.Door.AssistantTrigger.PushPull");
     const unknown = transformItem({ key: "X.Y.Setting.Z", value: "X.Y.EnumType.Z.On" });
     expect(unknown.bshValues).toEqual(["X.Y.EnumType.Z.On"]);
   });
@@ -684,39 +731,45 @@ describe("display names and descriptions", () => {
 
   it("labels a setting's choices with the cloud's display values when it sends them", () => {
     const t = transformItem({
-      key: "BSH.Common.Setting.PowerState",
-      value: "BSH.Common.EnumType.PowerState.On",
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
       constraints: {
-        allowedvalues: ["BSH.Common.EnumType.PowerState.On", "BSH.Common.EnumType.PowerState.Standby"],
-        displayvalues: ["Ein", "Bereitschaft"],
+        allowedvalues: [
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+        ],
+        displayvalues: ["Drücken", "Ziehen"],
       },
     });
     // The adapter's own labels beat the cloud's: the cloud answers in the language
     // it picks ("1400 rpm" on a German installation), the table in the system one.
-    expect(t.common.states).toEqual({ on: "On", standby: "Standby" });
+    expect(t.common.states).toEqual({ push: "Push", pull: "Pull" });
     const de = transformItem({
-      key: "BSH.Common.Setting.PowerState",
-      value: "BSH.Common.EnumType.PowerState.On",
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
       lang: "de",
       constraints: {
-        allowedvalues: ["BSH.Common.EnumType.PowerState.On", "X.Y.EnumType.PowerState.Brandnew"],
-        displayvalues: ["Einschalten", "Ganz neu"],
+        allowedvalues: ["Refrigeration.Common.EnumType.Door.AssistantTrigger.Push", "X.Y.EnumType.Door.Brandnew"],
+        displayvalues: ["Schieben", "Ganz neu"],
       },
     });
     // The cloud's label only fills a value the table does not know.
-    expect(de.common.states).toEqual({ on: "Ein", brandnew: "Ganz neu" });
+    expect(de.common.states).toEqual({ push: "Drücken", brandnew: "Ganz neu" });
   });
 
   it("keeps the table's labels when the display values do not line up", () => {
     const t = transformItem({
-      key: "BSH.Common.Setting.PowerState",
-      value: "BSH.Common.EnumType.PowerState.On",
+      key: "Refrigeration.Common.Setting.Door.AssistantTriggerFridge",
+      value: "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
       constraints: {
-        allowedvalues: ["BSH.Common.EnumType.PowerState.On", "BSH.Common.EnumType.PowerState.Standby"],
-        displayvalues: ["Ein"],
+        allowedvalues: [
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Push",
+          "Refrigeration.Common.EnumType.Door.AssistantTrigger.Pull",
+        ],
+        displayvalues: ["Drücken"],
       },
     });
-    expect(t.common.states).toMatchObject({ on: "On", standby: "Standby" });
+    expect(t.common.states).toMatchObject({ push: "Push", pull: "Pull" });
   });
 
   it("names an option from its definition, without inventing an explanation", () => {
@@ -956,5 +1009,68 @@ describe("enum options without a default (audit 2026-09-24, D9)", () => {
     expect(mk({ allowedvalues: values, default: values[1] })).toBe("cupboarddry");
     // An invented "" read like the user's choice of no drying target.
     expect(mk({ allowedvalues: values })).toBeUndefined();
+  });
+});
+
+describe("on/off as a switch (README: on/off as booleans)", () => {
+  const P = "BSH.Common.EnumType.PowerState";
+
+  it("makes the power state a power switch: On is on, Off or Standby is off", () => {
+    const on = transformItem({
+      key: "BSH.Common.Setting.PowerState",
+      value: `${P}.On`,
+      constraints: { allowedvalues: [`${P}.Off`, `${P}.On`] },
+    });
+    expect(on.value).toBe(true);
+    expect(on.common).toMatchObject({ type: "boolean", role: "switch.power", write: true });
+    expect(on.common.states).toBeUndefined();
+    expect(on.bshValues).toEqual([`${P}.Off`, `${P}.On`]);
+    expect(transformItem({ key: "BSH.Common.Setting.PowerState", value: `${P}.Standby` }).value).toBe(false);
+    expect(transformItem({ key: "BSH.Common.Setting.PowerState", value: `${P}.MainsOff` }).value).toBe(false);
+    // Undefined is no value at all.
+    expect(transformItem({ key: "BSH.Common.Setting.PowerState", value: `${P}.Undefined` }).value).toBeUndefined();
+    // Without an allowed list the catalogue's values are the write candidates.
+    expect(transformItem({ key: "BSH.Common.Setting.PowerState", value: `${P}.On` }).bshValues).toContain(
+      `${P}.Standby`,
+    );
+  });
+
+  it("reports a power state the appliance only shows as an indicator", () => {
+    const t = transformItem({
+      key: "BSH.Common.Setting.PowerState",
+      value: `${P}.On`,
+      constraints: { access: "read" },
+    });
+    expect(t.common).toMatchObject({ type: "boolean", role: "indicator", write: false });
+    expect(t.bshValues).toBeUndefined();
+  });
+
+  it("makes every other on/off key a plain switch, a setting and an option alike", () => {
+    const light = transformItem({
+      key: "Dishcare.Dishwasher.Setting.TimeLight",
+      value: "Dishcare.Dishwasher.EnumType.TimeLight.Off",
+    });
+    expect(light.value).toBe(false);
+    expect(light.common).toMatchObject({ type: "boolean", role: "switch" });
+    const steam = transformOptionDefinition({
+      key: "Cooking.Oven.Option.SteamAssistLevel",
+      type: "Cooking.Oven.EnumType.AddedSteam",
+      constraints: {
+        allowedvalues: ["Cooking.Oven.EnumType.AddedSteam.Off", "Cooking.Oven.EnumType.AddedSteam.On"],
+        default: "Cooking.Oven.EnumType.AddedSteam.On",
+      },
+    });
+    expect(steam.common).toMatchObject({ type: "boolean", role: "switch", write: true });
+    expect(steam.value).toBe(true);
+    expect(steam.bshValues).toHaveLength(2);
+  });
+
+  it("keeps a list where the sources know only an off value — the other values are unknown, not absent", () => {
+    const t = transformItem({
+      key: "Cooking.Oven.Option.MicrowavePower",
+      value: "Cooking.Oven.EnumType.MicrowavePower.Off",
+    });
+    expect(t.common.type).toBe("string");
+    expect(t.value).toBe("off");
   });
 });

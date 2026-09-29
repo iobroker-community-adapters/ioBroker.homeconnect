@@ -22,6 +22,7 @@ import { deviceIcon } from "./device-icons";
 import {
   resolveWrite,
   resolveEnum,
+  resolveValue,
   ambiguousCandidates,
   type WriteContext,
   type WriteRequest,
@@ -33,6 +34,8 @@ import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
 import { PROGRAM_UIDS } from "./program-uids";
+import { isSwitchKey, switchRole, switchState } from "./switch-values";
+import { boundShown, presentationFor, RUN_ENERGY, toShown, type Presentation } from "./value-units";
 import {
   catalogValues,
   DEFAULT_LABEL_LANGUAGE,
@@ -247,9 +250,11 @@ const FAILED_DEF_RETRY_MS = 6 * 60 * 60_000;
  * object carries the generation that built its list (`native.defGeneration`):
  * the first definition of a newer generation rebuilds the list from scratch, the
  * following ones add to it — a list only ever grew before, so no update could
- * take a value out that no program offers.
+ * take a value out that no program offers. 5: options in the shown unit and on/off
+ * options as switches (decision 47) — without the raise the union kept bounds in
+ * seconds next to bounds in minutes (max(86400, 1440)).
  */
-const PROGRAM_DEF_GENERATION = 4;
+const PROGRAM_DEF_GENERATION = 5;
 
 /**
  * The candidates of one option that belong to the value family of its key:
@@ -291,7 +296,8 @@ function confirmedValue(
   bshValues: string[] | undefined,
   written: ioBroker.StateValue,
 ): ioBroker.StateValue {
-  if (!bshValues || bshValues.length === 0) {
+  // A switch confirms its own true/false — the appliance got On or Off, the datapoint stays a boolean.
+  if (!bshValues || bshValues.length === 0 || typeof written === "boolean") {
     return written;
   }
   if (channel === "programs" && stateId === "selectedProgram") {
@@ -392,6 +398,54 @@ function storedNameSource(native: Record<string, unknown>): NameSource | undefin
  */
 function stringOrUndef(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
+}
+
+/**
+ * The form an older version stored a datapoint in, when it is not the current one: an on/off text (the key is a switch
+ * now) or a number in the appliance's unit (the key shows another unit now).
+ *
+ * @param key the stored BSH key
+ * @param common the stored `common`
+ * @param rel the namespace-relative state id (the run summary's datapoints carry no key)
+ * @returns what changes, or undefined when the stored form is the current one
+ */
+function storedForm(
+  key: string | undefined,
+  common: Partial<ioBroker.StateCommon>,
+  rel: string,
+): { kind: "switch" } | { kind: "unit"; p: Presentation } | undefined {
+  if (rel.endsWith(".lastRun.energy") && common.type === "number" && RUN_ENERGY.from.includes(common.unit ?? "")) {
+    return { kind: "unit", p: RUN_ENERGY };
+  }
+  if (key === undefined) {
+    return undefined;
+  }
+  if (common.type === "string" && isSwitchKey(key)) {
+    return { kind: "switch" };
+  }
+  const p = common.type === "number" ? presentationFor(key, common.unit) : undefined;
+  return p ? { kind: "unit", p } : undefined;
+}
+
+/**
+ * The unit, bounds and step of a stored number in its shown unit.
+ *
+ * @param common the stored `common`
+ * @param p the presentation
+ * @returns the fields to write
+ */
+function shownBounds(common: Partial<ioBroker.StateCommon>, p: Presentation): Partial<ioBroker.StateCommon> {
+  const patch: Partial<ioBroker.StateCommon> = { unit: p.unit };
+  if (typeof common.min === "number") {
+    patch.min = boundShown(common.min, p, "min");
+  }
+  if (typeof common.max === "number") {
+    patch.max = boundShown(common.max, p, "max");
+  }
+  if (typeof common.step === "number") {
+    patch.step = boundShown(common.step, p, "step");
+  }
+  return patch;
 }
 
 /** The `common` fields the transformer owns. `name` is handled by the label refresh, not the signature. */
@@ -870,6 +924,8 @@ export class ApplianceSync {
     }
     /** Every text datapoint of a BSH key: its stored `common` and what is known about it, for the list repair. */
     const storedLists = new Map<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>();
+    /** Every datapoint an older version stored in another form: an on/off text, a number in the appliance's unit. */
+    const oldForms = new Map<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>();
     try {
       const objects = await this.port.getForeignObjects(`${this.port.namespace}.*`, "state");
       for (const [fullId, obj] of Object.entries(objects)) {
@@ -904,7 +960,9 @@ export class ApplianceSync {
           nameSource: storedNameSource(native),
         };
         this.knownStates.set(rel, known);
-        if (isRecord(common.states) || (common.type === "string" && bshKey !== undefined)) {
+        if (storedForm(bshKey, common, rel) !== undefined) {
+          oldForms.set(rel, { common, known });
+        } else if (isRecord(common.states) || (common.type === "string" && bshKey !== undefined)) {
           storedLists.set(rel, { common, known });
         }
         const parts = rel.split(".");
@@ -921,8 +979,62 @@ export class ApplianceSync {
       this.port.log.debug(`priming known states from objects failed: ${errMessage(e)}`);
     }
     await this.refreshLegacyLabels();
+    await this.bringOldFormsUpToDate(oldForms);
     await this.refreshValueLabels(storedLists);
     await this.refreshChannelNames();
+  }
+
+  /**
+   * Bring every datapoint an older version stored in another form to the current one, object and value, without a
+   * single cloud request (decision 47): an on/off text becomes a switch ("on" → true), a number in the appliance's
+   * unit its shown unit (2,011,440 s → 558.7 h). The same datapoint lives on — its id, and what hangs on it, stay. An
+   * appliance that is off reports nothing for hours; without this its tree would show the old number under the new
+   * unit, or a text in a boolean, until it does.
+   *
+   * @param oldForms relative id → stored `common` and known state of every datapoint in an older form
+   */
+  private async bringOldFormsUpToDate(
+    oldForms: ReadonlyMap<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>,
+  ): Promise<void> {
+    for (const [rel, { common, known }] of oldForms) {
+      const form = storedForm(known.bshKey, common, rel);
+      if (form === undefined) {
+        continue;
+      }
+      try {
+        const patch: Partial<ioBroker.StateCommon> =
+          form.kind === "switch"
+            ? {
+                type: "boolean",
+                role: switchRole(known.bshKey ?? "", common.write === true),
+                states: null as unknown as undefined,
+                def: false,
+              }
+            : shownBounds(common, form.p);
+        await this.port.extendObject(rel, { common: patch });
+        const val = (await this.port.getState(rel))?.val;
+        const shown =
+          form.kind === "switch"
+            ? typeof val === "string"
+              ? switchState(val)
+              : undefined
+            : typeof val === "number"
+              ? toShown(val, form.p)
+              : undefined;
+        if (shown !== undefined) {
+          await this.port.setState(rel, { val: shown, ack: true });
+        }
+        const now: Partial<ioBroker.StateCommon> = { ...common, ...patch };
+        if (form.kind === "switch") {
+          delete now.states;
+          known.hasStates = false;
+        }
+        known.type = now.type;
+        known.metaSig = metaSignature(now, { bshKey: known.bshKey, bshValues: known.bshValues });
+      } catch (e) {
+        this.port.log.debug(`bringing ${rel} to its current form failed: ${errMessage(e)}`);
+      }
+    }
   }
 
   /**
@@ -3131,7 +3243,15 @@ export class ApplianceSync {
     // The run's own figures, where the appliance reports them (laundry appliances).
     const figures: Array<[string, number, I18nKey, I18nKey, string, string, (v: number) => number]> = [
       ["water", RUN_DETAIL.waterMl, "lrWater", "lrWaterDesc", "l", "value", v => v / 1000],
-      ["energy", RUN_DETAIL.energyWh, "lrEnergy", "lrEnergyDesc", "Wh", "value.energy.consumed", v => v],
+      [
+        "energy",
+        RUN_DETAIL.energyWh,
+        "lrEnergy",
+        "lrEnergyDesc",
+        "kWh",
+        "value.energy.consumed",
+        v => toShown(v, RUN_ENERGY),
+      ],
       ["detergent", RUN_DETAIL.detergentMl, "lrDetergent", "lrDetergentDesc", "ml", "value", v => v],
       ["softener", RUN_DETAIL.softenerMl, "lrSoftener", "lrSoftenerDesc", "ml", "value", v => v],
     ];
@@ -3446,7 +3566,11 @@ export class ApplianceSync {
         nameSource = "api";
       }
       // Clear the two merge-proof fields first, so no stale entry survives.
-      const clearCommon = known.hasStates === true && fresh.states !== undefined;
+      // A list goes when a new one comes, and when the value type changes — an on/off text that became a switch
+      // (decision 47) keeps no list of "on"/"off" a merge would leave standing.
+      const clearCommon =
+        known.hasStates === true &&
+        (fresh.states !== undefined || (known.type !== undefined && fresh.type !== known.type));
       const clearNative = known.hasValues === true && native.bshValues !== undefined;
       if (clearCommon || clearNative) {
         // A failure here must NOT be swallowed. Swallowing it let the second pass
@@ -3471,7 +3595,7 @@ export class ApplianceSync {
       // entries, and a value the appliance no longer offers would stay in the
       // dropdown and resolvable on write. Reachable whenever the single-setting
       // read fails and the list entry alone carries no `allowedvalues`.
-      known.hasStates = fresh.states !== undefined || known.hasStates === true;
+      known.hasStates = fresh.states !== undefined || (known.hasStates === true && !clearedStates);
       known.hasValues = native.bshValues !== undefined || known.hasValues === true;
       known.seenValues = native.seenValues ?? known.seenValues;
       this.port.log.debug(`refreshed object metadata of ${fullId}`);
@@ -4056,6 +4180,13 @@ export class ApplianceSync {
           `Write to ${rel} not sent: "${String(value)}" can only be chosen at the appliance — Home Connect does not offer it for remote selection.`,
         );
         await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
+      } else if (typeof value === "boolean" && ctx.bshValues && ctx.bshValues.length > 0) {
+        // A switch the appliance cannot be set to remotely (a power state without Off or Standby): the user asked for
+        // something — the answer goes to info, and the datapoint goes back to what the appliance really has.
+        this.port.log.info(
+          `Write to ${rel} not sent: the appliance cannot be switched ${value ? "on" : "off"} remotely.`,
+        );
+        await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
       } else {
         const both = ambiguousCandidates(value, ctx.bshValues);
         if (both.length > 0 && channel !== "options") {
@@ -4219,7 +4350,7 @@ export class ApplianceSync {
         continue;
       }
       const values = familyOf(meta?.bshValues, key);
-      const value = values && values.length > 0 ? resolveEnum(st.val, values, true) : st.val;
+      const value = resolveValue(st.val, values, true, key);
       if (value !== undefined && value !== null) {
         result.push({ key, value });
       }
