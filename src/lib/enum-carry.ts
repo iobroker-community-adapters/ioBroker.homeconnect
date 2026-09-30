@@ -24,7 +24,8 @@
  * it, and deletes them in that order, each followed by `removeIdFromAllEnums` (js-controller 7.2.2 `adapter.ts`
  * `_delForeignObject` → `_deleteObjects`). Whatever the caller keeps on the root to finish an interrupted move later
  * (a journal in `native`) is gone before the first child — a crash in between leaves the children without it. Keep
- * such a journal elsewhere, or delete the children first and the root last.
+ * such a journal elsewhere, or delete the children first and the root last. The fleet's move journal is
+ * `native.movingTo` on the old root: where an adapter writes it, a `remove` never deletes recursively.
  *
  * Fleet master: `Entwicklung/.consistency-master/src/lib/enum-carry.ts`. Every adapter that moves
  * objects between ids carries this file and its test byte for byte — the release run (consistency
@@ -155,7 +156,8 @@ async function carry(
  * @param adapter the adapter (object I/O, log)
  * @param successors the new full ids of a member that moves (e.g. every id below an old device root, mapped below the
  *   new root), an empty list for every other member
- * @param remove the caller's delete of everything that goes away (e.g. `() => this.delObjectAsync(root, { recursive: true })`)
+ * @param remove the caller's delete of everything that goes away — the ids below a root deepest first, the root last
+ *   (a recursive delete removes the root first, see above)
  * @param describeError the adapter's error-text helper (one per repository)
  * @returns the enums that were written and the new ids each got — empty when no moved id was in an enum, or when
  *   reading failed

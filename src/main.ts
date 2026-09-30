@@ -573,12 +573,33 @@ export class Homeconnect extends utils.Adapter {
     const carried = await moveAllWithEnums(
       this,
       oldId => carry.get(oldId) ?? [],
-      () => this.delObjectAsync(root, { recursive: true }),
+      () => this.deleteLeavesFirst(root),
       errMessage,
     );
     this.objectMirror.forgetTree(root);
     this.stateMirror.forget(this.objectMirror.fullId(root), true);
     return carried.reduce((n, c) => n + c.newIds.length, 0);
+  }
+
+  /**
+   * Delete a tree from its deepest objects up, the root last. A recursive delete takes the root first
+   * (js-controller 7.2.2 `_delForeignObject` → `_deleteObjects`), and the root of a device move carries its
+   * journal (`native.movingTo`): a stop in the middle would leave the moved datapoints behind with nothing that
+   * says where they belong. Deleting the root last keeps the journal until the tree below it is gone.
+   *
+   * @param root the namespace-relative root that goes away
+   */
+  private async deleteLeavesFirst(root: string): Promise<void> {
+    const full = `${this.namespace}.${root}`;
+    const list = await this.getObjectListAsync({ startkey: `${full}.`, endkey: `${full}.\u9999` });
+    const below = list.rows.map(row => row.id).filter(id => id.startsWith(`${full}.`));
+    below.sort((a, b) => b.split(".").length - a.split(".").length);
+    for (const id of below) {
+      await this.delForeignObjectAsync(id);
+    }
+    if (await this.getObjectAsync(root)) {
+      await this.delObjectAsync(root);
+    }
   }
 
   /** Build the port the AuthController drives the sign-in lifecycle through. */

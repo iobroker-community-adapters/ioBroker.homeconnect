@@ -132,6 +132,10 @@ vi.mock("@iobroker/adapter-core", () => {
       }
       return Promise.resolve();
     });
+    public delForeignObjectAsync = vi.fn((id: string) => {
+      this.objects.delete(this.key(id));
+      return Promise.resolve();
+    });
     public subscribeStatesAsync = vi.fn((pattern: string) => {
       this.subscribed.push(pattern);
       return Promise.resolve();
@@ -1561,6 +1565,7 @@ describe("Homeconnect tree delete that carries rooms and functions", () => {
       deleteTreeCarryingEnums(root: string, carry: Map<string, string[]>): Promise<number>;
     };
     ctx.i.objects.set("old", { type: "device" });
+    ctx.i.objects.set("old.status", { type: "channel" });
     ctx.i.objects.set("old.status.doorState", { type: "state" });
     ctx.i.foreign.set("enum.rooms.kitchen", {
       type: "enum",
@@ -1585,8 +1590,15 @@ describe("Homeconnect tree delete that carries rooms and functions", () => {
       ]),
     );
 
-    expect(a.delObjectAsync).toHaveBeenCalledTimes(1);
-    expect(a.delObjectAsync).toHaveBeenCalledWith("old", { recursive: true });
+    // Deepest first, the root (it carries a move's journal) last — never one recursive delete.
+    expect(a.delForeignObjectAsync.mock.calls.map(c => c[0])).toEqual([
+      "homeconnect.0.old.status.doorState",
+      "homeconnect.0.old.status",
+    ]);
+    expect(a.delObjectAsync.mock.calls).toEqual([["old"]]);
+    expect(a.delForeignObjectAsync.mock.invocationCallOrder[0]).toBeLessThan(
+      a.delObjectAsync.mock.invocationCallOrder[0],
+    );
     expect(ctx.i.objects.has("old.status.doorState")).toBe(false);
     expect([...(ctx.i.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members].sort()).toEqual([
       "hm-rpc.0.X",
