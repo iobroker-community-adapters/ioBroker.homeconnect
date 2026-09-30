@@ -80,8 +80,7 @@ The update takes care of the tree itself: your login and Client ID are kept, and
 What you have to do:
 
 1. Make a backup before the update. Going back to 1.x is not supported — the old tree is removed once it has been handed over, and 1.x cannot read the login 2.0 stores encrypted.
-2. Enter the **Client Secret** of your Home Connect application once — the older generation never asked for it.
-3. Adjust your scripts and visualizations to the new IDs. The table lists, for the last part of every old ID, the datapoint that replaces it (below the new device folder). Rows marked (decoded) are new datapoints read from the old raw value; rooms, functions, aliases and recordings of the old raw datapoint are not carried to them.
+2. Adjust your scripts and visualizations to the new IDs. The table lists, for the last part of every old ID, the datapoint that replaces it (below the new device folder). Rows marked (decoded) are new datapoints read from the old raw value; rooms, functions, aliases and recordings of the old raw datapoint are not carried to them.
 
 | Old ID, last part (1.x)                                                        | New datapoint (2.0)                                                          |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

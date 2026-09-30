@@ -80,8 +80,7 @@ Den Baum stellt das Update selbst um: Anmeldung und Client ID bleiben, und Räum
 Was du tun musst:
 
 1. Vor dem Update ein Backup machen. Zurück auf 1.x geht nicht — der alte Baum wird entfernt, sobald er übergeben ist, und 1.x kann die Anmeldung nicht lesen, die 2.0 verschlüsselt speichert.
-2. Einmal das **Client Secret** deiner Home-Connect-Anwendung eintragen — die alte Generation hat es nie abgefragt.
-3. Skripte und Visualisierungen auf die neuen IDs umstellen. Die Tabelle nennt zum letzten Teil jeder alten ID den Datenpunkt, der sie ersetzt (unter dem neuen Geräte-Ordner). Zeilen mit (entschlüsselt) sind neue Datenpunkte aus dem alten Rohwert; Räume, Funktionen, Aliase und Aufzeichnungen des alten Roh-Datenpunkts ziehen nicht mit.
+2. Skripte und Visualisierungen auf die neuen IDs umstellen. Die Tabelle nennt zum letzten Teil jeder alten ID den Datenpunkt, der sie ersetzt (unter dem neuen Geräte-Ordner). Zeilen mit (entschlüsselt) sind neue Datenpunkte aus dem alten Rohwert; Räume, Funktionen, Aliase und Aufzeichnungen des alten Roh-Datenpunkts ziehen nicht mit.
 
 | Alte ID, letzter Teil (1.x)                                                    | Neuer Datenpunkt (2.0)                                                       |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
