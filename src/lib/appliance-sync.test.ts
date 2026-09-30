@@ -7426,6 +7426,46 @@ describe("decoded program records (decision 40)", () => {
     expect(port.states.get("wt-1.statistics.sportshoes.completed")).toBe(1);
   });
 
+  it("moves the statistics of a number the program table names now at start, before the appliance reports them", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: `${NS}.wt-1`,
+        type: "device",
+        common: { name: "Wt" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wt", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const stored = {
+      _id: `${NS}.wt-1.statistics.program31673.completed`,
+      type: "state",
+      common: {
+        name: "Program 31673 · Runs completed",
+        type: "number",
+        role: "value",
+        read: true,
+        write: false,
+        custom: { "influxdb.0": { enabled: true } },
+      },
+      native: {},
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [`${NS}.wt-1.statistics.program31673.completed`]: stored };
+    await port.extendObject("wt-1.statistics.program31673", { type: "channel", common: { name: "Program 31673" } });
+    await port.extendObject("wt-1.statistics.program31673.completed", {
+      type: "state",
+      common: stored.common as ioBroker.StateCommon,
+      native: {},
+    });
+    port.states.set("wt-1.statistics.program31673.completed", 1);
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    expect(port.objects.has("wt-1.statistics.program31673.completed")).toBe(false);
+    const moved = port.objects.get("wt-1.statistics.sportshoes.completed")?.common as ioBroker.StateCommon;
+    expect(moved.custom).toMatchObject({ "influxdb.0": { enabled: true } });
+    expect(moved.name).toMatchObject({ en: "Sports shoes · Runs completed" });
+    expect(port.objects.get("wt-1.statistics.sportshoes")?.common?.name).toMatchObject({ en: "Sports shoes" });
+  });
+
   it("learns a program number from the run it saw, and moves its statistics with the recording", async () => {
     vi.useFakeTimers();
     try {
