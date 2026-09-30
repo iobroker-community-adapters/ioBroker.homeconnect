@@ -8,7 +8,7 @@ Jeder Wert kommt in einer Form an, mit der sich direkt arbeiten lässt: Ein/Aus 
 
 - Node.js >= 22
 - js-controller >= 7.2.2
-- Admin >= 8.0.11 — das Anmelde-Panel in den Einstellungen ist eine Admin-8-Komponente
+- Admin >= 8.0.14
 - Ein kostenloses Home-Connect-Entwicklerkonto für Client ID und Client Secret
 
 ## Zugangsdaten bei Home Connect anlegen

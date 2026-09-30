@@ -24,7 +24,7 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 - Node.js >= 22
 - js-controller >= 7.2.2
-- Admin >= 8.0.14 (the sign-in panel in the settings needs Admin 8)
+- Admin >= 8.0.14
 - A free Home Connect developer account (for a Client ID and Client Secret)
 
 > The adapter CANNOT be installed via GitHub: The adapter must be installed via the ioBroker repository (stable or latest).
@@ -128,7 +128,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 
 - (krobipd) Changed: complete rewrite with a new object tree — every appliance gets its own readable folder and datapoints, so scripts and VIS need the new IDs (table in the documentation)
 - (krobipd) Changed: values arrive as switches, numbers with units and lists in the system language instead of raw Home Connect texts; encoded program data is decoded into readable datapoints
-- (krobipd) Changed: the adapter requires js-controller 7.2.2 and Admin 8.0.14 or newer now; the sign-in panel in the settings shows the live status and needs Admin 8
+- (krobipd) Changed: the adapter requires js-controller 7.2.2 and Admin 8.0.14 or newer now
 - (krobipd) New: sign-in panel with the code, a connection test and a reset; login and Client ID of 1.x are kept, only the Client Secret has to be entered once
 - (krobipd) Improved: rooms, functions, aliases and recordings move to the matching new datapoints on update, and the stored login is kept encrypted
 - (krobipd) Fixed: the object database no longer grows with every value change (#387), and the start stays within the Home Connect request limits (#327, #58)

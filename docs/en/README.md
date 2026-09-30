@@ -8,7 +8,7 @@ Every value arrives in a form you can use directly: on/off as a boolean, a fixed
 
 - Node.js >= 22
 - js-controller >= 7.2.2
-- Admin >= 8.0.11 — the sign-in panel in the settings is an Admin 8 component
+- Admin >= 8.0.14
 - A free Home Connect developer account, for a Client ID and a Client Secret
 
 ## Getting your Home Connect credentials
