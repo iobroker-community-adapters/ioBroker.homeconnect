@@ -1433,7 +1433,9 @@ export class ApplianceSync {
    * The datapoints of the new tree that take the place of one legacy datapoint: a raw BSH key leaf
    * (`status.BSH_Common_Status_OperationState`) becomes the key again and goes through the same
    * expansion as the sync (`status.operationState` and `status.programRunning`); the old
-   * `general.connected` becomes `info.reachable`. Anything else has no counterpart.
+   * `general.connected` becomes `info.reachable`, and the old stop button — every 1.6.x appliance
+   * had one, though Home Connect lists no such command — becomes `programs.stop`. Anything else has
+   * no counterpart.
    *
    * @param rel the legacy state's namespace-relative id
    * @param deviceId the appliance's new device id
@@ -1444,6 +1446,9 @@ export class ApplianceSync {
     const leaf = parts.at(-1) ?? "";
     if (parts.length === 3 && parts[1] === "general" && leaf === "connected") {
       return [`${deviceId}.info.reachable`];
+    }
+    if (parts.length === 3 && parts[1] === "commands" && leaf === "BSH_Common_Command_StopProgram") {
+      return [`${deviceId}.programs.stop`];
     }
     if (!LEGACY_LEAF.test(leaf)) {
       return [];

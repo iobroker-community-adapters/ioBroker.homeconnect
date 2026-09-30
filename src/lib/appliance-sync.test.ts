@@ -5931,6 +5931,51 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     ]);
   });
 
+  it("carries a room and an alias on the old stop button to the program stop button", async () => {
+    // Every 1.6.x appliance had commands.BSH_Common_Command_StopProgram; Home Connect lists no such
+    // command, so the raw-key expansion names a datapoint that never exists — the button lives on
+    // as programs.stop.
+    const port = new FakePort();
+    seed(port, {
+      [OLD]: { type: "device", common: { name: "Spüler" }, native: {} },
+      [`${OLD}.commands.BSH_Common_Command_StopProgram`]: {
+        type: "state",
+        common: { name: "TRUE = Stop", type: "boolean" },
+        native: {},
+      },
+      "enum.functions.buttons": {
+        type: "enum",
+        common: { name: "Buttons", members: [`${OLD}.commands.BSH_Common_Command_StopProgram`] },
+        native: {},
+      },
+      "alias.0.kitchen.stop": {
+        type: "state",
+        common: { name: "Stop", alias: { id: `${OLD}.commands.BSH_Common_Command_StopProgram` } },
+        native: {},
+      },
+    });
+    const sync = new ApplianceSync(port);
+    await sync.sortOutLegacyTrees();
+    appliance(port, ROOT, "Spüler", {
+      vib: "SX87TX02CE",
+      status: [],
+      settings: [],
+      commands: [],
+      available: ["Dishcare.Dishwasher.Program.Eco50"],
+    });
+    port.logs.length = 0;
+    await sync.syncAppliances();
+
+    const STOP = `${NS}.sx87tx02ce-5775.programs.stop`;
+    expect(port.objects.get("sx87tx02ce-5775.programs.stop")?.type).toBe("state");
+    expect((port.foreign.get("enum.functions.buttons")?.common as { members: string[] }).members).toEqual([STOP]);
+    expect((port.foreign.get("alias.0.kitchen.stop")?.common as { alias: unknown }).alias).toEqual({ id: STOP });
+    expect(port.logs.filter(l => l.includes("previous adapter generation"))).toEqual([
+      "info: Spüler (sx87tx02ce-5775): took over the object tree 015090396331005775 of the previous adapter generation" +
+        " — 1 room/function entry, 1 alias(es) carried to the new datapoints.",
+    ]);
+  });
+
   it("continues a recording only where the same datapoint lives on — one successor of the same type", async () => {
     const port = new FakePort();
     seed(port, {

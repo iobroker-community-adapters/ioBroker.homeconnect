@@ -79,7 +79,7 @@ Den Baum stellt das Update selbst um: Anmeldung und Client ID bleiben, und Räum
 
 Was du tun musst:
 
-1. Vor dem Update ein Backup machen. Zurück auf 1.x geht nicht — der alte Baum wird entfernt, sobald er übergeben ist.
+1. Vor dem Update ein Backup machen. Zurück auf 1.x geht nicht — der alte Baum wird entfernt, sobald er übergeben ist, und 1.x kann die Anmeldung nicht lesen, die 2.0 verschlüsselt speichert.
 2. Einmal das **Client Secret** deiner Home-Connect-Anwendung eintragen — die alte Generation hat es nie abgefragt.
 3. Skripte und Visualisierungen auf die neuen IDs umstellen. Die Tabelle nennt zum letzten Teil jeder alten ID den Datenpunkt, der sie ersetzt (unter dem neuen Geräte-Ordner). Zeilen mit (entschlüsselt) sind neue Datenpunkte aus dem alten Rohwert; Räume, Funktionen, Aliase und Aufzeichnungen des alten Roh-Datenpunkts ziehen nicht mit.
 
@@ -91,6 +91,7 @@ Was du tun musst:
 | `BSH_Common_Command_PartlyOpenDoor`                                            | `commands.partlyOpenDoor`                                                    |
 | `BSH_Common_Command_PauseProgram`                                              | `commands.pauseProgram`                                                      |
 | `BSH_Common_Command_ResumeProgram`                                             | `commands.resumeProgram`                                                     |
+| `BSH_Common_Command_StopProgram`                                               | `programs.stop`                                                              |
 | `BSH_Common_Event_AlarmClockElapsed`                                           | `events.alarmClockElapsed`                                                   |
 | `BSH_Common_Event_Favorite_001_ExternalTrigger`                                | `events.favorite001ExternalTrigger`                                          |
 | `BSH_Common_Event_Favorite_002_ExternalTrigger`                                | `events.favorite002ExternalTrigger`                                          |
@@ -385,7 +386,16 @@ Was du tun musst:
 | `Refrigeration_FridgeFreezer_Setting_SetpointTemperatureRefrigerator`          | `settings.setpointTemperatureRefrigerator`                                   |
 | `Refrigeration_FridgeFreezer_Setting_SuperModeFreezer`                         | `settings.superModeFreezer`                                                  |
 | `Refrigeration_FridgeFreezer_Setting_SuperModeRefrigerator`                    | `settings.superModeRefrigerator`                                             |
+| `general.brand`                                                                | — (wird nicht mehr angelegt)                                                 |
 | `general.connected`                                                            | `info.reachable`                                                             |
+| `general.enumber`                                                              | — (wird nicht mehr angelegt)                                                 |
+| `general.haId`                                                                 | — (wird nicht mehr angelegt)                                                 |
+| `general.name`                                                                 | — (wird nicht mehr angelegt)                                                 |
+| `general.type`                                                                 | — (wird nicht mehr angelegt)                                                 |
+| `general.vib`                                                                  | — (wird nicht mehr angelegt)                                                 |
+| `own_request.request_json`                                                     | — (wird nicht mehr angelegt)                                                 |
+| `own_request.response`                                                         | — (wird nicht mehr angelegt)                                                 |
+| `rateLimit.*`, `rateTokenLimit.*` (unter `homeconnect.0`)                      | — (entfernt)                                                                 |
 
 ## Umstieg von 1.7 – 1.23
 

@@ -79,7 +79,7 @@ The update takes care of the tree itself: your login and Client ID are kept, and
 
 What you have to do:
 
-1. Make a backup before the update. Going back to 1.x is not supported — the old tree is removed once it has been handed over.
+1. Make a backup before the update. Going back to 1.x is not supported — the old tree is removed once it has been handed over, and 1.x cannot read the login 2.0 stores encrypted.
 2. Enter the **Client Secret** of your Home Connect application once — the older generation never asked for it.
 3. Adjust your scripts and visualizations to the new IDs. The table lists, for the last part of every old ID, the datapoint that replaces it (below the new device folder). Rows marked (decoded) are new datapoints read from the old raw value; rooms, functions, aliases and recordings of the old raw datapoint are not carried to them.
 
@@ -91,6 +91,7 @@ What you have to do:
 | `BSH_Common_Command_PartlyOpenDoor`                                            | `commands.partlyOpenDoor`                                                    |
 | `BSH_Common_Command_PauseProgram`                                              | `commands.pauseProgram`                                                      |
 | `BSH_Common_Command_ResumeProgram`                                             | `commands.resumeProgram`                                                     |
+| `BSH_Common_Command_StopProgram`                                               | `programs.stop`                                                              |
 | `BSH_Common_Event_AlarmClockElapsed`                                           | `events.alarmClockElapsed`                                                   |
 | `BSH_Common_Event_Favorite_001_ExternalTrigger`                                | `events.favorite001ExternalTrigger`                                          |
 | `BSH_Common_Event_Favorite_002_ExternalTrigger`                                | `events.favorite002ExternalTrigger`                                          |
@@ -385,7 +386,16 @@ What you have to do:
 | `Refrigeration_FridgeFreezer_Setting_SetpointTemperatureRefrigerator`          | `settings.setpointTemperatureRefrigerator`                                   |
 | `Refrigeration_FridgeFreezer_Setting_SuperModeFreezer`                         | `settings.superModeFreezer`                                                  |
 | `Refrigeration_FridgeFreezer_Setting_SuperModeRefrigerator`                    | `settings.superModeRefrigerator`                                             |
+| `general.brand`                                                                | — (no longer created)                                                        |
 | `general.connected`                                                            | `info.reachable`                                                             |
+| `general.enumber`                                                              | — (no longer created)                                                        |
+| `general.haId`                                                                 | — (no longer created)                                                        |
+| `general.name`                                                                 | — (no longer created)                                                        |
+| `general.type`                                                                 | — (no longer created)                                                        |
+| `general.vib`                                                                  | — (no longer created)                                                        |
+| `own_request.request_json`                                                     | — (no longer created)                                                        |
+| `own_request.response`                                                         | — (no longer created)                                                        |
+| `rateLimit.*`, `rateTokenLimit.*` (below `homeconnect.0`)                      | — (removed)                                                                  |
 
 ## Updating from 1.7 – 1.23
 
