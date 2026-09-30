@@ -3,10 +3,9 @@ import type { NativeKeyMigration } from "./native-key-migration";
 /**
  * Instance keys an earlier manifest declared and this adapter no longer reads. js-controller never
  * deletes one on an update, so they would stay in every existing installation for good — among
- * them the account name and password the previous adapter generation (1.6.x) stored, and
- * `common.nogit` (1.17.0), which blocks the install from GitHub — the only way to this adapter
- * while the ioBroker repository entry under its name is the community package. The fleet helper
- * nulls them once, in one write.
+ * them the account name and password the previous adapter generation (1.6.x) stored. The fleet
+ * helper nulls them once, in one write. `common.nogit` is not among them: since 2.0 the adapter is
+ * installed from npm, and the flag keeps the admin from offering the GitHub install.
  */
 export const SETTINGS_MIGRATIONS: NativeKeyMigration[] = [
   { drop: "authUri" },
@@ -23,7 +22,6 @@ export const SETTINGS_MIGRATIONS: NativeKeyMigration[] = [
   { commonDrop: "license" },
   { commonDrop: "main" },
   { commonDrop: "materialize" },
-  { commonDrop: "nogit" },
   { commonDrop: "plugins" },
   { commonDrop: "restartAdapters" },
   { commonDrop: "supportCustoms" },

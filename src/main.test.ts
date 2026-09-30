@@ -397,9 +397,10 @@ describe("Homeconnect onReady", () => {
     });
     await ctx.i.onReady();
     const a = ctx.i as unknown as { extendForeignObjectAsync: ReturnType<typeof vi.fn> };
+    // `nogit` stays: since 2.0 the adapter is installed from npm, and the flag keeps the GitHub install away.
     expect(a.extendForeignObjectAsync).toHaveBeenCalledWith("system.adapter.homeconnect.0", {
       native: { password: null, username: null },
-      common: { nogit: null, supportCustoms: null },
+      common: { supportCustoms: null },
     });
     // The write restarts the instance: nothing of this run may start after it.
     expect(ctx.syncs).toHaveLength(0);
