@@ -34,7 +34,7 @@ When Home Connect refuses the sign-in, the panel shows what it answered and what
 
 Each appliance gets one folder. Its name is the appliance's **model and the last four characters of its own Home Connect number** (for example `sx87tx02ce-5775`) — unchangeable, and different for two appliances of the same model, which neither the app name nor the E-number from the type plate is. The appliance name from the app stays visible as the folder's display name and follows it live. Should two appliances of one model end in the same four characters, the second one gets its whole number.
 
-Below each appliance — which channels an appliance gets depends on its type; fridges, freezers, wine coolers and air conditioners have no programs:
+Below each appliance — which channels an appliance gets depends on its type; fridges, freezers and wine coolers have no programs:
 
 | Channel      | What is in it                                                                                                                                                                      |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,10 +51,15 @@ Below each appliance — which channels an appliance gets depends on its type; f
 
 At instance level, `info.devicesTotal`, `info.devicesOnline` and `info.devicesAllOnline` summarise the account, `info.connection` is green when the adapter is signed in **and** live updates are running, and `auth.lastError` holds Home Connect's answer to a refused sign-in (empty while signed in, `Unknown` while nothing was asked yet).
 
+Where the data points come from:
+
+- **Status, settings, programs, options and commands** are what the appliance itself reports to Home Connect — the adapter creates exactly those. `options` holds only what you choose for a program; values the appliance reports while a program runs (remaining time, progress, forecasts, process phase) are under `status`.
+- **Events** are the exception. Home Connect has no way to ask which events an appliance can send — an event only arrives at the moment it happens. So the adapter creates every known event of the appliance type in advance, from its own catalogue: you can build a script on "salt empty" today instead of waiting months for the salt to run out. An appliance may therefore have event data points it never uses; an event the catalogue does not know is added the first time the appliance sends it.
+
 Two properties are worth knowing:
 
 - **Every data point exists from the first read of the connected appliance on** — the events of the appliance type even from the first start, and the options of _all_ its programs, not only of the one currently selected.
-- **No data point ever disappears.** A switched-off appliance reports far less to the cloud, but that never means it lost a capability. Only an appliance you remove from your Home Connect account loses its folder. (Exception: a statistics channel named `program<number>` moves to the program's name once the adapter has learned it; recordings, aliases, rooms and functions move along.)
+- **No data point ever disappears.** A switched-off appliance reports far less to the cloud, but that never means it lost a capability. Only an appliance you remove from your Home Connect account loses its folder. (Exception: a statistics channel named `program<number>` moves to the program's name once the adapter has learned it or its program table names the number; recordings, aliases, rooms and functions move along.)
 
 ## Operating appliances
 

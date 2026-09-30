@@ -34,7 +34,7 @@ Lehnt Home Connect die Anmeldung ab, zeigt das Panel die Antwort und was zu tun 
 
 Jedes Gerät bekommt einen Ordner. Sein Name ist das **Modell und die letzten vier Zeichen der eigenen Home-Connect-Nummer** des Geräts (zum Beispiel `sx87tx02ce-5775`) — unveränderlich und bei zwei Geräten desselben Modells verschieden, was weder der Gerätename aus der App noch die E-Nummer vom Typenschild ist. Der App-Name bleibt als Anzeigename des Ordners sichtbar und folgt der App live. Enden zwei Geräte eines Modells auf dieselben vier Zeichen, bekommt das zweite seine ganze Nummer.
 
-Unter jedem Gerät — welche Kanäle ein Gerät bekommt, hängt von seinem Typ ab; Kühl-, Gefrier-, Weinkühlgeräte und Klimageräte haben keine Programme:
+Unter jedem Gerät — welche Kanäle ein Gerät bekommt, hängt von seinem Typ ab; Kühl-, Gefrier- und Weinkühlgeräte haben keine Programme:
 
 | Kanal        | Was darin liegt                                                                                                                                                       |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,10 +51,15 @@ Unter jedem Gerät — welche Kanäle ein Gerät bekommt, hängt von seinem Typ 
 
 Auf Instanzebene fassen `info.devicesTotal`, `info.devicesOnline` und `info.devicesAllOnline` das Konto zusammen; `info.connection` ist grün, wenn der Adapter angemeldet ist **und** die Live-Updates laufen, und `auth.lastError` hält die Antwort von Home Connect auf eine abgelehnte Anmeldung fest (leer, solange die Anmeldung steht; `Unknown`, solange noch nichts gefragt wurde).
 
+Woher die Datenpunkte kommen:
+
+- **Status, Einstellungen, Programme, Optionen und Befehle** meldet das Gerät selbst an Home Connect — genau diese legt der Adapter an. Unter `options` steht nur, was man für ein Programm wählt; Werte, die das Gerät während eines Programms meldet (Restzeit, Fortschritt, Prognosen, Programmphase), stehen unter `status`.
+- **Ereignisse** sind die Ausnahme. Home Connect kann nicht beantworten, welche Ereignisse ein Gerät schicken kann — ein Ereignis kommt erst in dem Moment, in dem es eintritt. Deshalb legt der Adapter alle bekannten Ereignisse des Gerätetyps vorab aus seinem eigenen Katalog an: ein Skript auf „Salz leer“ lässt sich heute bauen, statt Monate zu warten, bis das Salz einmal ausgeht. Ein Gerät kann deshalb Ereignis-Datenpunkte haben, die es nie nutzt; ein Ereignis, das der Katalog nicht kennt, kommt dazu, sobald das Gerät es zum ersten Mal schickt.
+
 Zwei Eigenschaften sind wichtig zu wissen:
 
 - **Jeder Datenpunkt existiert ab dem ersten Lesen des verbundenen Geräts** — die Ereignisse des Gerätetyps schon ab dem ersten Start, und die Optionen _aller_ Programme, nicht nur die des gerade gewählten.
-- **Kein Datenpunkt verschwindet je.** Ein ausgeschaltetes Gerät meldet der Cloud sehr viel weniger, aber das heißt nie, dass es eine Fähigkeit verloren hätte. Nur ein aus dem Home-Connect-Konto entferntes Gerät verliert seinen Ordner. (Ausnahme: ein Statistik-Kanal `program<Nummer>` zieht auf den Programmnamen um, sobald der Adapter ihn gelernt hat; Aufzeichnungen, Aliase, Räume und Funktionen ziehen mit.)
+- **Kein Datenpunkt verschwindet je.** Ein ausgeschaltetes Gerät meldet der Cloud sehr viel weniger, aber das heißt nie, dass es eine Fähigkeit verloren hätte. Nur ein aus dem Home-Connect-Konto entferntes Gerät verliert seinen Ordner. (Ausnahme: ein Statistik-Kanal `program<Nummer>` zieht auf den Programmnamen um, sobald der Adapter ihn gelernt hat oder seine Programmtabelle die Nummer kennt; Aufzeichnungen, Aliase, Räume und Funktionen ziehen mit.)
 
 ## Geräte bedienen
 
