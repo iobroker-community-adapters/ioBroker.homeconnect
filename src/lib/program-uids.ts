@@ -505,6 +505,9 @@ export const PROGRAM_UIDS: Readonly<Record<string, Readonly<Record<number, strin
     31661: "LaundryCare.WasherDryer.Program.Rinse.Rinse.Rinse",
     31668: "LaundryCare.WasherDryer.Program.ShirtsBlouses.ShirtsBlouses.ShirtsBlouses",
     31670: "LaundryCare.WasherDryer.Program.Spin",
+    // Inferred 2026-09-30 from a live washer-dryer: the one program it ran once (SportShoes, 2026-09-20) that had
+    // no statistics group, counted exactly once under 31673; the key follows the three-part form of 31668.
+    31673: "LaundryCare.WasherDryer.Program.SportShoes.SportShoes.SportShoes",
     31694: "LaundryCare.WasherDryer.Program.Wool.Wool.Wool",
     32828: "BSH.Common.Program.Favorite.001",
   },

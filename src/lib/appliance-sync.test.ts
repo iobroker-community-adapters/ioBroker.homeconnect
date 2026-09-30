@@ -7216,8 +7216,8 @@ describe("decoded program records (decision 40)", () => {
     { key: "LaundryCare.Common.Status.Program.History.EffectiveTime", value: "AL0A-QAMAAw" },
     { key: "LaundryCare.Common.Status.Program.Details.Program08", value: "D3u2AAYABgAAEkg" },
     { key: "LaundryCare.Common.Status.Program.Details.Program02", value: "D3sHAF0AXwANqOA" },
-    // 31673: in none of the appliance descriptions researched — stays a number until learned.
-    { key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3u5AAEAAQAAFGQ" },
+    // 31699: in no program table — stays a number until learned.
+    { key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3vTAAEAAQAAFGQ" },
     { key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: SUMMARY },
     { key: "BSH.Common.Status.ErrorCodesList", value: "[]" },
   ];
@@ -7306,8 +7306,8 @@ describe("decoded program records (decision 40)", () => {
     expect(port.states.get("wt-1.statistics.cotton.runtime")).toBe(248.7);
     expect(port.states.get("wt-1.statistics.spin.completed")).toBe(6);
     // A number no description names stays a number, readably labelled.
-    expect(port.states.get("wt-1.statistics.program31673.completed")).toBe(1);
-    expect(port.objects.get("wt-1.statistics.program31673")?.common?.name).toEqual(tName("unknownProgram", 31673));
+    expect(port.states.get("wt-1.statistics.program31699.completed")).toBe(1);
+    expect(port.objects.get("wt-1.statistics.program31699")?.common?.name).toEqual(tName("unknownProgram", 31699));
     expect(port.objects.get("wt-1.statistics")?.type).toBe("folder");
     expect(port.states.get("wt-1.lastRun.start")).toBe(Date.parse("2026-09-27T14:35:55.271Z"));
     expect(port.states.get("wt-1.lastRun.duration")).toBe(12);
@@ -7354,10 +7354,59 @@ describe("decoded program records (decision 40)", () => {
           type: "WasherDryer",
           enumber: "Wt",
           idScheme: 3,
-          programUids: { 31673: wd("SportShoes.SportShoes.SportShoes") },
+          programUids: { 31699: wd("SportShoes.SportShoes.SportShoes") },
         },
       } as unknown as ioBroker.Object,
     };
+    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.syncAppliances();
+    sync.handleStreamEvent({
+      event: "STATUS",
+      id: "HA-1",
+      data: JSON.stringify({
+        items: [{ key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3vTAAEAAQAAFGQ" }],
+      }),
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(port.objects.has("wt-1.statistics.sportshoes.completed")).toBe(true);
+    expect(port.objects.has("wt-1.statistics.program31699.completed")).toBe(false);
+  });
+
+  it("moves the statistics of a number the program table names now, with the recording", async () => {
+    // An older version could not name 31673 and drew it as `program31673`; the table names it since decision 49.
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wt-1`]: {
+        _id: `${NS}.wt-1`,
+        type: "device",
+        common: { name: "Wt" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wt", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    port.primeStates = {
+      [`${NS}.wt-1.statistics.program31673.completed`]: {
+        _id: `${NS}.wt-1.statistics.program31673.completed`,
+        type: "state",
+        common: {
+          name: "Program 31673 · Runs completed",
+          type: "number",
+          role: "value",
+          read: true,
+          write: false,
+          custom: { "influxdb.0": { enabled: true } },
+        },
+        native: {},
+      } as unknown as ioBroker.Object,
+    };
+    // The stored tree as the database holds it (the priming reads the list, a move copies the objects).
+    const stored = port.primeStates[`${NS}.wt-1.statistics.program31673.completed`];
+    await port.extendObject("wt-1.statistics.program31673.completed", {
+      type: "state",
+      common: stored.common as ioBroker.StateCommon,
+      native: {},
+    });
     appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
@@ -7370,8 +7419,11 @@ describe("decoded program records (decision 40)", () => {
       }),
     });
     await new Promise(resolve => setTimeout(resolve, 20));
-    expect(port.objects.has("wt-1.statistics.sportshoes.completed")).toBe(true);
     expect(port.objects.has("wt-1.statistics.program31673.completed")).toBe(false);
+    const moved = port.objects.get("wt-1.statistics.sportshoes.completed")?.common as ioBroker.StateCommon;
+    expect(moved.custom).toMatchObject({ "influxdb.0": { enabled: true } });
+    expect(moved.name).toMatchObject({ en: "Sports shoes · Runs completed" });
+    expect(port.states.get("wt-1.statistics.sportshoes.completed")).toBe(1);
   });
 
   it("learns a program number from the run it saw, and moves its statistics with the recording", async () => {
@@ -7387,11 +7439,11 @@ describe("decoded program records (decision 40)", () => {
         event: "STATUS",
         id: "HA-1",
         data: JSON.stringify({
-          items: [{ key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3u5AAEAAQAAFGQ" }],
+          items: [{ key: "LaundryCare.Common.Status.Program.Details.Program20", value: "D3vTAAEAAQAAFGQ" }],
         }),
       });
       await vi.advanceTimersByTimeAsync(10);
-      await port.extendObject("wt-1.statistics.program31673.completed", {
+      await port.extendObject("wt-1.statistics.program31699.completed", {
         common: { custom: { "influxdb.0": { enabled: true } } },
       });
       // The sports-shoes program runs (seen at 14:36:10, inside the run) …
@@ -7403,7 +7455,7 @@ describe("decoded program records (decision 40)", () => {
         }),
       });
       await vi.advanceTimersByTimeAsync(10);
-      // … and ends: the summary names number 31673.
+      // … and ends: the summary names number 31699.
       vi.setSystemTime(Date.parse("2026-09-27T14:48:10Z"));
       sync.handleStreamEvent({
         event: "STATUS",
@@ -7412,17 +7464,17 @@ describe("decoded program records (decision 40)", () => {
           items: [
             {
               key: "BSH.Common.Status.ProgramSessionSummary.Latest",
-              value: SUMMARY.replace('"program":31670', '"program":31673'),
+              value: SUMMARY.replace('"program":31670', '"program":31699'),
             },
           ],
         }),
       });
       await vi.advanceTimersByTimeAsync(50);
       expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toEqual({
-        31673: wd("SportShoes.SportShoes.SportShoes"),
+        31699: wd("SportShoes.SportShoes.SportShoes"),
       });
       expect(port.states.get("wt-1.lastRun.program")).toBe("sportshoes");
-      expect(port.objects.has("wt-1.statistics.program31673.completed")).toBe(false);
+      expect(port.objects.has("wt-1.statistics.program31699.completed")).toBe(false);
       const moved = port.objects.get("wt-1.statistics.sportshoes.completed")?.common as ioBroker.StateCommon;
       expect(moved.custom).toMatchObject({ "influxdb.0": { enabled: true } });
       expect(port.states.get("wt-1.statistics.sportshoes.completed")).toBe(1);
@@ -7452,7 +7504,7 @@ describe("decoded program records (decision 40)", () => {
           items: [
             {
               key: "BSH.Common.Status.ProgramSessionSummary.Latest",
-              value: SUMMARY.replace('"program":31670', '"program":31673')
+              value: SUMMARY.replace('"program":31670', '"program":31699')
                 .replace("2026-09-27T14:35:55.271Z", "2026-09-27T15:30:00Z")
                 .replace("2026-09-27T14:47:59.859Z", "2026-09-27T16:10:00Z"),
             },
@@ -7461,7 +7513,7 @@ describe("decoded program records (decision 40)", () => {
       });
       await vi.advanceTimersByTimeAsync(50);
       expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toEqual({
-        31673: wd("SportShoes.SportShoes.SportShoes"),
+        31699: wd("SportShoes.SportShoes.SportShoes"),
       });
     } finally {
       vi.useRealTimers();
@@ -7858,29 +7910,29 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       { key: "BSH.Common.Option.ProgramProgress", value: 99, unit: "%" },
     ]);
     await flush();
-    expect(port.states.get("wt-1.options.remainingProgramTime")).toBe(1);
-    expect(port.states.get("wt-1.options.programProgress")).toBe(99);
+    expect(port.states.get("wt-1.status.remainingProgramTime")).toBe(1);
+    expect(port.states.get("wt-1.status.programProgress")).toBe(99);
 
     // Finished still counts as a run: its figures stay.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Finished" }]);
     await flush();
-    expect(port.states.get("wt-1.options.programProgress")).toBe(99);
+    expect(port.states.get("wt-1.status.programProgress")).toBe(99);
 
     // At rest: both are emptied, and a late leftover value is not shown again.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Inactive" }]);
     await flush();
-    expect(port.states.get("wt-1.options.remainingProgramTime")).toBeNull();
-    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.status.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
     send([{ key: "BSH.Common.Option.ProgramProgress", value: 100, unit: "%" }]);
     await flush();
-    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
 
     // A new run shows its figures again — another text value (the door) says nothing about rest.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Run" }]);
     send([{ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Closed" }]);
     send([{ key: "BSH.Common.Option.ProgramProgress", value: 5, unit: "%" }]);
     await flush();
-    expect(port.states.get("wt-1.options.programProgress")).toBe(5);
+    expect(port.states.get("wt-1.status.programProgress")).toBe(5);
   });
 
   it("empties them at the start for an appliance that was left at rest", async () => {
@@ -7902,19 +7954,19 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       }) as unknown as ioBroker.Object;
     port.primeStates = {
       [`${NS}.wt-1.status.operationState`]: state("BSH.Common.Status.OperationState", "string"),
-      [`${NS}.wt-1.options.remainingProgramTime`]: state("BSH.Common.Option.RemainingProgramTime", "number", "min"),
-      [`${NS}.wt-1.options.programProgress`]: state("BSH.Common.Option.ProgramProgress", "number", "%"),
+      [`${NS}.wt-1.status.remainingProgramTime`]: state("BSH.Common.Option.RemainingProgramTime", "number", "min"),
+      [`${NS}.wt-1.status.programProgress`]: state("BSH.Common.Option.ProgramProgress", "number", "%"),
     };
     for (const [fullId, obj] of Object.entries(port.primeStates)) {
       port.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     port.states.set("wt-1.status.operationState", "inactive");
-    port.states.set("wt-1.options.remainingProgramTime", 1);
-    port.states.set("wt-1.options.programProgress", 100);
+    port.states.set("wt-1.status.remainingProgramTime", 1);
+    port.states.set("wt-1.status.programProgress", 100);
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
-    expect(port.states.get("wt-1.options.remainingProgramTime")).toBeNull();
-    expect(port.states.get("wt-1.options.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.status.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
 
     // A running appliance keeps its figures.
     const running = new FakePort();
@@ -7924,9 +7976,9 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       running.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     running.states.set("wt-1.status.operationState", "run");
-    running.states.set("wt-1.options.programProgress", 40);
+    running.states.set("wt-1.status.programProgress", 40);
     await new ApplianceSync(running).primeFromObjects();
-    expect(running.states.get("wt-1.options.programProgress")).toBe(40);
+    expect(running.states.get("wt-1.status.programProgress")).toBe(40);
 
     // An operation state nobody reported yet ("") says nothing: the figures stay.
     const unknown = new FakePort();
@@ -7936,9 +7988,9 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       unknown.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     unknown.states.set("wt-1.status.operationState", "");
-    unknown.states.set("wt-1.options.programProgress", 40);
+    unknown.states.set("wt-1.status.programProgress", 40);
     await new ApplianceSync(unknown).primeFromObjects();
-    expect(unknown.states.get("wt-1.options.programProgress")).toBe(40);
+    expect(unknown.states.get("wt-1.status.programProgress")).toBe(40);
   });
 
   it("writes no run value of an appliance that has none", async () => {
@@ -7983,5 +8035,211 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
     await flush();
     expect(port.objects.get("wt-1.history")?.type).toBe("folder");
     expect(port.objects.has("wt-1.history.latest.program")).toBe(true);
+  });
+});
+
+describe("run values the cloud delivers as options (decision 49)", () => {
+  const COTTON = "LaundryCare.Washer.Program.Cotton";
+  const deviceOf = (port: FakePort): string =>
+    [...port.objects.keys()].find(id => !id.includes(".") && port.objects.get(id)?.type === "device") ?? "";
+
+  it("takes no run value from a program definition into options, and shows it under status", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Washer", { type: "Washer", status: [], available: [COTTON] });
+    port.getResponses.set(`/api/homeappliances/HA-1/programs/available/${COTTON}`, {
+      key: COTTON,
+      options: [
+        {
+          key: "LaundryCare.Washer.Option.SpinSpeed",
+          type: "LaundryCare.Washer.EnumType.SpinSpeed",
+          constraints: { allowedvalues: ["LaundryCare.Washer.EnumType.SpinSpeed.RPM1200"] },
+        },
+        {
+          key: "BSH.Common.Option.RemainingProgramTime",
+          type: "Int",
+          unit: "seconds",
+          constraints: { min: 0, max: 86400, access: "readWrite" },
+        },
+      ],
+    });
+    port.getResponses.set("/api/homeappliances/HA-1/programs/selected", {
+      key: COTTON,
+      options: [{ key: "BSH.Common.Option.RemainingProgramTime", value: 5400, unit: "seconds" }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const dev = deviceOf(port);
+    expect(port.objects.has(`${dev}.options.spinSpeed`)).toBe(true);
+    expect(port.objects.has(`${dev}.options.remainingProgramTime`)).toBe(false);
+    expect(port.objects.get(`${dev}.status.remainingProgramTime`)?.common).toMatchObject({ write: false, unit: "min" });
+    expect(port.states.get(`${dev}.status.remainingProgramTime`)).toBe(90);
+    const stored = (port.objects.get(dev)?.native as { programOptions: Record<string, { ids: string[] }> })
+      .programOptions;
+    expect(stored[COTTON].ids).toEqual(["spinSpeed"]);
+  });
+
+  it("moves an older option-shaped run value to status, read-only, with its value and recording", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.washer`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-W", type: "Washer" },
+      } as unknown as ioBroker.Object,
+    };
+    port.primeStates = {
+      // As an option definition of an older version made it: writable, a level.
+      [`${NS}.washer.options.remainingProgramTime`]: {
+        _id: "",
+        type: "state",
+        common: {
+          name: "Remaining program time",
+          type: "number",
+          role: "level",
+          unit: "min",
+          read: true,
+          write: true,
+          custom: { "influxdb.0": { enabled: true } },
+        },
+        native: { bshKey: "BSH.Common.Option.RemainingProgramTime" },
+      } as unknown as ioBroker.Object,
+      [`${NS}.washer.options.baseProgram`]: {
+        _id: "",
+        type: "state",
+        common: { name: "Base program", type: "string", role: "text", read: true, write: false },
+        native: { bshKey: "BSH.Common.Option.BaseProgram" },
+      } as unknown as ioBroker.Object,
+      // Emptied at rest (decision 48): no value to shape it — it stays a number.
+      [`${NS}.washer.options.programProgress`]: {
+        _id: "",
+        type: "state",
+        common: {
+          name: "Program progress",
+          type: "number",
+          role: "level",
+          unit: "%",
+          min: 0,
+          max: 200,
+          step: 1,
+          read: true,
+          write: true,
+        },
+        native: { bshKey: "BSH.Common.Option.ProgramProgress" },
+      } as unknown as ioBroker.Object,
+      // A list an option definition gave is not the run value's list.
+      [`${NS}.washer.options.processPhase`]: {
+        _id: "",
+        type: "state",
+        common: { name: "Process phase", type: "string", role: "text", read: true, write: true, states: { x: "X" } },
+        native: { bshKey: "LaundryCare.Common.Option.ProcessPhase" },
+      } as unknown as ioBroker.Object,
+      // A settable option stays where it is.
+      [`${NS}.washer.options.spinSpeed`]: {
+        _id: "",
+        type: "state",
+        common: { name: "Spin speed", type: "string", role: "text", read: true, write: true },
+        native: { bshKey: "LaundryCare.Washer.Option.SpinSpeed" },
+      } as unknown as ioBroker.Object,
+    };
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      port.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    port.states.set("washer.options.remainingProgramTime", 42);
+    const sync = new ApplianceSync(port);
+    await sync.migrateRenamedStates();
+
+    const moved = port.objects.get("washer.status.remainingProgramTime")?.common as ioBroker.StateCommon;
+    expect(moved).toMatchObject({ write: false, role: "value", unit: "min" });
+    expect(moved.custom).toMatchObject({
+      "influxdb.0": { enabled: true, aliasId: `${NS}.washer.options.remainingProgramTime` },
+    });
+    expect(port.states.get("washer.status.remainingProgramTime")).toBe(42);
+    expect(port.objects.has("washer.options.remainingProgramTime")).toBe(false);
+    expect(port.objects.has("washer.programs.baseProgram")).toBe(true);
+    expect(port.objects.has("washer.options.baseProgram")).toBe(false);
+    expect(port.objects.has("washer.options.spinSpeed")).toBe(true);
+    expect(port.objects.get("washer.status.programProgress")?.common).toMatchObject({
+      type: "number",
+      role: "value",
+      unit: "%",
+      write: false,
+    });
+    expect((port.objects.get("washer.status.programProgress")?.common as ioBroker.StateCommon).max).toBeUndefined();
+    expect(port.states.has("washer.status.programProgress")).toBe(false);
+    const phase = port.objects.get("washer.status.processPhase")?.common as ioBroker.StateCommon;
+    expect(phase.states).not.toHaveProperty("x");
+  });
+
+  it("keeps a streamed run value on its plain short value, like the option it was", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.washer`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-1", type: "Washer", enumber: "Washer", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    // A list with Drying of two families — the list-unique form would be "dryer.drying".
+    port.primeStates = {
+      [`${NS}.washer.status.processPhase`]: {
+        _id: "",
+        type: "state",
+        common: { name: "Process phase", type: "string", role: "text", read: true, write: false },
+        native: {
+          bshKey: "LaundryCare.Common.Option.ProcessPhase",
+          bshValues: [
+            "LaundryCare.Common.EnumType.ProcessPhase.Drying",
+            "LaundryCare.Dryer.EnumType.ProcessPhase.Drying",
+          ],
+        },
+      } as unknown as ioBroker.Object,
+    };
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    sync.handleStreamEvent({
+      event: "NOTIFY",
+      id: "HA-1",
+      data: JSON.stringify({
+        items: [
+          { key: "LaundryCare.Common.Option.ProcessPhase", value: "LaundryCare.Dryer.EnumType.ProcessPhase.Drying" },
+        ],
+      }),
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(port.states.get("washer.status.processPhase")).toBe("drying");
+  });
+
+  it("never arms a run value an older definition cache still lists", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.washer`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: {
+          haId: "HA-1",
+          type: "Washer",
+          enumber: "Washer",
+          idScheme: 3,
+          programOptions: {
+            [COTTON]: {
+              ids: ["spinSpeed", "remainingProgramTime"],
+              keys: {
+                spinSpeed: "LaundryCare.Washer.Option.SpinSpeed",
+                remainingProgramTime: "BSH.Common.Option.RemainingProgramTime",
+              },
+              v: 5,
+            },
+          },
+        },
+      } as unknown as ioBroker.Object,
+    };
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    await sync.activateProgramOptions("washer", "HA-1", COTTON);
+    await sync.handleWrite(`${NS}.washer.options.remainingProgramTime`, 10);
+    expect(port.writes).toHaveLength(0);
   });
 });

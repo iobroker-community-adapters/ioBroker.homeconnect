@@ -67,5 +67,7 @@ describe("device catalog integrity", () => {
     expect(PROGRAMLESS_TYPES.has("FridgeFreezer")).toBe(true);
     expect(PROGRAMLESS_TYPES.has("WarmingDrawer")).toBe(false); // has programs despite zero events
     expect(PROGRAMLESS_TYPES.has("Dishwasher")).toBe(false);
+    // The official API lists six air-conditioner programs (key research 2026-09-30).
+    expect(PROGRAMLESS_TYPES.has("AirConditioner")).toBe(false);
   });
 });

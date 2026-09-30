@@ -36,18 +36,18 @@ Each appliance gets one folder. Its name is the appliance's **model and the last
 
 Below each appliance — which channels an appliance gets depends on its type; fridges, freezers, wine coolers and air conditioners have no programs:
 
-| Channel      | What is in it                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `info`       | `reachable` — whether the appliance is currently connected to Home Connect (the green/grey dot on the folder)                                  |
-| `status`     | Read-only appliance state: operation state, `doorOpen` / `doorLocked`, `programRunning`, remote-control flags                                  |
-| `settings`   | Writable settings: power state, child lock, interior light, fridge temperatures                                                                |
-| `events`     | Every event of this appliance type as a boolean: program finished, salt nearly empty, rinse aid empty, filter saturated, door alarm …          |
-| `programs`   | `selectedProgram`, `activeProgram`, and the `start` / `stop` buttons                                                                           |
-| `options`    | The options of the programs: temperature, spin speed, intensive zone, delayed start …                                                          |
-| `commands`   | Momentary buttons the appliance offers, e.g. acknowledging an event                                                                            |
-| `lastRun`    | The last finished run: program, start, end, duration, how it ended, and water, energy, detergent and softener where the appliance reports them |
-| `history`    | Previous runs, one channel each: `latest`, `previous`, `thirdLatest` … with program and duration                                               |
-| `statistics` | Per program: runs started, runs completed, running time                                                                                        |
+| Channel      | What is in it                                                                                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `info`       | `reachable` — whether the appliance is currently connected to Home Connect (the green/grey dot on the folder)                                                                      |
+| `status`     | Read-only appliance state: operation state, `doorOpen` / `doorLocked`, `programRunning`, remote-control flags, and while a program runs its remaining time, progress and forecasts |
+| `settings`   | Writable settings: power state, child lock, interior light, fridge temperatures                                                                                                    |
+| `events`     | Every event of this appliance type as a boolean: program finished, salt nearly empty, rinse aid empty, filter saturated, door alarm …                                              |
+| `programs`   | `selectedProgram`, `activeProgram`, and the `start` / `stop` buttons                                                                                                               |
+| `options`    | The options you choose for a program: temperature, spin speed, intensive zone, delayed start …                                                                                     |
+| `commands`   | Momentary buttons the appliance offers, e.g. acknowledging an event                                                                                                                |
+| `lastRun`    | The last finished run: program, start, end, duration, how it ended, and water, energy, detergent and softener where the appliance reports them                                     |
+| `history`    | Previous runs, one channel each: `latest`, `previous`, `thirdLatest` … with program and duration                                                                                   |
+| `statistics` | Per program: runs started, runs completed, running time                                                                                                                            |
 
 At instance level, `info.devicesTotal`, `info.devicesOnline` and `info.devicesAllOnline` summarise the account, `info.connection` is green when the adapter is signed in **and** live updates are running, and `auth.lastError` holds Home Connect's answer to a refused sign-in (empty while signed in, `Unknown` while nothing was asked yet).
 
@@ -92,27 +92,29 @@ What you have to do:
 | `BSH_Common_Command_ResumeProgram`                                             | `commands.resumeProgram`                                                     |
 | `BSH_Common_Command_StopProgram`                                               | `programs.stop`                                                              |
 | `BSH_Common_Event_AlarmClockElapsed`                                           | `events.alarmClockElapsed`                                                   |
+| `BSH_Common_Event_AquaStopOccured`                                             | `events.aquaStopOccured`                                                     |
 | `BSH_Common_Event_Favorite_001_ExternalTrigger`                                | `events.favorite001ExternalTrigger`                                          |
 | `BSH_Common_Event_Favorite_002_ExternalTrigger`                                | `events.favorite002ExternalTrigger`                                          |
+| `BSH_Common_Event_LowWaterPressure`                                            | `events.lowWaterPressure`                                                    |
 | `BSH_Common_Event_ProgramAborted`                                              | `events.programAborted`                                                      |
 | `BSH_Common_Event_ProgramFinished`                                             | `events.programFinished`                                                     |
-| `BSH_Common_Option_BaseProgram`                                                | `options.baseProgram`                                                        |
-| `BSH_Common_Option_CurrentStepRemainingTime`                                   | `options.currentStepRemainingTime`                                           |
+| `BSH_Common_Option_BaseProgram`                                                | `programs.baseProgram`                                                       |
+| `BSH_Common_Option_CurrentStepRemainingTime`                                   | `status.currentStepRemainingTime`                                            |
 | `BSH_Common_Option_Duration`                                                   | `options.duration`                                                           |
-| `BSH_Common_Option_ElapsedProgramTime`                                         | `options.elapsedProgramTime`                                                 |
-| `BSH_Common_Option_ElapsedProgramTime_AutoCounting`                            | `options.elapsedProgramTimeAutoCounting`                                     |
-| `BSH_Common_Option_EnergyForecast`                                             | `options.energyForecast`                                                     |
-| `BSH_Common_Option_EstimatedTotalProgramTime`                                  | `options.estimatedTotalProgramTime`                                          |
+| `BSH_Common_Option_ElapsedProgramTime`                                         | `status.elapsedProgramTime`                                                  |
+| `BSH_Common_Option_ElapsedProgramTime_AutoCounting`                            | `status.elapsedProgramTimeAutoCounting`                                      |
+| `BSH_Common_Option_EnergyForecast`                                             | `status.energyForecast`                                                      |
+| `BSH_Common_Option_EstimatedTotalProgramTime`                                  | `status.estimatedTotalProgramTime`                                           |
 | `BSH_Common_Option_FinishInRelative`                                           | `options.finishInRelative`                                                   |
-| `BSH_Common_Option_ProgramName`                                                | `options.programName`                                                        |
-| `BSH_Common_Option_ProgramProgress`                                            | `options.programProgress`                                                    |
-| `BSH_Common_Option_RemainingProgramTime`                                       | `options.remainingProgramTime`                                               |
-| `BSH_Common_Option_RemainingProgramTime_AutoCounting`                          | `options.remainingProgramTimeAutoCounting`                                   |
-| `BSH_Common_Option_RemainingProgramTimeEstimationState`                        | `options.remainingProgramTimeEstimationState`                                |
-| `BSH_Common_Option_RemainingProgramTimeIsEstimated`                            | `options.remainingProgramTimeIsEstimated`                                    |
-| `BSH_Common_Option_SmartEnergyService_SmartStartEnabled`                       | `options.smartEnergyServiceSmartStartEnabled`                                |
+| `BSH_Common_Option_ProgramName`                                                | `programs.programName`                                                       |
+| `BSH_Common_Option_ProgramProgress`                                            | `status.programProgress`                                                     |
+| `BSH_Common_Option_RemainingProgramTime`                                       | `status.remainingProgramTime`                                                |
+| `BSH_Common_Option_RemainingProgramTime_AutoCounting`                          | `status.remainingProgramTimeAutoCounting`                                    |
+| `BSH_Common_Option_RemainingProgramTimeEstimationState`                        | `status.remainingProgramTimeEstimationState`                                 |
+| `BSH_Common_Option_RemainingProgramTimeIsEstimated`                            | `status.remainingProgramTimeIsEstimated`                                     |
+| `BSH_Common_Option_SmartEnergyService_SmartStartEnabled`                       | `status.smartEnergyServiceSmartStartEnabled`                                 |
 | `BSH_Common_Option_StartInRelative`                                            | `options.startInRelative`                                                    |
-| `BSH_Common_Option_WaterForecast`                                              | `options.waterForecast`                                                      |
+| `BSH_Common_Option_WaterForecast`                                              | `status.waterForecast`                                                       |
 | `BSH_Common_Root_ActiveProgram`                                                | `programs.activeProgram`                                                     |
 | `BSH_Common_Root_SelectedProgram`                                              | `programs.selectedProgram`                                                   |
 | `BSH_Common_Setting_AlarmClock`                                                | `settings.alarmClock`                                                        |
@@ -155,7 +157,7 @@ What you have to do:
 | `ConsumerProducts_CleaningRobot_Option_CleaningPasses`                         | `options.cleaningPasses`                                                     |
 | `ConsumerProducts_CleaningRobot_Option_CleaningSpeed`                          | `options.cleaningSpeed`                                                      |
 | `ConsumerProducts_CleaningRobot_Option_MopExtensionEnabled`                    | `options.mopExtensionEnabled`                                                |
-| `ConsumerProducts_CleaningRobot_Option_ProcessPhase`                           | `options.processPhase`                                                       |
+| `ConsumerProducts_CleaningRobot_Option_ProcessPhase`                           | `status.processPhase`                                                        |
 | `ConsumerProducts_CleaningRobot_Option_ReferenceMapId`                         | `options.referenceMapId`                                                     |
 | `ConsumerProducts_CleaningRobot_Option_SuctionPower`                           | `options.suctionPower`                                                       |
 | `ConsumerProducts_CleaningRobot_Option_WaterFlowRate`                          | `options.waterFlowRate`                                                      |
@@ -169,6 +171,7 @@ What you have to do:
 | `ConsumerProducts_CleaningRobot_Status_LastSelectedMap`                        | `status.lastSelectedMap`                                                     |
 | `ConsumerProducts_CleaningRobot_Status_Lifted`                                 | `status.lifted`                                                              |
 | `ConsumerProducts_CleaningRobot_Status_Lost`                                   | `status.lost`                                                                |
+| `ConsumerProducts_CleaningRobot_Status_ProcessPhase`                           | `status.processPhase`                                                        |
 | `ConsumerProducts_CoffeeMaker_Event_BeanContainerEmpty`                        | `events.beanContainerEmpty`                                                  |
 | `ConsumerProducts_CoffeeMaker_Event_CalcNCleanIn10Cups`                        | `events.calcNCleanIn10Cups`                                                  |
 | `ConsumerProducts_CoffeeMaker_Event_CalcNCleanIn15Cups`                        | `events.calcNCleanIn15Cups`                                                  |
@@ -193,18 +196,18 @@ What you have to do:
 | `ConsumerProducts_CoffeeMaker_Option_BeanAmount`                               | `options.beanAmount`                                                         |
 | `ConsumerProducts_CoffeeMaker_Option_BeanContainerSelection`                   | `options.beanContainerSelection`                                             |
 | `ConsumerProducts_CoffeeMaker_Option_BeverageSize`                             | `options.beverageSize`                                                       |
-| `ConsumerProducts_CoffeeMaker_Option_BeveragesRemaining`                       | `options.beveragesRemaining`                                                 |
+| `ConsumerProducts_CoffeeMaker_Option_BeveragesRemaining`                       | `status.beveragesRemaining`                                                  |
 | `ConsumerProducts_CoffeeMaker_Option_Coarsness`                                | `options.coarsness`                                                          |
-| `ConsumerProducts_CoffeeMaker_Option_Coarsness_Recommendation`                 | `options.coarsnessRecommendation`                                            |
+| `ConsumerProducts_CoffeeMaker_Option_Coarsness_Recommendation`                 | `status.coarsnessRecommendation`                                             |
 | `ConsumerProducts_CoffeeMaker_Option_CoffeeMilkRatio`                          | `options.coffeeMilkRatio`                                                    |
 | `ConsumerProducts_CoffeeMaker_Option_CoffeeStrength`                           | `options.coffeeStrength`                                                     |
-| `ConsumerProducts_CoffeeMaker_Option_CoffeeStrength_Recommendation`            | `options.coffeeStrengthRecommendation`                                       |
+| `ConsumerProducts_CoffeeMaker_Option_CoffeeStrength_Recommendation`            | `status.coffeeStrengthRecommendation`                                        |
 | `ConsumerProducts_CoffeeMaker_Option_CoffeeTemperature`                        | `options.coffeeTemperature`                                                  |
-| `ConsumerProducts_CoffeeMaker_Option_CoffeeTemperature_Recommendation`         | `options.coffeeTemperatureRecommendation`                                    |
+| `ConsumerProducts_CoffeeMaker_Option_CoffeeTemperature_Recommendation`         | `status.coffeeTemperatureRecommendation`                                     |
 | `ConsumerProducts_CoffeeMaker_Option_FillQuantity`                             | `options.fillQuantity`                                                       |
-| `ConsumerProducts_CoffeeMaker_Option_FillQuantity_Recommendation`              | `options.fillQuantityRecommendation`                                         |
+| `ConsumerProducts_CoffeeMaker_Option_FillQuantity_Recommendation`              | `status.fillQuantityRecommendation`                                          |
 | `ConsumerProducts_CoffeeMaker_Option_FlowRate`                                 | `options.flowRate`                                                           |
-| `ConsumerProducts_CoffeeMaker_Option_FlowRate_Recommendation`                  | `options.flowRateRecommendation`                                             |
+| `ConsumerProducts_CoffeeMaker_Option_FlowRate_Recommendation`                  | `status.flowRateRecommendation`                                              |
 | `ConsumerProducts_CoffeeMaker_Option_HotWaterTemperature`                      | `options.hotWaterTemperature`                                                |
 | `ConsumerProducts_CoffeeMaker_Option_MultipleBeverages`                        | `options.multipleBeverages`                                                  |
 | `ConsumerProducts_CoffeeMaker_Option_Shot_Count`                               | `options.shotCount`                                                          |
@@ -233,7 +236,7 @@ What you have to do:
 | `Cooking_Oven_Option_AirExchange`                                              | `options.airExchange`                                                        |
 | `Cooking_Oven_Option_CavitySelector`                                           | `options.cavitySelector`                                                     |
 | `Cooking_Oven_Option_FastPreHeat`                                              | `options.fastPreHeat`                                                        |
-| `Cooking_Oven_Option_HeatupProgress`                                           | `options.heatupProgress`                                                     |
+| `Cooking_Oven_Option_HeatupProgress`                                           | `status.heatupProgress`                                                      |
 | `Cooking_Oven_Option_Level`                                                    | `options.level`                                                              |
 | `Cooking_Oven_Option_MeatProbeTemperatureV2`                                   | `options.meatProbeTemperatureV2`                                             |
 | `Cooking_Oven_Option_MicrowavePower`                                           | `options.microwavePower`                                                     |
@@ -280,14 +283,27 @@ What you have to do:
 | `Dishcare_Dishwasher_Option_VarioSpeed`                                        | `options.varioSpeed`                                                         |
 | `Dishcare_Dishwasher_Option_VarioSpeedPlus`                                    | `options.varioSpeedPlus`                                                     |
 | `Dishcare_Dishwasher_Option_ZeoliteDry`                                        | `options.zeoliteDry`                                                         |
+| `Dishcare_Dishwasher_Setting_TimeLight`                                        | `settings.timeLight`                                                         |
 | `Dishcare_Dishwasher_Status_EcoDryActive`                                      | `status.ecoDryActive`                                                        |
 | `Dishcare_Dishwasher_Status_ProgramPhase`                                      | `status.programPhase`                                                        |
-| `LaundryCare_Common_Option_LoadRecommendation`                                 | `options.loadRecommendation`                                                 |
+| `LaundryCare_Common_Event_DelayedShutdown`                                     | `events.delayedShutdown`                                                     |
+| `LaundryCare_Common_Event_DelayedShutdownCanceled`                             | `events.delayedShutdownCanceled`                                             |
+| `LaundryCare_Common_Event_DoorNotLockable`                                     | `events.doorNotLockable`                                                     |
+| `LaundryCare_Common_Event_DoorNotUnlockable`                                   | `events.doorNotUnlockable`                                                   |
+| `LaundryCare_Common_Event_DoorOpen`                                            | `events.doorOpen`                                                            |
+| `LaundryCare_Common_Event_FatalErrorOccured`                                   | `events.fatalErrorOccured`                                                   |
+| `LaundryCare_Common_Event_FoamDetection`                                       | `events.foamDetection`                                                       |
+| `LaundryCare_Common_Event_SupplyPower_BlackedOut`                              | `events.supplyPowerBlackedOut`                                               |
+| `LaundryCare_Common_Event_SupplyPower_SupplyVoltageTooLow`                     | `events.supplyPowerSupplyVoltageTooLow`                                      |
+| `LaundryCare_Common_Option_LoadRecommendation`                                 | `status.loadRecommendation`                                                  |
 | `LaundryCare_Common_Option_LowTemperatureHygiene`                              | `options.lowTemperatureHygiene`                                              |
-| `LaundryCare_Common_Option_ProcessPhase`                                       | `options.processPhase`                                                       |
+| `LaundryCare_Common_Option_ProcessPhase`                                       | `status.processPhase`                                                        |
 | `LaundryCare_Common_Option_SilentMode`                                         | `options.silentMode`                                                         |
 | `LaundryCare_Common_Option_SpeedPerfect`                                       | `options.speedPerfect`                                                       |
 | `LaundryCare_Common_Option_VarioPerfect`                                       | `options.varioPerfect`                                                       |
+| `LaundryCare_Common_Setting_Brightness`                                        | `settings.brightness`                                                        |
+| `LaundryCare_Common_Setting_EndSignalVolume`                                   | `settings.endSignalVolume`                                                   |
+| `LaundryCare_Common_Setting_KeySignalVolume`                                   | `settings.keySignalVolume`                                                   |
 | `LaundryCare_Common_Status_Program_Details_Program01`                          | `statistics.<program>.*` (decoded)                                           |
 | `LaundryCare_Common_Status_Program_Details_Program02`                          | `statistics.<program>.*` (decoded)                                           |
 | `LaundryCare_Common_Status_Program_Details_Program06`                          | `statistics.<program>.*` (decoded)                                           |
@@ -301,16 +317,22 @@ What you have to do:
 | `LaundryCare_Common_Status_Version_Smm_DomainFw`                               | — (appliance-internal, no longer created)                                    |
 | `LaundryCare_Common_Status_Version_Smm_HcFw`                                   | — (appliance-internal, no longer created)                                    |
 | `LaundryCare_Dryer_Event_DryingProcessFinished`                                | `events.dryingProcessFinished`                                               |
-| `LaundryCare_Dryer_Option_ConnectedDry_OriginalProgramTime`                    | `options.connectedDryOriginalProgramTime`                                    |
+| `LaundryCare_Dryer_Option_ConnectedDry_OriginalProgramTime`                    | `status.connectedDryOriginalProgramTime`                                     |
 | `LaundryCare_Dryer_Option_DryingTarget`                                        | `options.dryingTarget`                                                       |
 | `LaundryCare_Dryer_Option_DryingTargetAdjustment`                              | `options.dryingTargetAdjustment`                                             |
 | `LaundryCare_Dryer_Option_Gentle`                                              | `options.gentle`                                                             |
 | `LaundryCare_Dryer_Option_HalfLoad`                                            | `options.halfLoad`                                                           |
-| `LaundryCare_Dryer_Option_ProcessPhase`                                        | `options.processPhase`                                                       |
+| `LaundryCare_Dryer_Option_ProcessPhase`                                        | `status.processPhase`                                                        |
 | `LaundryCare_Dryer_Option_Refresher`                                           | `options.refresher`                                                          |
 | `LaundryCare_Dryer_Option_WrinkleGuard`                                        | `options.wrinkleGuard`                                                       |
+| `LaundryCare_Washer_Event_Circulation_Pump_ErrorLockedRotor`                   | `events.circulationPumpErrorLockedRotor`                                     |
+| `LaundryCare_Washer_Event_Circulation_Pump_ErrorMaxTorque`                     | `events.circulationPumpErrorMaxTorque`                                       |
 | `LaundryCare_Washer_Event_IDos1FillLevelPoor`                                  | `events.iDos1FillLevelPoor`                                                  |
 | `LaundryCare_Washer_Event_IDos2FillLevelPoor`                                  | `events.iDos2FillLevelPoor`                                                  |
+| `LaundryCare_Washer_Event_IDosUnitDefect`                                      | `events.iDosUnitDefect`                                                      |
+| `LaundryCare_Washer_Event_PumpError`                                           | `events.pumpError`                                                           |
+| `LaundryCare_Washer_Event_Spin_SpinAbort`                                      | `events.spinSpinAbort`                                                       |
+| `LaundryCare_Washer_Event_WaterSupply_WarmWaterAbsent`                         | `events.waterSupplyWarmWaterAbsent`                                          |
 | `LaundryCare_Washer_Option_EISA`                                               | `options.eISA`                                                               |
 | `LaundryCare_Washer_Option_IDos1_Active`                                       | `options.iDos1Active`                                                        |
 | `LaundryCare_Washer_Option_IDos1Active`                                        | `options.iDos1Active`                                                        |
@@ -323,7 +345,7 @@ What you have to do:
 | `LaundryCare_Washer_Option_MiniLoad`                                           | `options.miniLoad`                                                           |
 | `LaundryCare_Washer_Option_MultipleSoak`                                       | `options.multipleSoak`                                                       |
 | `LaundryCare_Washer_Option_Prewash`                                            | `options.prewash`                                                            |
-| `LaundryCare_Washer_Option_ProcessPhase`                                       | `options.processPhase`                                                       |
+| `LaundryCare_Washer_Option_ProcessPhase`                                       | `status.processPhase`                                                        |
 | `LaundryCare_Washer_Option_RinseHold`                                          | `options.rinseHold`                                                          |
 | `LaundryCare_Washer_Option_RinsePlus`                                          | `options.rinsePlus`                                                          |
 | `LaundryCare_Washer_Option_RinsePlus1`                                         | `options.rinsePlus1`                                                         |
@@ -335,8 +357,12 @@ What you have to do:
 | `LaundryCare_Washer_Option_Temperature`                                        | `options.temperature`                                                        |
 | `LaundryCare_Washer_Option_WaterAndRinsePlus1`                                 | `options.waterAndRinsePlus1`                                                 |
 | `LaundryCare_Washer_Option_WaterPlus`                                          | `options.waterPlus`                                                          |
+| `LaundryCare_Washer_Setting_EnableDrumCleanReminder`                           | `settings.enableDrumCleanReminder`                                           |
 | `LaundryCare_Washer_Setting_IDos1BaseLevel`                                    | `settings.iDos1BaseLevel`                                                    |
+| `LaundryCare_Washer_Setting_IDos1_ContentName`                                 | `settings.iDos1ContentName`                                                  |
 | `LaundryCare_Washer_Setting_IDos2BaseLevel`                                    | `settings.iDos2BaseLevel`                                                    |
+| `LaundryCare_Washer_Setting_IDos2Content`                                      | `settings.iDos2Content`                                                      |
+| `LaundryCare_Washer_Setting_IDos2_ContentName`                                 | `settings.iDos2ContentName`                                                  |
 | `LaundryCare_Washer_Status_Detergent_All_Consumed`                             | `status.detergentAllConsumed`                                                |
 | `LaundryCare_Washer_Status_Softener_All_Consumed`                              | `status.softenerAllConsumed`                                                 |
 | `LaundryCare_WasherDryer_Option_DryingTarget`                                  | `options.dryingTarget`                                                       |
@@ -361,6 +387,7 @@ What you have to do:
 | `Refrigeration_Common_Setting_Light_External_Brightness`                       | `settings.lightExternalBrightness`                                           |
 | `Refrigeration_Common_Setting_Light_External_Power`                            | `settings.lightExternalPower`                                                |
 | `Refrigeration_Common_Setting_Light_Internal_Brightness`                       | `settings.lightInternalBrightness`                                           |
+| `Refrigeration_Common_Setting_Light_Internal_EnableTheaterMode`                | `settings.lightInternalEnableTheaterMode`                                    |
 | `Refrigeration_Common_Setting_Light_Internal_Power`                            | `settings.lightInternalPower`                                                |
 | `Refrigeration_Common_Setting_SabbathMode`                                     | `settings.sabbathMode`                                                       |
 | `Refrigeration_Common_Setting_VacationMode`                                    | `settings.vacationMode`                                                      |

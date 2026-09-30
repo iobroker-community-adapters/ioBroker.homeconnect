@@ -129,11 +129,14 @@ export const LOCKABLE_DOOR_TYPES: ReadonlySet<string> = new Set([
   "WasherDryer",
 ]);
 
-/** Types without any programs → no `programs.*` channel is created (an existing one is migrated away). */
+/**
+ * Types without any programs → no `programs.*` channel is created (an existing one is migrated away). The air
+ * conditioner is not one of them: the official API lists six programs and three options for it (Active clean,
+ * Auto, Cool, Dry, Fan, Heat; key research 2026-09-30) — the type source's class only lacks the mixin.
+ */
 export const PROGRAMLESS_TYPES: ReadonlySet<string> = new Set([
   "Freezer",
   "FridgeFreezer",
   "Refrigerator",
   "WineCooler",
-  "AirConditioner",
 ]);

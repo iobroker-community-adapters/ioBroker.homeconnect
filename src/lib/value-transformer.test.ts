@@ -35,6 +35,7 @@ import {
   parseConstraints,
   expandBshItem,
   isDoorStatusKey,
+  sharesShortValue,
 } from "./value-transformer";
 import { tName } from "./i18n";
 
@@ -223,7 +224,7 @@ describe("transformItem", () => {
       unit: "seconds",
       constraints: { min: 0, max: 86400 },
     });
-    expect(t).toMatchObject({ channel: "options", id: "remainingProgramTime", value: 151 });
+    expect(t).toMatchObject({ channel: "status", id: "remainingProgramTime", value: 151 });
     expect(t.common).toMatchObject({ type: "number", role: "value", unit: "min", min: 0, max: 1440 });
     // A number the table does not convert keeps its value; the cloud's unit word reads the ioBroker way.
     const kept = transformItem({ key: "BSH.Common.Option.ProgramProgress", value: 40, unit: "%" });
@@ -560,9 +561,9 @@ describe("stateIdForKey — nested keys land in their real channel", () => {
       channel: "settings",
       id: "lightInternalBrightness",
     });
-    expect(stateIdForKey("BSH.Common.Option.SmartEnergyService.SmartStartEnabled")).toEqual({
+    expect(stateIdForKey("LaundryCare.Washer.Option.IDos1.Active")).toEqual({
       channel: "options",
-      id: "smartEnergyServiceSmartStartEnabled",
+      id: "iDos1Active",
     });
     expect(stateIdForKey("BSH.Common.Event.Favorite.001.ExternalTrigger")).toEqual({
       channel: "events",
@@ -1088,5 +1089,69 @@ describe("a colour is a colour", () => {
     });
     expect(shown.common.role).toBe("text");
     expect(transformItem({ key: "BSH.Common.Setting.SomeName", value: "x" }).common.role).toBe("text");
+  });
+});
+
+describe("run values the cloud delivers as options (decision 49)", () => {
+  it("puts a run value under status and a program's own description under programs", () => {
+    expect(stateIdForKey("BSH.Common.Option.RemainingProgramTime")).toEqual({
+      channel: "status",
+      id: "remainingProgramTime",
+    });
+    expect(stateIdForKey("BSH.Common.Option.ProgramProgress")).toEqual({ channel: "status", id: "programProgress" });
+    expect(stateIdForKey("BSH.Common.Option.SmartEnergyService.SmartStartEnabled")).toEqual({
+      channel: "status",
+      id: "smartEnergyServiceSmartStartEnabled",
+    });
+    expect(stateIdForKey("ConsumerProducts.CoffeeMaker.Option.CoffeeStrength.Recommendation")).toEqual({
+      channel: "status",
+      id: "coffeeStrengthRecommendation",
+    });
+    expect(stateIdForKey("BSH.Common.Option.BaseProgram")).toEqual({ channel: "programs", id: "baseProgram" });
+    expect(stateIdForKey("BSH.Common.Option.ProgramName")).toEqual({ channel: "programs", id: "programName" });
+  });
+
+  it("keeps a settable option under options, even one that counts down while running", () => {
+    for (const key of [
+      "BSH.Common.Option.StartInRelative",
+      "BSH.Common.Option.FinishInRelative",
+      "BSH.Common.Option.Duration",
+      "LaundryCare.Washer.Option.Prewash",
+      "ConsumerProducts.CoffeeMaker.Option.CoffeeStrength",
+    ]) {
+      expect(stateIdForKey(key).channel).toBe("options");
+    }
+  });
+
+  it("gives both forms of a robot's process phase one datapoint", () => {
+    expect(stateIdForKey("ConsumerProducts.CleaningRobot.Option.ProcessPhase")).toEqual(
+      stateIdForKey("ConsumerProducts.CleaningRobot.Status.ProcessPhase"),
+    );
+    const status = transformItem({
+      key: "ConsumerProducts.CleaningRobot.Status.ProcessPhase",
+      value: "ConsumerProducts.CleaningRobot.EnumType.ProcessPhase.Cleaning",
+    });
+    expect(status.value).toBe("cleaning");
+    expect(status.common.name).toEqual(tName("optRobotProcessPhase"));
+  });
+
+  it("shows a run value read-only and keeps the short value it had as an option", () => {
+    const t = transformItem({ key: "BSH.Common.Option.RemainingProgramTime", value: 600, unit: "seconds" });
+    expect(t.common).toMatchObject({ write: false, role: "value", unit: "min" });
+    expect(t.value).toBe(10);
+    const phase = transformItem({
+      key: "LaundryCare.Common.Option.ProcessPhase",
+      value: "LaundryCare.Dryer.EnumType.ProcessPhase.Drying",
+      constraints: {
+        allowedvalues: [
+          "LaundryCare.Common.EnumType.ProcessPhase.Drying",
+          "LaundryCare.Dryer.EnumType.ProcessPhase.Drying",
+        ],
+      },
+    });
+    expect(phase.channel).toBe("status");
+    expect(phase.value).toBe("drying");
+    expect(sharesShortValue("LaundryCare.Common.Option.ProcessPhase")).toBe(true);
+    expect(sharesShortValue("BSH.Common.Setting.PowerState")).toBe(false);
   });
 });

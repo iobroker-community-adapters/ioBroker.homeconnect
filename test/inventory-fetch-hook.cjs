@@ -161,7 +161,9 @@ function route(url, init) {
     if (fixture.programs.length === 0) {
       return bshError("SDK.Error.NoProgramSelected", 404);
     }
-    return json({ key: fixture.programs[0], options: [] });
+    // The run values come with the selected program, as the real cloud sends them (decision 49) — never in a
+    // program definition.
+    return json({ key: fixture.programs[0], options: fixture.selectedOptions || [] });
   }
   if (sub === "/programs/active") {
     return bshError("SDK.Error.NoProgramActive", 404);

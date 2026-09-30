@@ -13,6 +13,7 @@ import {
   shortEnumIn,
   stateIdForKey,
   parseConstraints,
+  sharesShortValue,
   type BshOptionDefinition,
   type NameSource,
   type TransformedState,
@@ -70,6 +71,7 @@ import {
   type SessionSummary,
 } from "./program-records";
 import { isDeviceInternalKey } from "./device-internal";
+import { isRunValueKey } from "./run-values";
 import { runSegment } from "./run-ordinal";
 import type { SseEvent } from "./sse-parser";
 import type { JsonResult } from "./http";
@@ -364,10 +366,19 @@ const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
  * both there too ("Otherwise, some sensors report erroneous values", `sensor.py`), decision 48.
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
-/** The options that only mean something while a program is under way. */
+/**
+ * A stand-in value of a stored value type — it gives a value-less run value its shape when it moves (decision 49).
+ *
+ * @param type the stored `common.type`
+ * @returns a value of that type, or undefined for any other
+ */
+function runValueProbe(type: unknown): ioBroker.StateValue | undefined {
+  return type === "number" ? 0 : type === "boolean" ? false : type === "string" ? "" : undefined;
+}
+/** The run values that only mean something while a program is under way (under `status` since decision 49). */
 const RUN_VALUE_KEYS: ReadonlyMap<string, string> = new Map([
-  ["BSH.Common.Option.RemainingProgramTime", "options.remainingProgramTime"],
-  ["BSH.Common.Option.ProgramProgress", "options.programProgress"],
+  ["BSH.Common.Option.RemainingProgramTime", "status.remainingProgramTime"],
+  ["BSH.Common.Option.ProgramProgress", "status.programProgress"],
 ]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
 
@@ -925,7 +936,10 @@ export class ApplianceSync {
                       )
                     : undefined;
                 defs[program] = {
-                  ids: ids.filter((id): id is string => typeof id === "string"),
+                  // A run value an older version took from a definition is no option any more (decision 49).
+                  ids: ids.filter(
+                    (id): id is string => typeof id === "string" && !(keys?.[id] && isRunValueKey(keys[id])),
+                  ),
                   v,
                   ...(keys ? { keys } : {}),
                 };
@@ -1229,8 +1243,8 @@ export class ApplianceSync {
       return;
     }
     const full = [...catalogue, ...carried.filter(v => !catalogue.includes(v))];
-    // Options stay on the plain tail, every other list is list-unique (as in the transformer).
-    const shortOf = (v: string): string => (rel.split(".")[1] === "options" ? shortEnum(v) : shortEnumIn(v, full));
+    // Options and run values stay on the plain tail, every other list is list-unique (as in the transformer).
+    const shortOf = (v: string): string => (sharesShortValue(key) ? shortEnum(v) : shortEnumIn(v, full));
     const states = Object.fromEntries(full.map(v => [shortOf(v), valueLabel(v, lang, undefined, key)]));
     try {
       await this.port.extendObject(rel, { common: { states } });
@@ -1862,7 +1876,13 @@ export class ApplianceSync {
           isDoorStatusKey(native.bshKey) && typeof oldValue === "string"
             ? `BSH.Common.EnumType.DoorState.${oldValue.charAt(0).toUpperCase()}${oldValue.slice(1)}`
             : oldValue;
-        const expanded = expandBshItem({ key: native.bshKey, value }, lockable);
+        // A run value leaving `options` often has no value (emptied at rest, decision 48): its shape comes from the
+        // stored type then, or the move would turn a number into text. The probe only shapes — it is never written.
+        const shape =
+          (value === null || value === undefined) && isRunValueKey(native.bshKey)
+            ? runValueProbe((obj.common as Partial<ioBroker.StateCommon> | undefined)?.type)
+            : value;
+        const expanded = expandBshItem({ key: native.bshKey, value: shape }, lockable);
         const oneToOne = expanded.length === 1;
         for (const t of expanded) {
           const newRel = `${deviceId}.${t.channel}.${t.id}`;
@@ -1885,6 +1905,17 @@ export class ApplianceSync {
               // REST sync re-tightens genuine read-only settings via the signature.
               common.write = true;
             }
+            if (isRunValueKey(native.bshKey)) {
+              // A run value leaving `options` (decision 49) is read-only, whatever an option definition once
+              // made of it — and takes the role that says so. A list or bounds an option definition gave are not
+              // this value's; the transform's own (catalogue, seen values, the item's constraints) are.
+              common.write = false;
+              common.role = t.common.role;
+              common.states = t.common.states;
+              common.min = t.common.min;
+              common.max = t.common.max;
+              common.step = t.common.step;
+            }
           }
           // Name and desc are the adapter's — the new place gets the current
           // label whatever stood on the old object (the adapter owns its
@@ -1906,7 +1937,8 @@ export class ApplianceSync {
           // of the old id and took the new one's parent with it).
           const targetChannel = `${deviceId}.${t.channel}`;
           remaining.set(targetChannel, (remaining.get(targetChannel) ?? 0) + 1);
-          const newValue = oneToOne && t.common.type === oldCommon.type ? oldValue : t.value;
+          const newValue =
+            oneToOne && t.common.type === oldCommon.type ? oldValue : shape === value ? t.value : undefined;
           if (newValue !== null && newValue !== undefined) {
             await this.port.setState(newRel, { val: newValue, ack: true });
           }
@@ -2935,7 +2967,12 @@ export class ApplianceSync {
       if (staleRead) {
         t.value = undefined;
       }
-      if (t.channel !== "options" && typeof value === "string" && t.value === shortEnum(value) && value.includes(".")) {
+      if (
+        !sharesShortValue(raw.key) &&
+        typeof value === "string" &&
+        t.value === shortEnum(value) &&
+        value.includes(".")
+      ) {
         // The datapoint's list first: a value-only item brings no list, and the
         // transformer's fallback candidate set is just the value itself.
         const known = this.knownStates.get(`${deviceId}.${t.channel}.${t.id}`);
@@ -3406,8 +3443,20 @@ export class ApplianceSync {
    *
    * @param deviceId the id-safe device path segment
    * @param d the decoded counters
+   * @param moved whether this draw follows a move — the move is never started again from its own draw
    */
-  private async drawStatistics(deviceId: string, d: ProgramDetails): Promise<void> {
+  private async drawStatistics(deviceId: string, d: ProgramDetails, moved = false): Promise<void> {
+    // A number an older version could not name, which the program table names now, moves to that name first —
+    // the move draws it (a learned number takes the same path in learnProgramUid).
+    const numbered = `program${d.uid}`;
+    if (
+      !moved &&
+      this.statisticsSegment(deviceId, d.uid) !== numbered &&
+      [...this.knownStates.keys()].some(id => id.startsWith(`${deviceId}.statistics.${numbered}.`))
+    ) {
+      await this.moveStatistics(deviceId, d.uid, numbered);
+      return;
+    }
     const key = this.programKeyFor(deviceId, d.uid);
     const channel = `statistics.${this.statisticsSegment(deviceId, d.uid)}`;
     const label = key ? programLabels(key) : tName("unknownProgram", d.uid);
@@ -3619,7 +3668,7 @@ export class ApplianceSync {
       }
     }
     if (details) {
-      await this.drawStatistics(deviceId, details);
+      await this.drawStatistics(deviceId, details, true);
     }
   }
 
@@ -4143,7 +4192,9 @@ export class ApplianceSync {
    * @returns the option's state id, or undefined if it had no key
    */
   private async applyOptionDefinition(deviceId: string, raw: Record<string, unknown>): Promise<string | undefined> {
-    if (this.stopped || typeof raw.key !== "string") {
+    // A run value a definition happens to name is still no option (decision 49): its datapoint comes from the
+    // program's values under `status`, it never enters the write gate.
+    if (this.stopped || typeof raw.key !== "string" || isRunValueKey(raw.key)) {
       return undefined;
     }
     const opt: BshOptionDefinition = {

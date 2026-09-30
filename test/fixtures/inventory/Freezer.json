@@ -364,6 +364,13 @@
       "constraints": {
         "access": "readWrite"
       }
+    },
+    {
+      "key": "Refrigeration.Common.Setting.Light.Internal.EnableTheaterMode",
+      "value": true,
+      "constraints": {
+        "access": "readWrite"
+      }
     }
   ],
   "programs": [],
@@ -375,5 +382,6 @@
     {
       "key": "BSH.Common.Command.DeactivateWiFi"
     }
-  ]
+  ],
+  "selectedOptions": []
 }

@@ -235,8 +235,49 @@
       }
     }
   ],
-  "programs": [],
-  "programOptions": [],
+  "programs": [
+    "HeatingVentilationAirConditioning.AirConditioner.Program.ActiveClean",
+    "HeatingVentilationAirConditioning.AirConditioner.Program.Auto",
+    "HeatingVentilationAirConditioning.AirConditioner.Program.Cool",
+    "HeatingVentilationAirConditioning.AirConditioner.Program.Dry",
+    "HeatingVentilationAirConditioning.AirConditioner.Program.Fan",
+    "HeatingVentilationAirConditioning.AirConditioner.Program.Heat"
+  ],
+  "programOptions": [
+    {
+      "key": "HeatingVentilationAirConditioning.AirConditioner.Option.FanSpeedMode",
+      "type": "Enum",
+      "constraints": {
+        "allowedvalues": [
+          "HeatingVentilationAirConditioning.AirConditioner.EnumType.FanSpeedMode.Automatic",
+          "HeatingVentilationAirConditioning.AirConditioner.EnumType.FanSpeedMode.Manual"
+        ],
+        "access": "readWrite"
+      }
+    },
+    {
+      "key": "HeatingVentilationAirConditioning.AirConditioner.Option.FanSpeedPercentage",
+      "type": "Int",
+      "unit": "%",
+      "constraints": {
+        "min": 0,
+        "max": 100,
+        "stepsize": 1,
+        "access": "readWrite"
+      }
+    },
+    {
+      "key": "HeatingVentilationAirConditioning.AirConditioner.Option.SetpointTemperature",
+      "type": "Double",
+      "unit": "°C",
+      "constraints": {
+        "min": 16,
+        "max": 30,
+        "stepsize": 0.5,
+        "access": "readWrite"
+      }
+    }
+  ],
   "commands": [
     {
       "key": "BSH.Common.Command.AcknowledgeEvent"
@@ -244,5 +285,6 @@
     {
       "key": "BSH.Common.Command.DeactivateWiFi"
     }
-  ]
+  ],
+  "selectedOptions": []
 }

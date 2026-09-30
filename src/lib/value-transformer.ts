@@ -14,6 +14,7 @@ import { isProgramRecordKey } from "./program-records";
 import { isDeviceInternalKey } from "./device-internal";
 import { boundShown, presentationFor, shownUnit, toShown } from "./value-units";
 import { isSwitchKey, switchRole, switchState } from "./switch-values";
+import { isRunValueKey, runValueChannel } from "./run-values";
 
 /**
  * Where a state's display name came from — decides whether a later label may
@@ -218,7 +219,8 @@ export function stateIdForKey(key: string): { channel: string; id: string } {
   for (let i = 0; i < parts.length - 1; i++) {
     const channel = KIND_TO_CHANNEL[parts[i] ?? ""];
     if (channel) {
-      return { channel, id: camelJoin(parts.slice(i + 1)) };
+      // A run value the cloud delivers as an option is no option (decision 49, run-values.ts).
+      return { channel: runValueChannel(key) ?? channel, id: camelJoin(parts.slice(i + 1)) };
     }
   }
   return { channel: "misc", id: lowerFirst(parts[parts.length - 1] ?? key) };
@@ -234,6 +236,19 @@ export function stateIdForKey(key: string): { channel: string; id: string } {
  */
 function camelJoin(segments: string[]): string {
   return segments.map((s, i) => (i === 0 ? lowerFirst(s) : s.charAt(0).toUpperCase() + s.slice(1))).join("");
+}
+
+/**
+ * Whether a key's enum values are shown as the plain last segment instead of the list-unique form: an option
+ * (its union across programs can hold two appliance families under one id — one short value each), and a run
+ * value that came as an option (`processPhase` of three laundry families, decision 49 — its values kept their
+ * form when it moved to `status`).
+ *
+ * @param key the fully-qualified BSH key
+ * @returns whether the values collapse to the last segment
+ */
+export function sharesShortValue(key: string): boolean {
+  return stateIdForKey(key).channel === "options" || isRunValueKey(key);
 }
 
 /**
@@ -592,7 +607,7 @@ function transformValue(item: BshItem): {
     // stay on the plain tail: their union across programs can hold the same
     // option of two appliance families under one id, and those mean the same
     // thing — one short value each (the write path picks the family).
-    const inList = stateIdForKey(item.key).channel !== "options" ? full : undefined;
+    const inList = sharesShortValue(item.key) ? undefined : full;
     const shortOf = (v: string): string => (inList ? shortEnumIn(v, inList) : shortEnum(v));
     // No value in, no value out: an absent value stays absent here too — "" is
     // the idle program only when the item says "" (a key-only enum setting wrote

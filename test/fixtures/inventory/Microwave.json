@@ -374,373 +374,7 @@
   ],
   "programOptions": [
     {
-      "key": "BSH.Common.Option.BaseProgram",
-      "type": "Enum",
-      "constraints": {
-        "allowedvalues": [
-          "BSH.Common.Program.Favorite.001",
-          "BSH.Common.Program.Favorite.002",
-          "BSH.Common.Program.Favorite.003",
-          "BSH.Common.Program.Favorite.004",
-          "BSH.Common.Program.Favorite.005",
-          "BSH.Common.Program.Favorite.006",
-          "BSH.Common.Program.Favorite.007",
-          "BSH.Common.Program.Favorite.008",
-          "BSH.Common.Program.Favorite.009",
-          "BSH.Common.Program.Favorite.010",
-          "BSH.Common.Program.Favorite.011",
-          "BSH.Common.Program.Favorite.012",
-          "BSH.Common.Program.Favorite.013",
-          "BSH.Common.Program.Favorite.014",
-          "BSH.Common.Program.Favorite.015",
-          "BSH.Common.Program.Favorite.016",
-          "BSH.Common.Program.Favorite.017",
-          "BSH.Common.Program.Favorite.018",
-          "BSH.Common.Program.Favorite.019",
-          "BSH.Common.Program.Favorite.020",
-          "ConsumerProducts.CleaningRobot.Program.Basic.GoHome",
-          "ConsumerProducts.CleaningRobot.Program.Cleaning.CleanAll",
-          "ConsumerProducts.CleaningRobot.Program.Cleaning.CleanMap",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.CaffeGrande",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.CaffeLatte",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.Cappuccino",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.Coffee",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.CoffeePot",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.EspressoDoppio",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.EspressoMacchiato",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.HotWater",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.LatteMacchiato",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.MilkFroth",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.Ristretto",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.WarmMilk",
-          "ConsumerProducts.CoffeeMaker.Program.Beverage.XLCoffee",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.ApplianceOffRinsing",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.ApplianceOnRinsing",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.AutoClean",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.AutoDescale",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.CalcNClean",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.Clean",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanBrewingUnitManually",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanBrewingUnitManuallyDetailed",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanOutletManually",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.Descale",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.FrostProtection",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.RemoveWaterFilter",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.ReplaceWaterFilter",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.RinseMilkSystem",
-          "ConsumerProducts.CoffeeMaker.Program.CleaningModes.RinseWaterFilter",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Americano",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.BlackEye",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.CafeAuLait",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.CafeConLeche",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.CafeCortado",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.ColdBrew",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.ColdBrewMacchiato",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Cortado",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.DeadEye",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Doppio",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.FlatWhite",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Galao",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Garoto",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.GrosserBrauner",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Kaapi",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.KleinerBrauner",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.KoffieVerkeerd",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.RedEye",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.SlowBrew",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.Verlaengerter",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.VerlaengerterBraun",
-          "ConsumerProducts.CoffeeMaker.Program.CoffeeWorld.WienerMelange",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee1",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee2",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee3",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee4",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee5",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee6",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee7",
-          "ConsumerProducts.CoffeeMaker.Program.MyCoffee.MyCoffee8",
-          "Cooking.Common.Program.Hood.Automatic",
-          "Cooking.Common.Program.Hood.DelayedShutOff",
-          "Cooking.Common.Program.Hood.Interval",
-          "Cooking.Common.Program.Hood.Venting",
-          "Cooking.Hob.Program.FryingSensorMode",
-          "Cooking.Hob.Program.PowerLevelMode",
-          "Cooking.Hob.Program.PowerMoveMode",
-          "Cooking.Oven.Program.Cleaning.Draining",
-          "Cooking.Oven.Program.Cleaning.Drying",
-          "Cooking.Oven.Program.Cleaning.EasyClean",
-          "Cooking.Oven.Program.Cleaning.Ecolysis",
-          "Cooking.Oven.Program.Cleaning.Pyrolysis",
-          "Cooking.Oven.Program.CleaningModes.AutoSteamCalibration",
-          "Cooking.Oven.Program.Dish.Automatic.Conv.Microwave.PizzaThinCrust1Slice",
-          "Cooking.Oven.Program.Dish.Automatic.Conv.Steam.BonelessPorkNeckJoint",
-          "Cooking.Oven.Program.Dish.Automatic.Microwave.GefluegelteileAuftauen",
-          "Cooking.Oven.Program.Dish.Automatic.Microwave.Haehnchenteile",
-          "Cooking.Oven.Program.Dish.Automatic.Microwave.PommesFrites",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.FreshLasagne",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.FruitTartOrCheesecakeWithPastryBase",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.MeatProbe.GooseBreast",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.PizzaChilled",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.PotatoGratinRawIngredients4CmDeep",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.Steam.MeatProbe.BonelessPorkNeckJoint",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.Steam.MeatProbe.TurkeyBreast",
-          "Cooking.Oven.Program.Dish.Recommendation.Conv.Steam.PartCookedBreadRollsOrBaguette",
-          "Cooking.Oven.Program.Dish.Recommendation.FullSteam.Broccoli",
-          "Cooking.Oven.Program.Dish.SubsequentCooking",
-          "Cooking.Oven.Program.HeatingMode.2DHotAir",
-          "Cooking.Oven.Program.HeatingMode.3DHotAir",
-          "Cooking.Oven.Program.HeatingMode.AirFry",
-          "Cooking.Oven.Program.HeatingMode.BottomHeating",
-          "Cooking.Oven.Program.HeatingMode.BreadBaking",
-          "Cooking.Oven.Program.HeatingMode.Defrost",
-          "Cooking.Oven.Program.HeatingMode.Desiccation",
-          "Cooking.Oven.Program.HeatingMode.DoughProving",
-          "Cooking.Oven.Program.HeatingMode.FrozenHeatupSpecial",
-          "Cooking.Oven.Program.HeatingMode.FullSurfaceGrill",
-          "Cooking.Oven.Program.HeatingMode.GrillLargeArea",
-          "Cooking.Oven.Program.HeatingMode.GrillSmallArea",
-          "Cooking.Oven.Program.HeatingMode.HotAir",
-          "Cooking.Oven.Program.HeatingMode.HotAir100Steam",
-          "Cooking.Oven.Program.HeatingMode.HotAir30Steam",
-          "Cooking.Oven.Program.HeatingMode.HotAir60Steam",
-          "Cooking.Oven.Program.HeatingMode.HotAir80Steam",
-          "Cooking.Oven.Program.HeatingMode.HotAirEco",
-          "Cooking.Oven.Program.HeatingMode.HotAirGentle",
-          "Cooking.Oven.Program.HeatingMode.HotAirGrilling",
-          "Cooking.Oven.Program.HeatingMode.IntensiveHeat",
-          "Cooking.Oven.Program.HeatingMode.KeepWarm",
-          "Cooking.Oven.Program.HeatingMode.LetRest",
-          "Cooking.Oven.Program.HeatingMode.PizzaSetting",
-          "Cooking.Oven.Program.HeatingMode.PreHeating",
-          "Cooking.Oven.Program.HeatingMode.PreheatOvenware",
-          "Cooking.Oven.Program.HeatingMode.Proof",
-          "Cooking.Oven.Program.HeatingMode.SabbathProgramme",
-          "Cooking.Oven.Program.HeatingMode.SlowCook",
-          "Cooking.Oven.Program.HeatingMode.TopBottomHeating",
-          "Cooking.Oven.Program.HeatingMode.TopBottomHeatingEco",
-          "Cooking.Oven.Program.HeatingMode.WarmingDrawer",
-          "Cooking.Oven.Program.Microwave.1000Watt",
-          "Cooking.Oven.Program.Microwave.180Watt",
-          "Cooking.Oven.Program.Microwave.360Watt",
-          "Cooking.Oven.Program.Microwave.450Watt",
-          "Cooking.Oven.Program.Microwave.600Watt",
-          "Cooking.Oven.Program.Microwave.900Watt",
-          "Cooking.Oven.Program.Microwave.90Watt",
-          "Cooking.Oven.Program.Microwave.Max",
-          "Cooking.Oven.Program.SteamModes.DoughProving",
-          "Cooking.Oven.Program.SteamModes.Reheat",
-          "Cooking.Oven.Program.SteamModes.Steam",
-          "Cooking.Oven.Program.SubsequentMode.ContinueCooking",
-          "Cooking.Oven.Program.SubsequentMode.KeepWarm",
-          "Cooking.Oven.Program.SubsequentMode.LeaveToRest",
-          "Cooking.Oven.Program.SubsequentMode.Microwave",
-          "Dishcare.Dishwasher.Program.Auto1",
-          "Dishcare.Dishwasher.Program.Auto2",
-          "Dishcare.Dishwasher.Program.Auto3",
-          "Dishcare.Dishwasher.Program.AutoHalfLoad",
-          "Dishcare.Dishwasher.Program.Eco50",
-          "Dishcare.Dishwasher.Program.ExpressSparkle65",
-          "Dishcare.Dishwasher.Program.Glas40",
-          "Dishcare.Dishwasher.Program.GlassCare",
-          "Dishcare.Dishwasher.Program.GlassShine",
-          "Dishcare.Dishwasher.Program.Intensiv45",
-          "Dishcare.Dishwasher.Program.Intensiv70",
-          "Dishcare.Dishwasher.Program.IntensivPower",
-          "Dishcare.Dishwasher.Program.Kurz60",
-          "Dishcare.Dishwasher.Program.LearningDishwasher",
-          "Dishcare.Dishwasher.Program.MachineCare",
-          "Dishcare.Dishwasher.Program.MagicDaily",
-          "Dishcare.Dishwasher.Program.MaxEfficient",
-          "Dishcare.Dishwasher.Program.MaximumCleaning",
-          "Dishcare.Dishwasher.Program.MixedLoad",
-          "Dishcare.Dishwasher.Program.NightWash",
-          "Dishcare.Dishwasher.Program.Normal45",
-          "Dishcare.Dishwasher.Program.Normal65",
-          "Dishcare.Dishwasher.Program.PreRinse",
-          "Dishcare.Dishwasher.Program.Quick45",
-          "Dishcare.Dishwasher.Program.Quick65",
-          "Dishcare.Dishwasher.Program.QuickD",
-          "Dishcare.Dishwasher.Program.SteamFresh",
-          "Dishcare.Dishwasher.Program.Super60",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.ActiveClean",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.Auto",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.Cool",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.Dry",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.Fan",
-          "HeatingVentilationAirConditioning.AirConditioner.Program.Heat",
-          "LaundryCare.Dryer.Program.AntiShrink",
-          "LaundryCare.Dryer.Program.Bedlinens",
-          "LaundryCare.Dryer.Program.Blankets",
-          "LaundryCare.Dryer.Program.BusinessShirts.EasyIron",
-          "LaundryCare.Dryer.Program.BusinessShirts",
-          "LaundryCare.Dryer.Program.ColdRefresh.1Piece",
-          "LaundryCare.Dryer.Program.ColdRefresh.5Piece",
-          "LaundryCare.Dryer.Program.ColdRefresh.Business",
-          "LaundryCare.Dryer.Program.ColdRefresh.ColdRefresh.ColdRefresh",
-          "LaundryCare.Dryer.Program.ConnectedDry",
-          "LaundryCare.Dryer.Program.Cotton.CottonEco",
-          "LaundryCare.Dryer.Program.Cotton.Eco4060",
-          "LaundryCare.Dryer.Program.Cotton",
-          "LaundryCare.Dryer.Program.Delicates",
-          "LaundryCare.Dryer.Program.Dessous",
-          "LaundryCare.Dryer.Program.DownFeathers",
-          "LaundryCare.Dryer.Program.EasyCare.EasyCare",
-          "LaundryCare.Dryer.Program.Hygiene",
-          "LaundryCare.Dryer.Program.InBasket.WoolBasket",
-          "LaundryCare.Dryer.Program.InBasket",
-          "LaundryCare.Dryer.Program.Jeans",
-          "LaundryCare.Dryer.Program.MaintenanceCare1.MaintenanceCare1.QuickCare",
-          "LaundryCare.Dryer.Program.MaintenanceCare2.MaintenanceCare2.DepthCare",
-          "LaundryCare.Dryer.Program.Mix",
-          "LaundryCare.Dryer.Program.MyTime.MyDryingTime",
-          "LaundryCare.Dryer.Program.Outdoor.Sportswear",
-          "LaundryCare.Dryer.Program.Outdoor",
-          "LaundryCare.Dryer.Program.Pillow",
-          "LaundryCare.Dryer.Program.Shirts15",
-          "LaundryCare.Dryer.Program.Super40",
-          "LaundryCare.Dryer.Program.Synthetic",
-          "LaundryCare.Dryer.Program.SyntheticRefresh",
-          "LaundryCare.Dryer.Program.TimeCold.AirFluff",
-          "LaundryCare.Dryer.Program.TimeCold",
-          "LaundryCare.Dryer.Program.TimeColdFix.TimeCold20",
-          "LaundryCare.Dryer.Program.TimeColdFix.TimeCold30",
-          "LaundryCare.Dryer.Program.TimeColdFix.TimeCold60",
-          "LaundryCare.Dryer.Program.TimeWarm",
-          "LaundryCare.Dryer.Program.TimeWarmFix.TimeWarm30",
-          "LaundryCare.Dryer.Program.TimeWarmFix.TimeWarm40",
-          "LaundryCare.Dryer.Program.TimeWarmFix.TimeWarm60",
-          "LaundryCare.Dryer.Program.Towels",
-          "LaundryCare.Dryer.Program.WoolFinish",
-          "LaundryCare.Washer.Program.Auto30",
-          "LaundryCare.Washer.Program.Auto40",
-          "LaundryCare.Washer.Program.Auto60",
-          "LaundryCare.Washer.Program.Chiffon",
-          "LaundryCare.Washer.Program.Cotton.Colour",
-          "LaundryCare.Washer.Program.Cotton.CottonEco",
-          "LaundryCare.Washer.Program.Cotton.Eco4060",
-          "LaundryCare.Washer.Program.Cotton",
-          "LaundryCare.Washer.Program.Curtains",
-          "LaundryCare.Washer.Program.DarkWash",
-          "LaundryCare.Washer.Program.DelicatesSilk",
-          "LaundryCare.Washer.Program.Dessous",
-          "LaundryCare.Washer.Program.DownDuvet.Duvet",
-          "LaundryCare.Washer.Program.DrumClean.DrumClean70.DrumClean70",
-          "LaundryCare.Washer.Program.DrumClean",
-          "LaundryCare.Washer.Program.EasyCare",
-          "LaundryCare.Washer.Program.HygienePlus",
-          "LaundryCare.Washer.Program.Mix.NightWash",
-          "LaundryCare.Washer.Program.Mix",
-          "LaundryCare.Washer.Program.Monsoon",
-          "LaundryCare.Washer.Program.MyTime",
-          "LaundryCare.Washer.Program.Outdoor",
-          "LaundryCare.Washer.Program.PlushToy",
-          "LaundryCare.Washer.Program.PowerSpeed59",
-          "LaundryCare.Washer.Program.Rinse.RinseSpinDrain",
-          "LaundryCare.Washer.Program.Rinse",
-          "LaundryCare.Washer.Program.Sensitive",
-          "LaundryCare.Washer.Program.ShirtsBlouses",
-          "LaundryCare.Washer.Program.Spin.SpinDrain",
-          "LaundryCare.Washer.Program.SportFitness",
-          "LaundryCare.Washer.Program.SportShoes",
-          "LaundryCare.Washer.Program.Steaming.Steaming",
-          "LaundryCare.Washer.Program.Super153045.Super15",
-          "LaundryCare.Washer.Program.Super153045.Super1530",
-          "LaundryCare.Washer.Program.Super153045.Super30",
-          "LaundryCare.Washer.Program.Towels",
-          "LaundryCare.Washer.Program.WashAndDry.60",
-          "LaundryCare.Washer.Program.WashAndDry.90",
-          "LaundryCare.Washer.Program.WaterProof",
-          "LaundryCare.Washer.Program.WaterProofIDOS.WaterProofIDOS.WaterProofIDOS",
-          "LaundryCare.Washer.Program.Wool",
-          "LaundryCare.WasherDryer.Program.Cotton.Cotton.Cotton",
-          "LaundryCare.WasherDryer.Program.Cotton.Eco4060",
-          "LaundryCare.WasherDryer.Program.Cotton",
-          "LaundryCare.WasherDryer.Program.DarkWash.DarkWash.DarkWash",
-          "LaundryCare.WasherDryer.Program.DelicatesSilk.DelicatesSilk.DelicatesSilk",
-          "LaundryCare.WasherDryer.Program.DelicatesSilk",
-          "LaundryCare.WasherDryer.Program.DrumCleanAndDry.DrumCare",
-          "LaundryCare.WasherDryer.Program.DrumCleanDry.DrumCare.DrumCare",
-          "LaundryCare.WasherDryer.Program.EasyCare.HHSynthetics.HHSynthetics",
-          "LaundryCare.WasherDryer.Program.EasyCare",
-          "LaundryCare.WasherDryer.Program.FastWashDry.WD45.WD45",
-          "LaundryCare.WasherDryer.Program.LabelEU19.LabelEU19.Eco4060",
-          "LaundryCare.WasherDryer.Program.Mix.HHMix.HHMix",
-          "LaundryCare.WasherDryer.Program.Mix",
-          "LaundryCare.WasherDryer.Program.MoistRemove.DrumDry.DrumDry",
-          "LaundryCare.WasherDryer.Program.MyTime.MyTime.MyTime",
-          "LaundryCare.WasherDryer.Program.RefreshWD.Refresh.Refresh",
-          "LaundryCare.WasherDryer.Program.Rinse.Rinse.Rinse",
-          "LaundryCare.WasherDryer.Program.Rinse",
-          "LaundryCare.WasherDryer.Program.Sensitive.Sensitive.Sensitive",
-          "LaundryCare.WasherDryer.Program.Sensitive",
-          "LaundryCare.WasherDryer.Program.ShirtsBlouses.ShirtsBlouses.ShirtsBlouses",
-          "LaundryCare.WasherDryer.Program.ShirtsBlouses",
-          "LaundryCare.WasherDryer.Program.Spin",
-          "LaundryCare.WasherDryer.Program.SportFitness",
-          "LaundryCare.WasherDryer.Program.SportShoes.SportShoes.SportShoes",
-          "LaundryCare.WasherDryer.Program.WashAndDry.60",
-          "LaundryCare.WasherDryer.Program.WashAndDry.90",
-          "LaundryCare.WasherDryer.Program.Wool.Wool.Wool",
-          "LaundryCare.WasherDryer.Program.Wool",
-          "Unknown"
-        ],
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.CurrentStepRemainingTime",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "seconds"
-    },
-    {
       "key": "BSH.Common.Option.Duration",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "seconds"
-    },
-    {
-      "key": "BSH.Common.Option.ElapsedProgramTime",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "seconds"
-    },
-    {
-      "key": "BSH.Common.Option.ElapsedProgramTime.AutoCounting",
-      "type": "Boolean",
-      "constraints": {
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.EnergyForecast",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "%"
-    },
-    {
-      "key": "BSH.Common.Option.EstimatedTotalProgramTime",
       "type": "Int",
       "constraints": {
         "min": 0,
@@ -762,64 +396,6 @@
       "unit": "seconds"
     },
     {
-      "key": "BSH.Common.Option.ProgramName",
-      "type": "String",
-      "constraints": {
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.ProgramProgress",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "%"
-    },
-    {
-      "key": "BSH.Common.Option.RemainingProgramTime",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "seconds"
-    },
-    {
-      "key": "BSH.Common.Option.RemainingProgramTime.AutoCounting",
-      "type": "Boolean",
-      "constraints": {
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.RemainingProgramTimeEstimationState",
-      "type": "Enum",
-      "constraints": {
-        "allowedvalues": ["BSH.Common.EnumType.EstimationState.Inactive"],
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.RemainingProgramTimeIsEstimated",
-      "type": "Boolean",
-      "constraints": {
-        "access": "readWrite"
-      }
-    },
-    {
-      "key": "BSH.Common.Option.SmartEnergyService.SmartStartEnabled",
-      "type": "Boolean",
-      "constraints": {
-        "access": "readWrite"
-      }
-    },
-    {
       "key": "BSH.Common.Option.StartInRelative",
       "type": "Int",
       "constraints": {
@@ -829,17 +405,6 @@
         "access": "readWrite"
       },
       "unit": "seconds"
-    },
-    {
-      "key": "BSH.Common.Option.WaterForecast",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "%"
     },
     {
       "key": "Cooking.Common.Option.Hood.Boost",
@@ -900,17 +465,6 @@
       "constraints": {
         "access": "readWrite"
       }
-    },
-    {
-      "key": "Cooking.Oven.Option.HeatupProgress",
-      "type": "Int",
-      "constraints": {
-        "min": 0,
-        "max": 200,
-        "stepsize": 1,
-        "access": "readWrite"
-      },
-      "unit": "%"
     },
     {
       "key": "Cooking.Oven.Option.Level",
@@ -1007,6 +561,76 @@
     },
     {
       "key": "BSH.Common.Command.DeactivateWiFi"
+    }
+  ],
+  "selectedOptions": [
+    {
+      "key": "BSH.Common.Option.BaseProgram",
+      "value": "Cooking.Oven.Program.SubsequentMode.Microwave"
+    },
+    {
+      "key": "BSH.Common.Option.CurrentStepRemainingTime",
+      "value": 300,
+      "unit": "seconds"
+    },
+    {
+      "key": "BSH.Common.Option.ElapsedProgramTime",
+      "value": 0,
+      "unit": "seconds"
+    },
+    {
+      "key": "BSH.Common.Option.ElapsedProgramTime.AutoCounting",
+      "value": true
+    },
+    {
+      "key": "BSH.Common.Option.EnergyForecast",
+      "value": 60,
+      "unit": "%"
+    },
+    {
+      "key": "BSH.Common.Option.EstimatedTotalProgramTime",
+      "value": 5400,
+      "unit": "seconds"
+    },
+    {
+      "key": "BSH.Common.Option.ProgramName",
+      "value": "Espresso"
+    },
+    {
+      "key": "BSH.Common.Option.ProgramProgress",
+      "value": 0,
+      "unit": "%"
+    },
+    {
+      "key": "BSH.Common.Option.RemainingProgramTime",
+      "value": 3600,
+      "unit": "seconds"
+    },
+    {
+      "key": "BSH.Common.Option.RemainingProgramTime.AutoCounting",
+      "value": true
+    },
+    {
+      "key": "BSH.Common.Option.RemainingProgramTimeEstimationState",
+      "value": "BSH.Common.EnumType.EstimationState.Inactive"
+    },
+    {
+      "key": "BSH.Common.Option.RemainingProgramTimeIsEstimated",
+      "value": true
+    },
+    {
+      "key": "BSH.Common.Option.SmartEnergyService.SmartStartEnabled",
+      "value": false
+    },
+    {
+      "key": "BSH.Common.Option.WaterForecast",
+      "value": 40,
+      "unit": "%"
+    },
+    {
+      "key": "Cooking.Oven.Option.HeatupProgress",
+      "value": 0,
+      "unit": "%"
     }
   ]
 }

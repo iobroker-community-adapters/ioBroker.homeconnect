@@ -355,5 +355,6 @@
     {
       "key": "BSH.Common.Command.DeactivateWiFi"
     }
-  ]
+  ],
+  "selectedOptions": []
 }

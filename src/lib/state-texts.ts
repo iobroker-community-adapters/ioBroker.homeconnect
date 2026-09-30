@@ -110,6 +110,39 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     name: "evDryingProcessFinished",
     desc: "evDryingProcessFinishedDesc",
   },
+  // Laundry events of a live washer-dryer (2026-09-30) that no reference lists: the meaning is the appliance's
+  // own cloud name (a single language) together with its key — nothing beyond what those two say.
+  "BSH.Common.Event.AquaStopOccured": { name: "evAquaStop", desc: "evAquaStopDesc" },
+  "BSH.Common.Event.LowWaterPressure": { name: "evLowWaterPressure", desc: "evLowWaterPressureDesc" },
+  "LaundryCare.Common.Event.DelayedShutdown": { name: "evDelayedShutdown", desc: "evDelayedShutdownDesc" },
+  "LaundryCare.Common.Event.DelayedShutdownCanceled": {
+    name: "evDelayedShutdownCanceled",
+    desc: "evDelayedShutdownCanceledDesc",
+  },
+  "LaundryCare.Common.Event.DoorNotLockable": { name: "evDoorNotLockable", desc: "evDoorNotLockableDesc" },
+  "LaundryCare.Common.Event.DoorNotUnlockable": { name: "evDoorNotUnlockable", desc: "evDoorNotUnlockableDesc" },
+  "LaundryCare.Common.Event.DoorOpen": { name: "evCloseDoor", desc: "evCloseDoorDesc" },
+  "LaundryCare.Common.Event.FatalErrorOccured": { name: "evFatalError", desc: "evFatalErrorDesc" },
+  "LaundryCare.Common.Event.FoamDetection": { name: "evFoamDetection", desc: "evFoamDetectionDesc" },
+  "LaundryCare.Common.Event.SupplyPower.BlackedOut": { name: "evPowerBlackedOut", desc: "evPowerBlackedOutDesc" },
+  "LaundryCare.Common.Event.SupplyPower.SupplyVoltageTooLow": {
+    name: "evVoltageTooLow",
+    desc: "evVoltageTooLowDesc",
+  },
+  // The cloud names both "Drain pump blocked"; the key names a circulation pump — the name says only what both
+  // agree on, and the key's own words tell the two faults apart.
+  "LaundryCare.Washer.Event.Circulation.Pump.ErrorLockedRotor": {
+    name: "evPumpLockedRotor",
+    desc: "evPumpLockedRotorDesc",
+  },
+  "LaundryCare.Washer.Event.Circulation.Pump.ErrorMaxTorque": { name: "evPumpMaxTorque", desc: "evPumpMaxTorqueDesc" },
+  "LaundryCare.Washer.Event.IDosUnitDefect": { name: "evIDosUnitDefect", desc: "evIDosUnitDefectDesc" },
+  "LaundryCare.Washer.Event.PumpError": { name: "evPumpError", desc: "evPumpErrorDesc" },
+  "LaundryCare.Washer.Event.Spin.SpinAbort": { name: "evSpinAbort", desc: "evSpinAbortDesc" },
+  "LaundryCare.Washer.Event.WaterSupply.WarmWaterAbsent": {
+    name: "evWarmWaterAbsent",
+    desc: "evWarmWaterAbsentDesc",
+  },
   // ─── events: cleaning robot ────────────────────────────────────────────────
   "ConsumerProducts.CleaningRobot.Event.EmptyDustBoxAndCleanFilter": {
     name: "evEmptyDustBoxAndCleanFilter",
@@ -474,6 +507,12 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     name: "optRobotProcessPhase",
     desc: "processPhaseDesc",
   },
+  // Newer robots report the same phase as a status (official "Program Progress Changes"); it lands on the
+  // same datapoint as the option form (decision 49).
+  "ConsumerProducts.CleaningRobot.Status.ProcessPhase": {
+    name: "optRobotProcessPhase",
+    desc: "processPhaseDesc",
+  },
   "ConsumerProducts.CleaningRobot.Option.ReferenceMapId": {
     name: "optReferenceMapId",
     desc: "referenceMapIdDesc",
@@ -604,6 +643,18 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   },
   "LaundryCare.Washer.Setting.IDos1BaseLevel": { name: "setIDos1BaseLevel", desc: "setIDos1BaseLevelDesc" },
   "LaundryCare.Washer.Setting.IDos2BaseLevel": { name: "setIDos2BaseLevel", desc: "setIDos2BaseLevelDesc" },
+  // Laundry settings of a live washer-dryer (2026-09-30) that no reference lists; meaning from the appliance's
+  // own cloud name, its key and the values it offers.
+  "LaundryCare.Common.Setting.Brightness": { name: "setLaundryBrightness", desc: "setLaundryBrightnessDesc" },
+  "LaundryCare.Common.Setting.EndSignalVolume": { name: "setEndSignalVolume", desc: "setEndSignalVolumeDesc" },
+  "LaundryCare.Common.Setting.KeySignalVolume": { name: "setKeySignalVolume", desc: "setKeySignalVolumeDesc" },
+  "LaundryCare.Washer.Setting.EnableDrumCleanReminder": {
+    name: "setDrumCleanReminder",
+    desc: "setDrumCleanReminderDesc",
+  },
+  "LaundryCare.Washer.Setting.IDos1.ContentName": { name: "setIDos1ContentName", desc: "setIDosContentNameDesc" },
+  "LaundryCare.Washer.Setting.IDos2.ContentName": { name: "setIDos2ContentName", desc: "setIDosContentNameDesc" },
+  "LaundryCare.Washer.Setting.IDos2Content": { name: "setIDos2Content", desc: "setIDos2ContentDesc" },
   "Refrigeration.Common.Setting.BottleCooler.SetpointTemperature": {
     name: "setTempBottleCooler",
     desc: "setTempBottleCoolerDesc",
@@ -673,6 +724,11 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   "Refrigeration.Common.Setting.Light.Internal.Power": {
     name: "setLightInternalPower",
     desc: "lightInternalPowerDesc",
+  },
+  // Live on a fridge-freezer (2026-09-30), in no reference; meaning from the appliance's own cloud name.
+  "Refrigeration.Common.Setting.Light.Internal.EnableTheaterMode": {
+    name: "setTheaterMode",
+    desc: "setTheaterModeDesc",
   },
   "Refrigeration.Common.Setting.SabbathMode": {
     name: "setFridgeSabbathMode",
