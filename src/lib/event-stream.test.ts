@@ -267,6 +267,33 @@ describe("EventStream lifecycle guards", () => {
     expect(h.timers.at(-1)?.ms).toBe(60_000);
   });
 
+  it("names the limit Home Connect gives in the body of a refused connect", async () => {
+    const h = harness();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              key: "429",
+              description:
+                'The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.',
+            },
+          }),
+          { status: 429 },
+        ),
+      ),
+    );
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(h.logs.map(l => l.msg)).toContainEqual(
+      expect.stringContaining(
+        'HTTP 429 (429: The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.), the Home Connect rate limit',
+      ),
+    );
+  });
+
   it("does not hand a KEEP-ALIVE frame to the adapter", async () => {
     const h = harness();
     const events: string[] = [];

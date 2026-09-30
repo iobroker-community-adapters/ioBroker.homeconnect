@@ -1438,6 +1438,23 @@ describe("Homeconnect port wiring", () => {
     // "GET /api/x failed: undefined" is a bug report nobody can act on.
     expect(ctx.i.log.warn).toHaveBeenCalledWith("GET /api/x failed: unknown");
   });
+
+  it("says which limit a 429 hit and for how long, in Home Connect's words", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValue({
+      status: 429,
+      ok: false,
+      data: undefined,
+      error: "429",
+      description:
+        'The rate limit "10 successive error calls in 10 minutes" was reached. Requests are blocked during the remaining period of 544 seconds.',
+    });
+    await ctx.i.apiGet("/api/x");
+    expect(ctx.i.log.warn).toHaveBeenCalledWith(
+      'GET /api/x failed: 429 (The rate limit "10 successive error calls in 10 minutes" was reached. Requests are blocked during the remaining period of 544 seconds.)',
+    );
+  });
 });
 
 describe("Homeconnect tree delete that carries rooms and functions", () => {
@@ -2372,6 +2389,22 @@ describe("Homeconnect findings of the 2026-09-24 audit (rate pause)", () => {
     httpMock.getJson.mockResolvedValueOnce(failResult(429, { retryAfterMs: 30_000 }));
     await ctx.i.checkConnection();
     expect(ctx.i.restBlockedUntil).toBeGreaterThan(Date.now() + 25_000);
+  });
+
+  it("the connection test names the limit a 429 hit, in Home Connect's words", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValueOnce(
+      failResult(429, {
+        error: "429",
+        description:
+          'The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.',
+      }),
+    );
+    await expect(ctx.i.checkConnection()).resolves.toEqual({
+      error:
+        'Home Connect answered HTTP 429: 429 (The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.)',
+    });
   });
 
   it("F17: a 429 on the event stream pauses REST too (one daily quota)", async () => {

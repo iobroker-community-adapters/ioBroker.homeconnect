@@ -5,7 +5,7 @@
 
 import { SseParser, type SseEvent } from "./sse-parser";
 import { errMessage, isRecord } from "./pure-helpers";
-import { errorKey, readBodyCapped, retryAfterMs } from "./http";
+import { errorDescription, errorKey, readBodyCapped, retryAfterMs } from "./http";
 
 /** SSE endpoint for all appliances (the "all" stream also carries PAIRED/DEPAIRED). */
 const EVENTS_PATH = "/api/homeappliances/events";
@@ -42,14 +42,18 @@ const CONNECT_TIMEOUT_MS = 30_000;
  * one morning, each warned as a bare "status 503").
  *
  * The body's BSH error key is named too when there is one: a 403 is often a
- * missing scope, not a rejected login — only the key tells.
+ * missing scope, not a rejected login — only the key tells. So is Home Connect's
+ * own description: on a 429 it alone names the limit and how long it blocks.
  *
  * @param status the HTTP status of the refused connect
- * @param key the BSH error key of the answer, if any
+ * @param refusal the BSH error key and description of the answer, if any
+ * @param refusal.key the BSH error key
+ * @param refusal.description Home Connect's description
  * @returns the reason for the log line and the connection test
  */
-function refusedReason(status: number, key?: string): string {
-  const detail = key ? ` (${key})` : "";
+function refusedReason(status: number, refusal: { key?: string; description?: string } = {}): string {
+  const said = [refusal.key, refusal.description].filter(Boolean).join(": ");
+  const detail = said ? ` (${said})` : "";
   if (status >= 500 || status === 404) {
     return `HTTP ${status}${detail}, a problem on the Home Connect side`;
   }
@@ -63,22 +67,23 @@ function refusedReason(status: number, key?: string): string {
 }
 
 /**
- * The BSH error key of a refused answer — read capped, never throwing. Reading
- * the body also frees the connection (undici keeps an unread body until GC).
+ * The BSH error key and description of a refused answer — read capped, never
+ * throwing. Reading the body also frees the connection (undici keeps an unread
+ * body until GC).
  *
  * @param res the refused response
- * @returns the error key, if the body carries one
+ * @returns the error key and description, as far as the body carries them
  */
-async function refusedKey(res: Response): Promise<string | undefined> {
+async function refusedKey(res: Response): Promise<{ key?: string; description?: string }> {
   try {
     const text = await readBodyCapped(res, REFUSED_BODY_BYTES);
     if (!text) {
-      return undefined;
+      return {};
     }
     const body: unknown = JSON.parse(text);
-    return isRecord(body) ? errorKey(body) : undefined;
+    return isRecord(body) ? { key: errorKey(body), description: errorDescription(body) } : {};
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -254,8 +259,8 @@ export class EventStream {
         // Reading the (small, capped) body frees the connection too — undici
         // holds on to one whose body is neither read nor cancelled until the
         // garbage collector finds it, once per retry of a failing spell.
-        const key = await this.readRefusedKey(res, abort);
-        this.noteConnectFailure(refusedReason(res.status, key));
+        const refusal = await this.readRefusedKey(res, abort);
+        this.noteConnectFailure(refusedReason(res.status, refusal));
         if (res.status === 429) {
           const pause = retryAfterMs(res.headers.get("retry-after")) ?? RATE_LIMIT_FALLBACK_MS;
           this.rateLimitedUntil = this.now() + pause;
@@ -331,19 +336,19 @@ export class EventStream {
    *
    * @param res the refused response
    * @param abort the attempt's abort controller (aborting it ends the body read)
-   * @returns the BSH error key, if one arrived in time
+   * @returns the BSH error key and description, as far as they arrived in time
    */
-  private readRefusedKey(res: Response, abort: AbortController): Promise<string | undefined> {
-    return new Promise<string | undefined>(resolve => {
+  private readRefusedKey(res: Response, abort: AbortController): Promise<{ key?: string; description?: string }> {
+    return new Promise<{ key?: string; description?: string }>(resolve => {
       let settled = false;
       const timer = this.deps.setTimer(() => {
         if (!settled) {
           settled = true;
           abort.abort();
-          resolve(undefined);
+          resolve({});
         }
       }, REFUSED_BODY_TIMEOUT_MS);
-      void refusedKey(res).then(async key => {
+      void refusedKey(res).then(async refusal => {
         // A body the reader could not take (no stream API) is still released.
         try {
           await res.body?.cancel();
@@ -353,7 +358,7 @@ export class EventStream {
         if (!settled) {
           settled = true;
           this.deps.clearTimer(timer);
-          resolve(key);
+          resolve(refusal);
         }
       });
     });

@@ -33,6 +33,28 @@ describe("getJson 429", () => {
     expect(res).toMatchObject({ status: 429, ok: false, retryAfterMs: 42_000 });
   });
 
+  it("carries Home Connect's description — on a 429 the only place that names the limit", async () => {
+    // The body of a real 429 (ioBroker.homeconnect #327, 2025-10-23).
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            '{"error":{"description":"The rate limit \\"50 calls in 1 minute\\" was reached. Requests are blocked during the remaining period of 54 seconds.","key":"429"}}',
+            { status: 429, headers: { "retry-after": "54" } },
+          ),
+        ),
+    );
+    const res = await getJson("https://api.home-connect.com", "/x", "T");
+    expect(res).toMatchObject({
+      status: 429,
+      error: "429",
+      description:
+        'The rate limit "50 calls in 1 minute" was reached. Requests are blocked during the remaining period of 54 seconds.',
+    });
+  });
+
   it("leaves retryAfterMs undefined on a non-429 failure", async () => {
     vi.stubGlobal(
       "fetch",

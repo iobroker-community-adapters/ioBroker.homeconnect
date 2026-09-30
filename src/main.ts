@@ -908,7 +908,9 @@ export class Homeconnect extends utils.Adapter {
       return { error: `Home Connect is not reachable: ${res.error ?? "network error"}` };
     }
     if (!res.ok) {
-      return { error: `Home Connect answered HTTP ${res.status}: ${res.error ?? "unknown error"}` };
+      return {
+        error: `Home Connect answered HTTP ${res.status}: ${res.error ?? "unknown error"}${res.description ? ` (${res.description})` : ""}`,
+      };
     }
     const list = isRecord(res.data) && Array.isArray(res.data.homeappliances) ? res.data.homeappliances : undefined;
     if (!list) {
@@ -1150,7 +1152,7 @@ export class Homeconnect extends utils.Adapter {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
     }
     const level = this.restLog.note(source, categorize(res.status));
-    this.log[level](`${source} failed: ${res.error ?? "unknown"}`);
+    this.log[level](`${source} failed: ${res.error ?? "unknown"}${res.description ? ` (${res.description})` : ""}`);
   }
 
   /**

@@ -4,7 +4,7 @@
 // `requestJson` core for the REST calls.
 
 import type { FormPostResult } from "./oauth";
-import { errMessage } from "./pure-helpers";
+import { cleanLabel, errMessage } from "./pure-helpers";
 
 /** Default per-request timeout (Home Connect research pins request timeout at 20 s). */
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -73,6 +73,12 @@ export interface JsonResult {
   error: string | undefined;
   /** On a 429, the `Retry-After` window in ms (from the header), else undefined. */
   retryAfterMs?: number;
+  /**
+   * Home Connect's own words on a failure (`error.description`) — on a 429 the only place that names the limit
+   * ("50 calls in 1 minute", "10 successive error calls in 10 minutes", "1000 calls in 1 day") and how long it
+   * blocks. Undefined when the body carries none.
+   */
+  description?: string;
 }
 
 /**
@@ -219,6 +225,7 @@ async function toJsonResult(res: Response): Promise<JsonResult> {
     data: res.ok ? envelope.data : undefined,
     error: res.ok ? undefined : (errorKey(envelope) ?? `status ${res.status}`),
     retryAfterMs: res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined,
+    description: res.ok ? undefined : errorDescription(envelope),
   };
 }
 
@@ -250,6 +257,20 @@ export function errorKey(body: Record<string, unknown>): string | undefined {
     if (typeof key === "string") {
       return key;
     }
+  }
+  return undefined;
+}
+
+/**
+ * Pull Home Connect's `error.description` out of an `{ error: { description } }` body, cleaned for a log line.
+ *
+ * @param body the parsed response body
+ * @returns the description, or undefined when there is none
+ */
+export function errorDescription(body: Record<string, unknown>): string | undefined {
+  const err = body.error;
+  if (err !== null && typeof err === "object") {
+    return cleanLabel((err as Record<string, unknown>).description) || undefined;
   }
   return undefined;
 }
