@@ -818,6 +818,23 @@ describe("AuthController findings of the 2026-09-24 audit", () => {
     expect(port.savedTokens.map(t => t.refreshToken)).toEqual(["ROTATED"]);
   });
 
+  it("settle() waits for the token a confirmed sign-in brings, even while the link is still being cleared", async () => {
+    const h = harness([ok(DEVICE_BODY), ok({ ...TOKEN_BODY, refresh_token: "FIRST" })]);
+    await h.ctl.start();
+    // The link write hangs (a slow database): before the fix the poll's token waited
+    // behind it, outside the in-flight set, and a teardown in that window lost the
+    // only valid key.
+    h.port.setVerificationUrl = (url: string) => {
+      h.port.urls.push(url);
+      return url === "" ? new Promise<void>(() => undefined) : Promise.resolve();
+    };
+    firePending(h); // the poll: the user confirmed the code
+    await flush();
+    h.ctl.stop();
+    await h.ctl.settle();
+    expect(h.port.savedTokens.map(x => x.refreshToken)).toEqual(["FIRST"]);
+  });
+
   it("F23/N1: a runtime refresh failing after stop stays on debug; the next attempt is announced as 'at the earliest'", async () => {
     const h = harness([ok(TOKEN_BODY), fail(500, {}), fail(500, {})]);
     h.port.refreshToken = "OLD";

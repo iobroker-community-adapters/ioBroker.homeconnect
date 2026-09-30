@@ -1797,6 +1797,25 @@ describe("Homeconnect event-stream outage", () => {
     expect(ctx.i.log.info).not.toHaveBeenCalledWith(expect.stringContaining("held back"));
   });
 
+  it("measures an outage the keep-alive watchdog noticed from the last traffic, not from the abort", async () => {
+    const { ctx } = await running();
+    expect(ctx.syncs[0].syncAppliances).toHaveBeenCalledTimes(1);
+    const onConnected = ctx.streams[0].deps.onConnected as unknown as (c: boolean, quietSince?: number) => void;
+
+    // The connection went silent 130 s ago; the watchdog aborts only now and the
+    // reconnect follows 5 s later. Counted from the abort, the outage looked like
+    // 5 s and nothing was re-read — 130 s of events were simply missing.
+    const quietSince = Date.now() - 130_000;
+    onConnected(false, quietSince);
+    await settle();
+    vi.setSystemTime(Date.now() + 5_000);
+    onConnected(true);
+    await settle();
+
+    expect(ctx.syncs[0].syncAppliances).toHaveBeenCalledTimes(2);
+    expect(ctx.i.log.info).toHaveBeenCalledWith(expect.stringContaining("Live updates were interrupted for 135 s"));
+  });
+
   it("says so when the re-read was held back by the request quota", async () => {
     // Measured live 2026-09-23: a 925 s outage was re-read 21 minutes after the
     // stream came back — the info line read as if it had happened right away.

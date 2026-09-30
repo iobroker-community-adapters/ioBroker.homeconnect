@@ -2553,6 +2553,20 @@ export class ApplianceSync {
     this.settingDefsDirty.delete(deviceId);
     this.armedProgramByDeviceId.delete(deviceId);
     this.idDecided.delete(deviceId);
+    this.programUids.delete(deviceId);
+    this.runningProgram.delete(deviceId);
+    this.records.delete(deviceId);
+    this.atRest.delete(deviceId);
+    for (const key of [...this.unreadableRecords]) {
+      if (key.startsWith(`${deviceId}|`)) {
+        this.unreadableRecords.delete(key);
+      }
+    }
+    for (const path of [...this.refusedPaths]) {
+      if (path.startsWith(`/api/homeappliances/${haId}/`)) {
+        this.refusedPaths.delete(path);
+      }
+    }
     for (const rel of [...this.knownStates.keys()]) {
       if (rel === deviceId || rel.startsWith(`${deviceId}.`)) {
         this.knownStates.delete(rel);
@@ -2938,7 +2952,7 @@ export class ApplianceSync {
         // A value left over from the last run: the metadata still counts, the value is not shown (decision 48).
         t.value = undefined;
       }
-      await this.applyTransformedState(deviceId, raw.key, t, valueless && !staleRead ? "values" : source);
+      await this.applyTransformedState(deviceId, raw.key, t, valueless ? "values" : source);
     }
     if (restingNow) {
       await this.emptyRunValues(deviceId);

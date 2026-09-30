@@ -37,8 +37,8 @@ const MIN_REQUEST_GAP_MS = 100;
  *
  * Below this, only a clean transport drop after a healthy connection fits: the
  * stream's backoff starts at 5 s with no failures behind it, and practically
- * nothing is lost in that time. Every outage the keep-alive watchdog itself
- * notices is 130 s by construction.
+ * nothing is lost in that time. An outage the keep-alive watchdog notices is
+ * measured from the last traffic, so it counts 130 s at least.
  */
 const STREAM_OUTAGE_RESYNC_MS = 60_000;
 /**
@@ -687,10 +687,10 @@ export class Homeconnect extends utils.Adapter {
       baseUrl: DEFAULT_BASE_URL,
       getAccessToken: () => this.authCtl?.accessToken,
       onEvent: ev => this.sync?.handleStreamEvent(ev),
-      onConnected: connected => {
+      onConnected: (connected, quietSince) => {
         this.streamUp = connected;
         void this.publishConnection();
-        this.noteStreamState(connected);
+        this.noteStreamState(connected, quietSince);
       },
       onUnauthorized: () => this.authCtl?.refreshNow() ?? Promise.resolve(false),
       // One daily quota for the stream and REST: a 429 on the stream pauses REST too.
@@ -713,12 +713,14 @@ export class Homeconnect extends utils.Adapter {
    * correct it. An appliance that was online the whole time sends neither.
    *
    * @param connected whether the stream is up now
+   * @param quietSince on a down-report after the keep-alive watchdog fired: when the stream went silent
    */
-  private noteStreamState(connected: boolean): void {
+  private noteStreamState(connected: boolean, quietSince?: number): void {
     if (!connected) {
       // Only the first of a run of down-reports starts the clock — the stream
-      // reports "down" again before every reconnect attempt.
-      this.streamDownSince ??= Date.now();
+      // reports "down" again before every reconnect attempt. A silent connection
+      // was dead from its last traffic on, not only from the watchdog's abort.
+      this.streamDownSince ??= quietSince ?? Date.now();
       return;
     }
     const downSince = this.streamDownSince;

@@ -455,8 +455,10 @@ export class AuthController {
         } else if (result === "slow_down") {
           this.pollDeviceFlow(deviceCode, intervalMs + SLOW_DOWN_STEP_MS, expiresAt);
         } else {
-          await this.port.setVerificationUrl("");
+          // The rotated token first, tracked straight on from the poll: a teardown in between would
+          // otherwise find nothing in flight and lose the only valid key.
           await this.track(this.applyToken(result));
+          await this.port.setVerificationUrl("");
           this.port.log.info("Home Connect: signed in.");
           await this.signedIn();
         }

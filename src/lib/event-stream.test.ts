@@ -178,6 +178,30 @@ describe("EventStream reconnect/backoff", () => {
     expect(signal.aborted).toBe(true);
     es.stop();
   });
+
+  it("reports the outage from the last traffic when the keep-alive watchdog aborts", async () => {
+    const quiet: Array<number | undefined> = [];
+    const h = harness({ onConnected: (c, since) => (c ? undefined : quiet.push(since)) });
+    // a body that stays silent until the abort, then fails like an aborted read
+    let rejectRead: (e: Error) => void = () => {};
+    const body = {
+      getReader: () => ({ read: () => new Promise((_, reject) => (rejectRead = reject)) }),
+    } as unknown as ReadableStream<Uint8Array>;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, body }));
+    const es = new EventStream(h.deps);
+    h.clock.t = 1_000;
+    es.start();
+    await flush();
+    // 130 s of silence: the last traffic was at 1 s, the watchdog fires at 131 s.
+    h.clock.t = 131_000;
+    h.timers.at(-1)?.cb();
+    rejectRead(new Error("aborted"));
+    await flush();
+    // The caller measures the outage from the silence — 130 s, well over the re-read
+    // threshold — not from the abort, which would count only the reconnect delay.
+    expect(quiet).toEqual([1_000]);
+    es.stop();
+  });
 });
 
 describe("EventStream lifecycle guards", () => {

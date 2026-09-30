@@ -738,6 +738,30 @@ describe("ApplianceSync.handleStreamEvent", () => {
     expect(port.states.get("oven-1.status.doorOpen")).toBe(false);
   });
 
+  it("keeps a number setting a number when a value-less REST item arrives after a newer stream value", async () => {
+    const port = new FakePort();
+    const key = "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator";
+    appliance(port, "HA-1", "Kuehl", { type: "FridgeFreezer", status: [], settings: [{ key, value: 4, unit: "°C" }] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const id = "kuehl-1.settings.setpointTemperatureRefrigerator";
+    expect((port.objects.get(id)?.common as ioBroker.StateCommon | undefined)?.type).toBe("number");
+
+    // The next pass reads a key-only item, and the stream delivers a value for the
+    // same key while that read is in flight — the REST answer is stale.
+    port.getResponses.set("/api/homeappliances/HA-1/settings", { settings: [{ key }] });
+    port.onGet = path => {
+      if (path === "/api/homeappliances/HA-1/settings") {
+        sync.handleStreamEvent({ event: "NOTIFY", id: "HA-1", data: JSON.stringify({ items: [{ key, value: 5 }] }) });
+      }
+    };
+    await sync.syncAppliances();
+    await flush();
+    // Without a value the transformer can only guess text; that guess must not
+    // refresh the metadata, stale or not (measured: number → string).
+    expect((port.objects.get(id)?.common as ioBroker.StateCommon | undefined)?.type).toBe("number");
+  });
+
   it("fetches only the affected appliance on a CONNECTED for an unknown haId", async () => {
     const port = new FakePort();
     port.getResponses.set("/api/homeappliances/HA-NEW", { haId: "HA-NEW", name: "New Oven", connected: false });
@@ -7123,6 +7147,50 @@ describe("decoded program records (decision 40)", () => {
     { key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: SUMMARY },
     { key: "BSH.Common.Status.ErrorCodesList", value: "[]" },
   ];
+
+  it("forgets every in-memory trace of an appliance removed from the account", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", {
+      type: "WasherDryer",
+      status: [
+        ...status(),
+        { key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Ready" },
+        // A record in a form nobody can read yet: noted once a run.
+        { key: "LaundryCare.Common.Status.Program.Details.Program03", value: "zz" },
+      ],
+      available: [wd("Cotton")],
+    });
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    // A read the cloud refuses for good.
+    port.refusedPaths.add(`${base}/commands`);
+    await sync.syncAppliances();
+    // Every Map and Set of the sync, with the keys that belong to this appliance.
+    const traces = (): Record<string, unknown[]> => {
+      const found: Record<string, unknown[]> = {};
+      for (const [field, v] of Object.entries(sync as unknown as Record<string, unknown>)) {
+        if (!(v instanceof Map) && !(v instanceof Set)) {
+          continue;
+        }
+        const keys = (v instanceof Map ? [...v.keys()] : [...v]).filter(
+          k => typeof k === "string" && (/^wt-1($|[.|])/.test(k) || k.includes("HA-1")),
+        );
+        if (keys.length > 0) {
+          found[field] = keys;
+        }
+      }
+      return found;
+    };
+    // The pass left traces in the per-appliance memory (decoded records, the resting state …).
+    expect(Object.keys(traces())).toEqual(
+      expect.arrayContaining(["records", "atRest", "unreadableRecords", "refusedPaths", "knownStates"]),
+    );
+
+    sync.handleStreamEvent({ event: "DEPAIRED", id: "HA-1", data: "{}" });
+    await flush();
+    // A re-pairing in the same run must start clean: nothing of the removed appliance stays.
+    expect(traces()).toEqual({});
+  });
 
   it("turns the encoded records into readable datapoints and never shows the raw ones", async () => {
     const port = new FakePort();

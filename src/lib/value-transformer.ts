@@ -419,8 +419,10 @@ export function transformOptionDefinition(opt: BshOptionDefinition): Transformed
   // An option the definition marks access:"read" is a display value of the
   // program (a remaining time, a phase), not something to set.
   const writable = c?.access !== "read";
-  // Only the definition's own default seeds a brand-new option — an invented
-  // 0 / false / "" read like a measurement for a program that never ran.
+  // Only the definition's own default becomes the option's value — an invented
+  // 0 / false / "" read like a measurement for a program that never ran. A
+  // boolean's `common.def: false` is ioBroker's start value, not a reading:
+  // js-controller writes it with quality 0x20 (substitute initial value).
   if (opt.type === "Boolean") {
     const common: ioBroker.StateCommon = {
       name,

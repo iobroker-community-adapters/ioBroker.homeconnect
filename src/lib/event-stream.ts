@@ -90,8 +90,12 @@ export interface EventStreamDeps {
   getAccessToken: () => string | undefined;
   /** Called with each non-KEEP-ALIVE event. */
   onEvent: (event: SseEvent) => void;
-  /** Called when the connection goes up (true) or down (false). */
-  onConnected: (connected: boolean) => void;
+  /**
+   * Called when the connection goes up (true) or down (false). On a down-report after the keep-alive watchdog
+   * fired, `quietSince` is the epoch-ms of the last traffic — the stream was dead from then on, not only from the
+   * abort.
+   */
+  onConnected: (connected: boolean, quietSince?: number) => void;
   /**
    * Called when the stream endpoint rejects the token (401). The adapter
    * refreshes the token; the next attempt then carries the fresh one. Without
@@ -130,6 +134,10 @@ export class EventStream {
   private lastFailure: string | undefined;
   /** Epoch-ms before which no reconnect may go out (a 429 on the stream). */
   private rateLimitedUntil = 0;
+  /** Epoch-ms of the last traffic on the open connection (every chunk re-arms the keep-alive watchdog). */
+  private lastTrafficAt: number | undefined;
+  /** Set when the keep-alive watchdog aborted a silent connection: when the silence began. */
+  private quietSince: number | undefined;
 
   /**
    * @param deps adapter-provided transport, callbacks, log and managed timers
@@ -204,7 +212,9 @@ export class EventStream {
     if (this.stopped) {
       return;
     }
-    this.deps.onConnected(false);
+    const quietSince = this.quietSince;
+    this.quietSince = undefined;
+    this.deps.onConnected(false, quietSince);
     // A 429 carries the pause the cloud asks for; retrying sooner counts against
     // the same daily quota (every request counts, refused ones too).
     const delay = Math.max(
@@ -386,8 +396,11 @@ export class EventStream {
   /** (Re)start the keep-alive watchdog — abort the connection if it fires. */
   private armKeepAlive(): void {
     this.clearKeepAlive();
+    this.lastTrafficAt = this.now();
     this.keepAliveTimer = this.deps.setTimer(() => {
       this.deps.log("debug", "event stream keep-alive timed out — reconnecting.");
+      // The outage began with the silence, not with this abort — the caller measures it from here.
+      this.quietSince = this.lastTrafficAt;
       this.abort?.abort();
     }, KEEPALIVE_TIMEOUT_MS);
   }
