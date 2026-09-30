@@ -12,13 +12,12 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 ## Features
 
-- **All appliance data** — status, settings, events, the active and selected program, and program options, each as an idiomatic ioBroker state.
-- **A stable, complete tree** — every data point is created upfront (the event catalog of the appliance type, the options of **all** its programs) and none ever disappears: a switched-off appliance reports less, but loses nothing.
-- **Live updates** through a single Home Connect event stream, so changes on the appliance show up within seconds — no polling storm.
+- **All appliance data** — status, settings, events, the active and selected program, and program options.
+- **A complete tree** — every data point is created upfront and stays, also while the appliance is switched off.
+- **Live updates** through the Home Connect event stream — changes on the appliance show up within seconds.
 - **Full control** — switch settings, select a program, set its options, and start, stop, pause or resume it.
-- **Idiomatic values** — on/off as booleans, fixed choices as readable names with a states list, measurements as numbers with their unit and limits.
-- **Encrypted login** — the OAuth token is stored encrypted and refreshed automatically; you sign in once.
-- Works with Bosch, Siemens, NEFF and Gaggenau appliances (dishwashers, washers, dryers, ovens, fridges, coffee makers and more).
+- **Readable values** — on/off as switches, fixed choices as names in your ioBroker language, measurements as numbers with their unit.
+- **Encrypted login** — the Client Secret and the login are stored encrypted, the login is refreshed automatically; you sign in once.
 
 ## Requirements
 
@@ -31,7 +30,7 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 ## Configuration
 
-The adapter signs in with an application of your own in the free Home Connect Developer Program. Three things belong together: your normal Home Connect account (the one of the Home Connect app, where your appliances are paired), a developer account linked to it, and an application registered in the developer account. The settings page walks you through it with a checklist and one button per step.
+The adapter signs in with an application of your own in the free Home Connect Developer Program, linked to the Home Connect account of your app.
 
 1. Create a free developer account at [developer.home-connect.com](https://developer.home-connect.com/user/register). As **Default Home Connect Account for Testing** enter the e-mail address of your Home Connect app account — exactly as in the app, in **lower case**. This links the two accounts.
 2. [Register an application](https://developer.home-connect.com/applications/add):
@@ -42,7 +41,7 @@ The adapter signs in with an application of your own in the free Home Connect De
 3. **Wait 15 to 60 minutes.** A new or edited application only becomes active at Home Connect after that — a sign-in before then is refused.
 4. Copy the **Client ID** (64 characters) and the **Client Secret** into the adapter settings and save.
 5. A **sign-in link** appears in the settings, together with the code it carries. Open it, sign in with your Home Connect account and confirm the code — the panel switches to **signed in** once it is done.
-6. **Test connection** in the same panel asks the running adapter to make a real request to Home Connect and shows what it found: how many appliances the account lists, how many are connected right now, and whether live updates are connected — or the exact reason when something is wrong.
+6. **Test connection** in the same panel makes a real request to Home Connect and shows how many appliances are listed and connected, or why it failed.
 
 The login is kept across adapter and version updates, so you sign in once. **Reset sign-in** in the panel forgets it and starts a new sign-in — for example to switch to another Home Connect account.
 
@@ -60,11 +59,11 @@ The panel shows what Home Connect answered and what to do about it; `auth.lastEr
 | `invalid_client` | The Client Secret was rejected | Check the Client Secret |
 | `access_denied` | The account was refused | Check that the account works in the Home Connect app (SingleKey ID, accepted terms of use) and that it is the one entered in the developer portal |
 
-Of the settings, only the Client Secret is stored encrypted; the login itself (`auth.session`) is stored encrypted too. A login saved by another ioBroker installation (after moving to a new system) cannot be read — the log says so, and one new sign-in is needed. Home Connect in China (`api.home-connect.cn`) is not supported.
+After moving to a new ioBroker system the stored login cannot be read — sign in once more. Home Connect in China (`api.home-connect.cn`) is not supported.
 
 ## Updating from 1.x
 
-Version 2.0 is a new object tree: every appliance gets a readable device folder (named by its model and the last four digits of its own number) instead of the raw Home Connect tree. Your sign-in and Client ID are kept, and rooms, functions, aliases and recording settings move to the datapoint that takes the old one's place. Three things to know:
+Version 2.0 is a new object tree: every appliance gets a readable device folder instead of the raw Home Connect tree. Your sign-in and Client ID are kept, and rooms, functions, aliases and recording settings move to the datapoint that takes the old one's place. Three things to know:
 
 1. Make a backup before the update — going back to 1.x is not supported, the old tree is removed once it has been handed over.
 2. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
@@ -77,13 +76,13 @@ At instance level:
 | Data point | Contents |
 |---|---|
 | `info.connection` | Whether the adapter is signed in **and** its live event stream is connected — only then do values flow |
-| `auth.signedIn` | Whether the adapter holds a usable Home Connect login (the settings panel uses it to tell "signed in, live updates down" from "not signed in") |
+| `auth.signedIn` | Whether the adapter holds a usable Home Connect login |
 | `auth.lastError` | What Home Connect answered when it refused the sign-in, in its own words — empty while signed in, `Unknown` while nothing was asked yet |
 | `info.devicesTotal` | How many appliances are paired with your Home Connect account |
 | `info.devicesOnline` | How many of them are connected right now |
-| `info.devicesAllOnline` | True only while every appliance is connected — note that household appliances are switched off most of the time, so this is a "everything is running" display rather than an alarm source |
+| `info.devicesAllOnline` | True only while every appliance is connected |
 
-Each paired appliance appears under a device folder named by its model and the last four characters of its own Home Connect number (e.g. `sx87tx02ce-5775`) — two appliances of the identical model get two folders, and the folder never changes. The name from your Home Connect app shows next to it as the display name and follows renames live. Each device has these channels:
+Each paired appliance appears under a device folder named by its model and the last four characters of its own Home Connect number (e.g. `sx87tx02ce-5775`), with the name from your Home Connect app as display name. Each device has these channels:
 
 | Channel | Contents |
 |---|---|
@@ -94,18 +93,12 @@ Each paired appliance appears under a device folder named by its model and the l
 | `programs.selectedProgram` | The selected program — **writable** dropdown of the available programs (appliances without programs get no `programs` channel at all). Two programs whose names end the same get a two-part value, e.g. `heatingmode.doughproving` and `steammodes.doughproving` |
 | `programs.activeProgram` | The running program (read-only, empty when idle) |
 | `programs.start` / `programs.stop` | **Buttons** — start the selected program / stop the active one |
-| `options.*` | **Writable** program options: temperature, spin speed, delayed start … — the union across **all** programs, created upfront; an option that does not belong to the currently selected program is simply not sent |
+| `options.*` | **Writable** program options: temperature, spin speed, delayed start … — the options of all programs; one that does not belong to the selected program is not sent |
 | `commands.*` | **Buttons** — pause, resume, open door, acknowledge event |
 
-Values arrive in their natural form: on/off as `boolean` switches, fixed choices as short readable names with a states list, and measurements as numbers with their unit and limits.
+Every data point has a name and a description in your ioBroker system language. The adapter maintains them itself — keep your own data points under `0_userdata`. While the adapter is stopped, every appliance shows as not reachable.
 
-Every data point carries a readable **name** in your ioBroker system language. The adapter's own names come first — it names the events, the common status values and settings, the program options and its own structure (channels, the online marker, the start/stop buttons, the door and running indicators) in all eleven ioBroker languages. Where it has no name of its own, it uses the localized name Home Connect sends, and as a last resort a readable name derived from the data point's id. The **description** explains what the data point means; it is never the manufacturer's key, and it stays empty where the adapter has nothing to explain. The adapter owns its data points — names, descriptions and structure — and keeps them current itself, on existing installations too; your own data points belong under `0_userdata`.
-
-**Data points never come and go.** An appliance's capabilities do not change with its state — so a switched-off appliance keeps every data point, even though it reports only a subset (often just `powerState`) while in standby. The only thing that removes data points is removing the appliance from your Home Connect account: **an appliance you remove is removed here too**, with its whole subtree — it can no longer be addressed, so its data points could never update again. Removing happens only when Home Connect itself reports the appliance as removed — through the live event stream or a successfully read appliance list — so a network hiccup can never wipe your tree.
-
-The adapter is also frugal with the cloud: program option definitions are fetched **once** per program and remembered (across restarts, inside the device object) — a program change or reconnect costs no extra requests.
-
-While the adapter is stopped, every appliance shows as not reachable and `devicesOnline` drops to `0` — `devicesTotal` keeps its value, because how many appliances you own does not change because the adapter is off.
+An appliance you remove from your Home Connect account is removed here too, once Home Connect reports it as removed.
 
 ## Usage
 
@@ -115,7 +108,7 @@ While the adapter is stopped, every appliance shows as not reachable and `device
 
 A choice can be written as its short value (`eco50`), in any capitalisation, or as the full Home Connect key; the data point confirms it in its short form.
 
-Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Settings and options are written straight back to the appliance; if the appliance rejects the options for a start, the program is started with its defaults instead. Everything else keeps itself up to date through the live event stream.
+Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Settings and options are written straight back to the appliance; if the appliance rejects the options for a start, the program is started with its defaults instead.
 
 ## Changelog
 
