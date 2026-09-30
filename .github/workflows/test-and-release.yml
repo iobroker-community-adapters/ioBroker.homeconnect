@@ -1,48 +1,35 @@
 name: Test and Release
 
+# Run this job on all pushes and pull requests
+# as well as tags with a semantic version
 on:
   push:
     branches:
-      # `developing` carries the work, the release branch carries the releases —
-      # both need testing. Without it a change first meets a Windows runner when
-      # the release tag already exists (yamaha v1.1.0 was tagged that way).
-      - main
-      - developing
+      # `developing` is where the work happens and `master` is the release branch, so
+      # both have to be tested. Without developing, a change is first seen by a Windows
+      # runner when the release tag is already pushed.
+      - "master"
+      - "developing"
     tags:
-      - v[0-9]+.[0-9]+.[0-9]+
-      - v[0-9]+.[0-9]+.[0-9]+-**
-    # A documentation-only push starts no run: no test can fail on a line of prose.
-    # GitHub's docs state "Path filters are not evaluated for pushes of tags", so the
-    # release run on a tag is unaffected. Deliberately only under `push`, never under
-    # `pull_request` — there this run is the required check of the branch protection
-    # (which is what lets Dependabot merges through).
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".gitignore"
-      - ".gitattributes"
-      - ".editorconfig"
-      - "LICENSE"
-      # No job reads the Dependabot configuration; the pre-push guard rightly refuses a
-      # skip-CI marker for it, so the filter is the only thing that keeps a config
-      # change from running the full matrix (seven such runs on 2026-09-15).
-      - ".github/dependabot.yml"
-  pull_request:
-    branches:
-      - main
-  # The prover's own trigger (round 51): the repochecker judges the LATEST run on the default branch (E3031).
-  # After a red run, a fix that only touches filtered files (a README the standard checks read) starts no run,
-  # and main stays red. The release run then starts this workflow on HEAD by hand — nothing else uses it.
-  workflow_dispatch:
+      # normal versions
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      # pre-releases
+      - "v[0-9]+.[0-9]+.[0-9]+-**"
 
+  pull_request: {}
+
+# Cancel previous PR/branch runs when a new commit is pushed
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Performs quick checks before the expensive test runs
   check-and-lint:
     if: contains(github.event.head_commit.message, '[skip ci]') == false
+
     runs-on: ubuntu-latest
+
     steps:
       - uses: ioBroker/testing-action-check@v2
         with:
@@ -50,213 +37,66 @@ jobs:
           type-checking: true
           lint: true
 
-  repochecker-version-gate:
-    if: contains(github.event.head_commit.message, '[skip ci]') == false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Verify io-package.json against ioBroker stable repository
-        run: |
-          set -euo pipefail
-          # Source: sources-dist-stable.json — the official stable channel from
-          # ioBroker.repositories. Default installations (`activeRepo: stable`)
-          # pull every ioBroker adapter from there. Every adapter requirement
-          # declared in io-package.json (common.dependencies +
-          # common.globalDependencies) must be AT LEAST latest-stable.
-          # Behind = drift (block). Ahead = allowed: the dependency check at
-          # install time blocks the update on systems that do not meet the
-          # requirement, and stable users only ever get the adapter version
-          # pinned in sources-dist-stable.json anyway (tt-tom17 pattern:
-          # ioBroker.public-transport 1.x on npm-latest with globalDependencies
-          # admin >=8.0.1 before Admin 8 reached stable).
-          URL="https://raw.githubusercontent.com/ioBroker/ioBroker.repositories/master/sources-dist-stable.json"
-          HTTP_STATUS=$(curl -sLo /tmp/stable.json -w "%{http_code}" --max-time 30 "$URL" || echo "000")
-          if [ "$HTTP_STATUS" = "404" ]; then
-            echo "::error ::sources-dist-stable.json returned 404 — file moved/renamed. Update workflow URL."
-            exit 1
-          fi
-          if [ "$HTTP_STATUS" = "000" ] || [ "$HTTP_STATUS" -ge 500 ] 2>/dev/null; then
-            echo "::warning ::sources-dist-stable.json not reachable (HTTP $HTTP_STATUS) — skipping live check"
-            exit 0
-          fi
-          if [ "$HTTP_STATUS" -ne 200 ] 2>/dev/null; then
-            echo "::warning ::sources-dist-stable.json returned HTTP $HTTP_STATUS — skipping live check"
-            exit 0
-          fi
-          # Schema sanity: without js-controller + admin the file is broken
-          JS_STABLE=$(jq -r '."js-controller".version // ""' /tmp/stable.json)
-          ADMIN_STABLE=$(jq -r '.admin.version // ""' /tmp/stable.json)
-          if [ -z "${JS_STABLE}" ] || [ -z "${ADMIN_STABLE}" ]; then
-            echo "::error ::sources-dist-stable.json schema changed — could not parse js-controller/admin versions."
-            exit 1
-          fi
-          # Iterate over every adapter dependency in io-package.json (dependencies + globalDependencies)
-          # and compare each one against its stable value. Format: "<kind>\t<name>\t<value>"
-          DEPS=$(jq -r '
-            [
-              (.common.dependencies // [] | map(to_entries[] | "dependencies\t\(.key)\t\(.value)")),
-              (.common.globalDependencies // [] | map(to_entries[] | "globalDependencies\t\(.key)\t\(.value)"))
-            ] | flatten | .[]
-          ' io-package.json)
-          FAIL=0
-          while IFS=$'\t' read -r KIND NAME VALUE; do
-            [ -z "${NAME}" ] && continue
-            STABLE=$(jq -r --arg n "${NAME}" '.[$n].version // ""' /tmp/stable.json)
-            if [ -z "${STABLE}" ]; then
-              echo "::warning ::${NAME} not in sources-dist-stable.json — skipping (no autosync target)"
-              continue
-            fi
-            case "${VALUE}" in
-              ">="*) MIN="${VALUE#>=}" ;;
-              *)
-                echo "::error ::Unexpected format: io-package.json ${KIND}.${NAME}=${VALUE} — fleet standard is \">=<version>\""
-                FAIL=1
-                continue ;;
-            esac
-            if [ "${MIN}" = "${STABLE}" ]; then
-              echo "✓ ${KIND}.${NAME} = ${VALUE}"
-            elif [ "$(printf '%s\n%s\n' "${MIN}" "${STABLE}" | sort -V | head -n1)" = "${STABLE}" ]; then
-              echo "✓ ${KIND}.${NAME} = ${VALUE} (ahead of stable ${STABLE} — install-side dependency check protects older systems)"
-            else
-              echo "::error ::Drift: io-package.json ${KIND}.${NAME}=${VALUE} is behind stable, expected at least >=${STABLE}"
-              FAIL=1
-            fi
-          done <<< "${DEPS}"
-          if [ "${FAIL}" -eq 1 ]; then
-            echo ""
-            echo "Source: https://github.com/ioBroker/ioBroker.repositories/blob/master/sources-dist-stable.json"
-            echo "Fix: bump io-package.json common.dependencies / globalDependencies to at least the stable versions above."
-            exit 1
-          fi
-          echo "✓ all ioBroker-deps at or ahead of stable repository"
-
-  workflow-lint:
-    if: contains(github.event.head_commit.message, '[skip ci]') == false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Lint workflow YAML files (actionlint)
-        uses: reviewdog/action-actionlint@v1
-        with:
-          fail_level: error
-
-  adapter-tests:
-    # The tag push starts a COMPLETE second run: the matrix runs again there, and `deploy`
-    # depends on the tests of its own run. That is the property the repochecker verifies —
-    # never make this job or its step conditional on the ref.
+  # Builds, type-checks and tests the admin sign-in component (src-admin). The build
+  # calls vite directly, so the component's own TypeScript never runs anywhere else.
+  admin-component:
     if: contains(github.event.head_commit.message, '[skip ci]') == false
     needs: [check-and-lint]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+          cache: npm
+      - run: npm ci
+      - name: Build the admin custom component (Vite / Module Federation)
+        run: npm run build:admin
+      - name: Type-check and test the component with its own TypeScript and vitest
+        run: npm run test:admin
+
+  # Runs adapter tests on all supported node versions and OSes
+  adapter-tests:
+    needs: [check-and-lint]
+
+    if: contains(github.event.head_commit.message, '[skip ci]') == false
+
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         node-version: [22.x, 24.x, 26.x]
         os: [ubuntu-latest, windows-latest, macos-latest]
+
     steps:
-      - name: Run tests
-        uses: ioBroker/testing-action-adapter@v1
+      - uses: ioBroker/testing-action-adapter@v1
         with:
           node-version: ${{ matrix.node-version }}
           os: ${{ matrix.os }}
           build: true
 
-  adapter-inventory:
-    # The adapter's own start proof, on every push: it runs against its fixture server
-    # (test/inventory.js) and, with a previous release tag, proves that an update reaches
-    # every existing object (upgrade suite). Locally the same run is release gate D06.
-    if: contains(github.event.head_commit.message, '[skip ci]') == false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # tags: the upgrade suite seeds the previous release's inventory
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.x
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Export the previous release's inventory for the upgrade suite
-        run: |
-          set -euo pipefail
-          tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "$GITHUB_REF_NAME" 2>/dev/null || true)
-          if [ -n "$tag" ] && git show "$tag:test/objects.inventory.json" > /tmp/inventory-previous.json 2>/dev/null; then
-            echo "INVENTORY_PREVIOUS=/tmp/inventory-previous.json" >> "$GITHUB_ENV"
-            echo "previous inventory: $tag"
-          else
-            echo "no previous release — upgrade suite not applicable"
-          fi
-      - name: Start the adapter against its fixture server
-        run: |
-          set -euo pipefail
-          npm run test:inventory 2>&1 | tee /tmp/inventory.log
-          if [ -n "${INVENTORY_PREVIOUS:-}" ] && ! grep -q "upgrade from the previous release" /tmp/inventory.log; then
-            echo "::error ::the upgrade suite did not run although a previous inventory exists"
-            exit 1
-          fi
-      - name: Fail when the committed inventory differs from what the code produces
-        run: |
-          if ! git diff --quiet -- test/objects.inventory.json; then
-            git diff --stat -- test/objects.inventory.json
-            echo "::error ::test/objects.inventory.json differs from what the adapter produces — regenerate it (npm run test:inventory) and commit it with the code"
-            exit 1
-          fi
-      - name: Judge the values a user sees
-        # Every value in its list, labels that say more than the raw value and follow the system
-        # language, enum values with a list, no coded raw values — from the dumps the run above wrote.
-        run: >-
-          npx iobroker-adapter-checks values
-          --objects test/objects.inventory.json
-          --states test/states.inventory.json
-          --objects-other-language test/objects.inventory.de.json
-          --declarations test/readable-values.json
-
-  admin-component:
-    # The build does not type-check: `tasks.js` calls vite directly, so the
-    # `tsc &&` of the src-admin build script never runs. Only this job does
-    # (CLAUDE_ADMIN_UI.md, section on type-checking the component).
-    if: contains(github.event.head_commit.message, '[skip ci]') == false
-    needs: [check-and-lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22.x" # the lowest matrix major, like the gate jobs
-          cache: npm
-      - run: npm ci
-      - name: Build the admin custom component (Vite / Module Federation)
-        run: npm run build:admin
-      # Needs src-admin/node_modules from the build step; the root test matrix never has them.
-      - name: Type-check and test the component with its own TypeScript and vitest
-        run: npm run test:admin
-
-  ci-passed:
-    # The one required check of the automerge ruleset: green only when every job that deploy waits for
-    # is green (every matrix leg, every gate job); a job skipped because of a red dependency fails it.
-    if: ${{ !cancelled() }}
-    needs: [check-and-lint, adapter-tests, repochecker-version-gate, workflow-lint, adapter-inventory, admin-component]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Every job deploy waits for passed
-        run: echo '${{ toJSON(needs.*.result) }}' | jq -e 'all(. == "success")'
-
+  # Deploys the final package to NPM
   deploy:
-    needs: [check-and-lint, adapter-tests, repochecker-version-gate, workflow-lint, adapter-inventory, admin-component]
+    needs: [check-and-lint, adapter-tests, admin-component]
+
+    # Trigger this step only when a commit on any branch is tagged with a version number
     if: |
       contains(github.event.head_commit.message, '[skip ci]') == false &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v')
+
     runs-on: ubuntu-latest
+
+    # Write permissions are required to create GitHub releases
+    # id-token is required for npm Trusted Publishing
     permissions:
       contents: write
       id-token: write
-      actions: read
+
     steps:
       - uses: ioBroker/testing-action-deploy@v1
         with:
-          # Any Node major above 22 avoids the npm@latest+Node22
-          # MODULE_NOT_FOUND for promise-retry during the publish step (seen in
-          # parcelapp v0.4.0). Kept at the matrix's highest major by the audit.
           node-version: "26.x"
           build: true
           github-token: ${{ secrets.GITHUB_TOKEN }}

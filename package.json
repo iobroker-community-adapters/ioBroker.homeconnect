@@ -20,13 +20,9 @@
       "name": "iobroker-community-adapters",
       "email": "iobroker-community-adapters@gmx.de",
       "role": "Maintenance 2023-2026"
-    },
-    {
-      "name": "Claude (Anthropic)",
-      "role": "Coding assistance"
     }
   ],
-  "homepage": "https://github.com/krobipd/ioBroker.homeconnect",
+  "homepage": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect",
   "license": "MIT",
   "keywords": [
     "ioBroker",
@@ -40,7 +36,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/krobipd/ioBroker.homeconnect"
+    "url": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect"
   },
   "engines": {
     "node": ">=22"
@@ -90,17 +86,13 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
-    "format": "prettier --write . \"!build/**\" \"!admin/custom/**\" \"!src-admin/.__mf__temp/**\" \"!src-admin/package.json\" \"!src-admin/package-lock.json\" \"!.github/dependabot.yml\" \"!.github/FUNDING.yml\" \"!.github/workflows/automerge-dependabot.yml\" \"!.github/copilot-instructions.md\" \"!.vscode/**\" \"!io-package.json\" \"!README.md\" \"!CHANGELOG_OLD.md\" \"!package-lock.json\" \"!.releaseconfig.json\" \"!tsconfig.json\" \"!tsconfig.build.json\" \"!test/objects.inventory.json\"",
-    "format:check": "prettier --check . \"!build/**\" \"!admin/custom/**\" \"!src-admin/.__mf__temp/**\" \"!src-admin/package.json\" \"!src-admin/package-lock.json\" \"!.github/dependabot.yml\" \"!.github/FUNDING.yml\" \"!.github/workflows/automerge-dependabot.yml\" \"!.github/copilot-instructions.md\" \"!.vscode/**\" \"!io-package.json\" \"!README.md\" \"!CHANGELOG_OLD.md\" \"!package-lock.json\" \"!.releaseconfig.json\" \"!tsconfig.json\" \"!tsconfig.build.json\" \"!test/objects.inventory.json\"",
-    "fix:changelog": "node -e \"const fs=require('fs');for(const[f,r]of[['README.md',/^(-->[ \\t]*)\\r?\\n(#{1,6} )/m],['CHANGELOG_OLD.md',/^(#{1,6} .*)\\r?\\n(#{1,6} )/]])if(fs.existsSync(f)){const t=fs.readFileSync(f,'utf8'),n=t.replace(r,(m,a,b)=>a+'\\n\\n'+b);if(n!==t)fs.writeFileSync(f,n)}\"",
+    "format": "prettier --write . \"!build/**\" \"!admin/custom/**\" \"!src-admin/.__mf__temp/**\" \"!src-admin/package.json\" \"!src-admin/package-lock.json\" \"!.github/**\" \"!.vscode/**\" \"!io-package.json\" \"!README.md\" \"!CHANGELOG_OLD.md\" \"!package-lock.json\" \"!.releaseconfig.json\" \"!tsconfig.json\" \"!tsconfig.build.json\" \"!test/objects.inventory.json\"",
+    "format:check": "prettier --check . \"!build/**\" \"!admin/custom/**\" \"!src-admin/.__mf__temp/**\" \"!src-admin/package.json\" \"!src-admin/package-lock.json\" \"!.github/**\" \"!.vscode/**\" \"!io-package.json\" \"!README.md\" \"!CHANGELOG_OLD.md\" \"!package-lock.json\" \"!.releaseconfig.json\" \"!tsconfig.json\" \"!tsconfig.build.json\" \"!test/objects.inventory.json\"",
     "release": "release-script",
-    "release-patch": "release-script patch --yes --all",
-    "release-minor": "release-script minor --yes --all",
-    "release-major": "release-script major --yes --all",
     "translate": "translate-adapter"
   },
   "bugs": {
-    "url": "https://github.com/krobipd/ioBroker.homeconnect/issues"
+    "url": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect/issues"
   },
   "readmeFilename": "README.md",
   "overrides": {

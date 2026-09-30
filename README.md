@@ -1,8 +1,8 @@
-# <img src="https://cdn.jsdelivr.net/gh/krobipd/ioBroker.homeconnect@main/admin/homeconnect.svg" width="48" align="top" /> ioBroker.homeconnect
+# <img src="https://cdn.jsdelivr.net/gh/iobroker-community-adapters/ioBroker.homeconnect@master/admin/homeconnect.svg" width="48" align="top" /> ioBroker.homeconnect
 
-**Release:** [![GitHub release](https://img.shields.io/github/v/release/krobipd/ioBroker.homeconnect)](https://github.com/krobipd/ioBroker.homeconnect/releases)
+**Release:** [![npm version](https://img.shields.io/npm/v/iobroker.homeconnect)](https://www.npmjs.com/package/iobroker.homeconnect) ![stable](https://iobroker.live/badges/homeconnect-stable.svg) ![Installations](https://iobroker.live/badges/homeconnect-installed.svg) [![npm downloads](https://img.shields.io/npm/dt/iobroker.homeconnect)](https://www.npmjs.com/package/iobroker.homeconnect)
 
-**Build:** [![Test and Release](https://github.com/krobipd/ioBroker.homeconnect/actions/workflows/test-and-release.yml/badge.svg)](https://github.com/krobipd/ioBroker.homeconnect/actions/workflows/test-and-release.yml) ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+**Build:** [![Test and Release](https://github.com/iobroker-community-adapters/ioBroker.homeconnect/actions/workflows/test-and-release.yml/badge.svg)](https://github.com/iobroker-community-adapters/ioBroker.homeconnect/actions/workflows/test-and-release.yml) ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen) ![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **Support:** [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5e5b?logo=ko-fi)](https://ko-fi.com/krobipd) [![PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/krobipd)
 
@@ -26,6 +26,8 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 - js-controller >= 7.2.2
 - Admin >= 8.0.14 (the sign-in panel in the settings needs Admin 8)
 - A free Home Connect developer account (for a Client ID and Client Secret)
+
+> The adapter CANNOT be installed via GitHub: The adapter must be installed via the ioBroker repository (stable or latest).
 
 ## Configuration
 
@@ -60,12 +62,13 @@ The panel shows what Home Connect answered and what to do about it; `auth.lastEr
 
 Of the settings, only the Client Secret is stored encrypted; the login itself (`auth.session`) is stored encrypted too. A login saved by another ioBroker installation (after moving to a new system) cannot be read — the log says so, and one new sign-in is needed. Home Connect in China (`api.home-connect.cn`) is not supported.
 
-## Updating from 1.6.x
+## Updating from 1.x
 
-The update takes care of itself: your sign-in and Client ID are kept, and the old raw object tree is replaced — every appliance reappears under a clean device folder (named by its model and its own number, with the name from the app as display name). What you attached to the old tree comes along: recording settings, rooms, functions and aliases move to the datapoint that takes the old one's place, and a recording continues its series where the value type stayed the same. The log names what was carried and what had no counterpart. Two things to know:
+Version 2.0 is a new object tree: every appliance gets a readable device folder (named by its model and the last four digits of its own number) instead of the raw Home Connect tree. Your sign-in and Client ID are kept, and rooms, functions, aliases and recording settings move to the datapoint that takes the old one's place. Three things to know:
 
-1. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
-2. Point your scripts and visualization at the new readable data points listed below — that cleaner tree is the whole point of this generation.
+1. Make a backup before the update — going back to 1.x is not supported, the old tree is removed once it has been handed over.
+2. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
+3. Point your scripts and visualization at the new data points — the [documentation](docs/en/README.md#updating-from-1x) lists the new datapoint for every old ID.
 
 ## Data points
 
@@ -121,59 +124,46 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
     ### **WORK IN PROGRESS**
 -->
 
-### 1.25.2 (2026-09-29)
+### **WORK IN PROGRESS**
 
-- Changed: the program history names each run — latest, previous, third-to-last … — instead of numbering its datapoints; existing ones move along with their settings.
-- Changed: firmware identifiers and the appliance's own connection datapoints (cloud connection, switching Wi-Fi off) are no longer created, on any appliance type.
-- Fixed: remaining time and progress stay empty while no program is under way, instead of showing the figures of the last run.
-- Fixed: the object tree no longer lists empty entries under an appliance's former ID, which looked like extra appliances.
+- (krobipd) Changed: complete rewrite with a new object tree — every appliance gets its own readable folder and datapoints, so scripts and VIS need the new IDs (table in the documentation)
+- (krobipd) Changed: values arrive as switches, numbers with units and lists in the system language instead of raw Home Connect texts; encoded program data is decoded into readable datapoints
+- (krobipd) Changed: the adapter requires js-controller 7.2.2 and Admin 8.0.14 or newer now; the sign-in panel in the settings shows the live status and needs Admin 8
+- (krobipd) New: sign-in panel with the code, a connection test and a reset; login and Client ID of 1.x are kept, only the Client Secret has to be entered once
+- (krobipd) Improved: rooms, functions, aliases and recordings move to the matching new datapoints on update, and the stored login is kept encrypted
+- (krobipd) Fixed: the object database no longer grows with every value change (#387), and the start stays within the Home Connect request limits (#327, #58)
 
-### 1.25.1 (2026-09-29)
+### 1.6.1 (2026-05-12)
 
-- Changed: on/off datapoints are switches — the power state, the dishwasher's time light and the oven's steam assist; switching off sends Off, or Standby where the appliance has no Off.
-- Changed: numbers show in a readable unit — durations in minutes, lifetime runtime in hours, energy in kWh, water, detergent and softener in litres, the load recommendation in kg.
-- Fixed: units read the ioBroker way (s, g) instead of the cloud's words, and the ambient light's own colour is a colour datapoint instead of a text.
-- Fixed: after an update, value lists of options the appliance was not offering kept English labels or had no list at all; they now show the installation's language from the start.
-- Fixed: the stain option for butter and oil stains was labelled "clarified butter" in every language; it now reads "butter/oil", as the manufacturer names it.
+- (TA2k) Login/Refresh flow improved
 
-### 1.25.0 (2026-09-29)
+### 1.6.0 (2026-05-11)
 
-- Changed: value lists speak the system language — programs, phases and settings show names like "Cotton" or "Running" instead of short values or English labels.
-- Changed: the encoded program history, program details and run summary become readable datapoints: the last programs with their duration, counters per program and the last run.
-- Changed: programs chosen at the appliance appear in both program lists by name; choosing one remotely is refused with a message, because Home Connect does not allow it.
-- New: program numbers in the history and statistics are named from the appliances' own descriptions; numbers they lack are learned from the runs the adapter sees.
-- New: the last run shows its water, energy, detergent and softener use and whether it finished or was aborted, decoded from the appliance's run summary.
-- New: a fault indicator tells whether the appliance reports a fault, next to the fault codes as readable text; the raw code list and other raw datapoints are removed.
-- Fixed: the water counters showed millilitres as litres — 12 million litres on a washer-dryer; they now show litres, as their unit says.
-- Fixed: the system language was never read, so the cloud answered in English and every value label was English, whatever language the installation uses.
-- Fixed: a value that its list did not name (a process phase, a drying target) is added to the list once, so it is always shown by its name.
-- Improved: a start no longer rewrites hundreds of unchanged datapoints, and status values are written only when they change, so history adapters record no repeated entries.
+- (copilot) Adapter requires node.js >= 22 now
+- (copilot) Adapter requires admin >= 7.7.22 now
+- (Lucky-ESA) Fixed adapter crash if URI is empty
+- (Lucky-ESA) Save remaining time in active folder
+- (Lucky-ESA) Device monitoring starts only after the adapter has started (this may take up to 2 minutes)
 
-### 1.24.0 (2026-09-26)
+### 1.5.2 (2025-12-14)
 
-- Changed: every appliance gets a new object ID once — its model and the end of its own number, e.g. `sx87tx02ce-5775`; scripts and visualizations need the new IDs.
-- Changed: the move carries values, recording settings, rooms, functions and aliases along, and recorded history continues in its old series.
-- Changed: two appliances of the same model now always get a folder each, named by their own number.
-- Changed: coming from version 1.6.x, recordings, rooms and aliases of the old tree are carried over to the new datapoints instead of being lost.
-- Changed: when Home Connect refuses the sign-in, the settings show why and what to do, and the answer is kept in `auth.lastError`.
-- Changed: the settings show the code to confirm next to the sign-in link; the notification no longer shows a code that has expired meanwhile.
-- Changed: if nobody confirms a sign-in link for an hour, the adapter stops asking for new ones; a button in the settings requests a new link.
-- Changed: a button in the settings resets the sign-in, for example to switch to another Home Connect account.
-- Fixed: a Home Connect application that was disabled, deleted or given a new secret now ends the login with a clear message instead of retrying for a day.
-- Fixed: a login saved by another ioBroker installation is reported in the log instead of silently asking for a new sign-in.
-- Improved: the settings guide the Home Connect developer account step by step, with one button per step.
+- (Lucky-ESA) Rate limit of 50 requests per minute intercepted at adapter startup
+- (Lucky-ESA) Added custom request
 
-### 1.23.0 (2026-09-24)
+### 1.5.1 (2025-09-20)
 
-- Fixed: a broken answer from Home Connect during start-up no longer leaves the adapter without live updates and without control of the appliances.
-- Fixed: a wrong Client ID or Client Secret is now reported once and retried every five minutes instead of creating a new sign-in link over and over.
-- Fixed: an option written in any spelling, for example "EXTRA", is kept when the program starts, and the drying target of washer-dryers now reaches the appliance.
-- Fixed: two programs whose names end in the same word, for example on steam ovens, now get two entries in the program list and can both be selected.
-- Fixed: signing in again while the adapter runs no longer shows the appliances as offline for a moment or lets options of another program through.
-- Fixed: the rate limit is respected on every path, including the connection test and live updates, and a short limit no longer cuts a longer pause short.
-- Fixed: after a reconnect, a value that arrived by live update is no longer overwritten by an older value read at the same time.
-- Improved: after a crash or power cut all appliances show as offline right at start, also while the sign-in is not configured yet.
-- Improved: the guide now explains the three steps of the Home Connect developer account, and the connection test in the settings no longer waits forever.
+- (Lucky-ESA) Fixed: Name of the objects are deleted
+
+### 1.5.0 (2025-09-02)
+
+- (Lucky-ESA) Clean up state roles and code
+- (Lucky-ESA) Added rate limiting
+- (Lucky-ESA) Dependencies updated
+- (Lucky-ESA) Added language selection
+- (Lucky-ESA) Migrated to ESLint 9
+- (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
+- (Lucky-ESA) Adapter requires admin >= 7.6.17 now
+- (mcm1957) Adapter requires node.js >= 20 now
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 
@@ -203,6 +193,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
----
-
-_Developed with assistance from Claude.ai_

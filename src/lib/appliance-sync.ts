@@ -3114,7 +3114,7 @@ export class ApplianceSync {
     this.unreadableRecords.add(`${deviceId}|${family}`);
     const shown = typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value);
     this.port.log.info(
-      `${deviceId}: ${key} came in a form the adapter cannot read yet, so it is not shown: ${shown} — please report it at https://github.com/krobipd/ioBroker.homeconnect/issues`,
+      `${deviceId}: ${key} came in a form the adapter cannot read yet, so it is not shown: ${shown} — please report it at https://github.com/iobroker-community-adapters/ioBroker.homeconnect/issues`,
     );
   }
 

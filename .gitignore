@@ -8,6 +8,9 @@
 node_modules
 nbproject
 
+# Build output — the CI builds it; the adapter is installed from npm, never from GitHub
+build/
+
 # npm package files
 iobroker.*.tgz
 

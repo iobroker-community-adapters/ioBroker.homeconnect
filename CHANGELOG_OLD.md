@@ -1,5 +1,61 @@
 # Older changes
 
+Versions 1.7.0 to 1.25.2 were published on GitHub only, while the rewrite was built outside this repository. Version 2.0.0 brings all of their changes to npm.
+
+## 1.25.2 (2026-09-29)
+
+- Changed: the program history names each run — latest, previous, third-to-last … — instead of numbering its datapoints; existing ones move along with their settings.
+- Changed: firmware identifiers and the appliance's own connection datapoints (cloud connection, switching Wi-Fi off) are no longer created, on any appliance type.
+- Fixed: remaining time and progress stay empty while no program is under way, instead of showing the figures of the last run.
+- Fixed: the object tree no longer lists empty entries under an appliance's former ID, which looked like extra appliances.
+
+## 1.25.1 (2026-09-29)
+
+- Changed: on/off datapoints are switches — the power state, the dishwasher's time light and the oven's steam assist; switching off sends Off, or Standby where the appliance has no Off.
+- Changed: numbers show in a readable unit — durations in minutes, lifetime runtime in hours, energy in kWh, water, detergent and softener in litres, the load recommendation in kg.
+- Fixed: units read the ioBroker way (s, g) instead of the cloud's words, and the ambient light's own colour is a colour datapoint instead of a text.
+- Fixed: after an update, value lists of options the appliance was not offering kept English labels or had no list at all; they now show the installation's language from the start.
+- Fixed: the stain option for butter and oil stains was labelled "clarified butter" in every language; it now reads "butter/oil", as the manufacturer names it.
+
+## 1.25.0 (2026-09-29)
+
+- Changed: value lists speak the system language — programs, phases and settings show names like "Cotton" or "Running" instead of short values or English labels.
+- Changed: the encoded program history, program details and run summary become readable datapoints: the last programs with their duration, counters per program and the last run.
+- Changed: programs chosen at the appliance appear in both program lists by name; choosing one remotely is refused with a message, because Home Connect does not allow it.
+- New: program numbers in the history and statistics are named from the appliances' own descriptions; numbers they lack are learned from the runs the adapter sees.
+- New: the last run shows its water, energy, detergent and softener use and whether it finished or was aborted, decoded from the appliance's run summary.
+- New: a fault indicator tells whether the appliance reports a fault, next to the fault codes as readable text; the raw code list and other raw datapoints are removed.
+- Fixed: the water counters showed millilitres as litres — 12 million litres on a washer-dryer; they now show litres, as their unit says.
+- Fixed: the system language was never read, so the cloud answered in English and every value label was English, whatever language the installation uses.
+- Fixed: a value that its list did not name (a process phase, a drying target) is added to the list once, so it is always shown by its name.
+- Improved: a start no longer rewrites hundreds of unchanged datapoints, and status values are written only when they change, so history adapters record no repeated entries.
+
+## 1.24.0 (2026-09-26)
+
+- Changed: every appliance gets a new object ID once — its model and the end of its own number, e.g. `sx87tx02ce-5775`; scripts and visualizations need the new IDs.
+- Changed: the move carries values, recording settings, rooms, functions and aliases along, and recorded history continues in its old series.
+- Changed: two appliances of the same model now always get a folder each, named by their own number.
+- Changed: coming from version 1.6.x, recordings, rooms and aliases of the old tree are carried over to the new datapoints instead of being lost.
+- Changed: when Home Connect refuses the sign-in, the settings show why and what to do, and the answer is kept in `auth.lastError`.
+- Changed: the settings show the code to confirm next to the sign-in link; the notification no longer shows a code that has expired meanwhile.
+- Changed: if nobody confirms a sign-in link for an hour, the adapter stops asking for new ones; a button in the settings requests a new link.
+- Changed: a button in the settings resets the sign-in, for example to switch to another Home Connect account.
+- Fixed: a Home Connect application that was disabled, deleted or given a new secret now ends the login with a clear message instead of retrying for a day.
+- Fixed: a login saved by another ioBroker installation is reported in the log instead of silently asking for a new sign-in.
+- Improved: the settings guide the Home Connect developer account step by step, with one button per step.
+
+## 1.23.0 (2026-09-24)
+
+- Fixed: a broken answer from Home Connect during start-up no longer leaves the adapter without live updates and without control of the appliances.
+- Fixed: a wrong Client ID or Client Secret is now reported once and retried every five minutes instead of creating a new sign-in link over and over.
+- Fixed: an option written in any spelling, for example "EXTRA", is kept when the program starts, and the drying target of washer-dryers now reaches the appliance.
+- Fixed: two programs whose names end in the same word, for example on steam ovens, now get two entries in the program list and can both be selected.
+- Fixed: signing in again while the adapter runs no longer shows the appliances as offline for a moment or lets options of another program through.
+- Fixed: the rate limit is respected on every path, including the connection test and live updates, and a short limit no longer cuts a longer pause short.
+- Fixed: after a reconnect, a value that arrived by live update is no longer overwritten by an older value read at the same time.
+- Improved: after a crash or power cut all appliances show as offline right at start, also while the sign-in is not configured yet.
+- Improved: the guide now explains the three steps of the Home Connect developer account, and the connection test in the settings no longer waits forever.
+
 ## 1.22.0 (2026-09-23)
 
 - Fixed: an appliance that was just switched on now shows its current data by itself once it is ready, without waiting for a later reconnect.
@@ -160,38 +216,6 @@
 - Programs, status and events update live through a single connection, so changes on the appliance show up in ioBroker within seconds instead of on a poll.
 - Full program control: select a program, set options such as temperature, spin speed or delayed start, then start, stop or pause it from ioBroker.
 - Every data point now has a short, readable name, so appliance values are easy to find and use in scripts, charts and visualisations.
-
-## 1.6.1 (2026-05-12) — stable
-
-- (TA2k) Login/Refresh flow improved
-
-## 1.6.0 (2026-05-11)
-
-- (copilot) Adapter requires node.js >= 22 now
-- (copilot) Adapter requires admin >= 7.7.22 now
-- (Lucky-ESA) Fixed adapter crash if URI is empty
-- (Lucky-ESA) Save remaining time in active folder
-- (Lucky-ESA) Device monitoring starts only after the adapter has started (this may take up to 2 minutes)
-
-## 1.5.2 (2025-12-14)
-
-- (Lucky-ESA) Rate limit of 50 requests per minute intercepted at adapter startup
-- (Lucky-ESA) Added custom request
-
-## 1.5.1 (2025-09-20)
-
-- (Lucky-ESA) Fixed: Name of the objects are deleted
-
-## 1.5.0 (2025-09-02)
-
-- (Lucky-ESA) Clean up state roles and code
-- (Lucky-ESA) Added rate limiting
-- (Lucky-ESA) Dependencies updated
-- (Lucky-ESA) Added language selection
-- (Lucky-ESA) Migrated to ESLint 9
-- (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
-- (Lucky-ESA) Adapter requires admin >= 7.6.17 now
-- (mcm1957) Adapter requires node.js >= 20 now
 
 ## 1.4.3 (2024-11-19)
 

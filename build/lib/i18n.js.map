@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../../src/lib/i18n.ts"],
-  "sourcesContent": ["import { I18n } from \"@iobroker/adapter-core\";\nimport type translations from \"../../admin/i18n/en.json\";\n\n/** A key of admin/i18n/en.json \u2014 the compiler rejects a typo. */\nexport type I18nKey = keyof typeof translations;\n\n/**\n * Resolve a key to a translation object for `common.name` / `common.desc` \u2014\n * Admin renders the viewer's language, nothing is resolved adapter-side\n * (core-team line: an object for every object type, no system-language string).\n * `%s` placeholders are filled from `args` in every language.\n *\n * @param key Translation key from admin/i18n/en.json\n * @param args Values for `%s` placeholders\n */\nexport function tName(key: I18nKey, ...args: (string | number)[]): ioBroker.StringOrTranslated {\n  return I18n.getTranslatedObject(key, ...args);\n}\n"],
-  "mappings": ";;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,0BAAqB;AAed,SAAS,MAAM,QAAiB,MAAwD;AAC7F,SAAO,yBAAK,oBAAoB,KAAK,GAAG,IAAI;AAC9C;",
-  "names": []
-}

@@ -1,6 +1,6 @@
 # Dependabot configuration
-# Cooldown delays version updates by 7 days (npm AND github-actions — GitHub supports `default-days` for Actions,
-# dependabot-options-reference 2026-08); security updates are processed immediately.
+# Cooldown delays updating normal npm dependencies by 7 days but allows security updates to be processed immediately.
+# Note: Cooldown is not supported for the github-actions ecosystem.
 # Reference: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
 version: 2
 updates:
@@ -8,12 +8,10 @@ updates:
   - package-ecosystem: 'npm'
     directory: '/'
     schedule:
-      interval: 'weekly'
-      day: 'thursday'
+      interval: 'cron'
       timezone: 'Europe/Berlin'
+      cronjob: '36 2 4 * *'
     open-pull-requests-limit: 15
-    assignees:
-      - 'krobipd'
     versioning-strategy: 'increase'
     cooldown:
       default-days: 7
@@ -21,24 +19,21 @@ updates:
       - dependency-name: '@types/node'
         update-types:
           - 'version-update:semver-major'
+      # The lint chain (@iobroker/eslint-config -> typescript-eslint) caps TypeScript below 6.1,
+      # so every TypeScript major bump would fail.
       - dependency-name: 'typescript'
         update-types:
           - 'version-update:semver-major'
 
-  # src-admin (Module-Federation admin component): hand-pinned compatibility matrix
-  # (React / MUI / @module-federation/vite — the versions the component was built against);
-  # npm-latest breaks the MF build. This entry exists ONLY to satisfy repochecker W8905
-  # (a non-root package.json must be covered by a dependabot npm directory). Ignoring all
-  # dependencies means it generates ZERO pull requests, so the pinned matrix is never moved.
-  # (open-pull-requests-limit: 0 would trip W8907; a wildcard ignore keeps the entry warning-free.)
+  # src-admin (admin sign-in component, Module Federation): hand-pinned compatibility matrix
+  # (React / MUI / @module-federation/vite). This entry only covers the non-root package.json
+  # (repochecker W8905); ignoring every dependency keeps the pinned matrix untouched.
   - package-ecosystem: 'npm'
     directory: '/src-admin'
     schedule:
-      interval: 'weekly'
-      day: 'thursday'
+      interval: 'cron'
       timezone: 'Europe/Berlin'
-    assignees:
-      - 'krobipd'
+      cronjob: '36 2 4 * *'
     cooldown:
       default-days: 7
     ignore:
@@ -47,11 +42,7 @@ updates:
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
-      interval: 'weekly'
-      day: 'thursday'
+      interval: 'cron'
       timezone: 'Europe/Berlin'
+      cronjob: '36 2 4 * *'
     open-pull-requests-limit: 15
-    assignees:
-      - 'krobipd'
-    cooldown:
-      default-days: 7

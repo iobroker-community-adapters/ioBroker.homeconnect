@@ -3,96 +3,57 @@
     "name": "homeconnect",
     "version": "1.25.2",
     "news": {
-      "1.25.2": {
-        "en": "The program history names each run (latest, previous …); firmware and connection datapoints are gone; remaining time and progress stay empty while nothing runs.",
-        "de": "Der Programmverlauf benennt jeden Lauf (letzter, vorletzter …); Firmware- und Verbindungs-Datenpunkte entfallen; Restzeit und Fortschritt bleiben ohne Lauf leer.",
-        "ru": "История программ называет каждый цикл (последний, предпоследний …); точки прошивки и связи убраны; остаток и прогресс пусты, пока ничего не работает.",
-        "pt": "O histórico nomeia cada ciclo (último, penúltimo …); pontos de firmware e ligação removidos; tempo restante e progresso ficam vazios sem programa.",
-        "nl": "De programmageschiedenis benoemt elke run (laatste, voorlaatste …); firmware- en verbindingspunten vervallen; resttijd en voortgang blijven leeg zonder run.",
-        "fr": "L'historique nomme chaque cycle (dernier, avant-dernier …) ; points firmware et connexion supprimés ; temps restant et progression vides hors cycle.",
-        "it": "La cronologia nomina ogni ciclo (ultimo, penultimo …); punti firmware e connessione rimossi; tempo residuo e avanzamento vuoti senza programma.",
-        "es": "El historial nombra cada ciclo (último, penúltimo …); se quitan los puntos de firmware y conexión; tiempo restante y progreso vacíos sin programa.",
-        "pl": "Historia programów nazywa każdy cykl (ostatni, przedostatni …); punkty firmware i połączenia usunięte; czas i postęp puste, gdy nic nie działa.",
-        "uk": "Історія програм називає кожен цикл (останній, передостанній …); точки прошивки та зв'язку прибрано; залишок і прогрес порожні без програми.",
-        "zh-cn": "程序历史为每次运行命名（最近、倒数第二……）；移除固件和连接数据点；无程序运行时剩余时间和进度保持为空。"
+      "1.6.1": {
+        "en": "Login/Refresh flow improved",
+        "de": "Login/Refresh Flow verbessert",
+        "ru": "Логин/Повторный поток улучшен",
+        "pt": "O fluxo de login/atualização melhorou",
+        "nl": "Aanmelden/verversen stroom verbeterd",
+        "fr": "Amélioration du flux de connexion/raffinage",
+        "it": "Miglioramento del flusso di Login/Refresh",
+        "es": "Mejoramiento del flujo de retorno",
+        "pl": "Zaloguj / Odśwież poprawiony przepływ",
+        "uk": "Ввійти/Поліпшити потік",
+        "zh-cn": "登录/更新流程得到改善"
       },
-      "1.25.1": {
-        "en": "On/off datapoints are switches, durations show in minutes, runtime in hours, energy in kWh and water in litres; option lists show the installation's language.",
-        "de": "An/Aus-Datenpunkte sind Schalter, Dauern in Minuten, Laufzeit in Stunden, Energie in kWh, Wasser in Litern; Optionslisten zeigen die Sprache der Installation.",
-        "ru": "Точки вкл/выкл стали переключателями, длительность в минутах, время работы в часах, энергия в кВт·ч, вода в литрах; списки опций на языке установки.",
-        "pt": "Pontos liga/desliga são interruptores, durações em minutos, tempo de funcionamento em horas, energia em kWh e água em litros; listas no idioma da instalação.",
-        "nl": "Aan/uit-datapunten zijn schakelaars, duur in minuten, looptijd in uren, energie in kWh en water in liters; optielijsten tonen de taal van de installatie.",
-        "fr": "Les points marche/arrêt sont des interrupteurs, durées en minutes, temps de marche en heures, énergie en kWh, eau en litres ; listes dans la langue installée.",
-        "it": "I punti acceso/spento sono interruttori, durate in minuti, tempo di funzionamento in ore, energia in kWh e acqua in litri; elenchi nella lingua installata.",
-        "es": "Los puntos encendido/apagado son interruptores, duraciones en minutos, tiempo de uso en horas, energía en kWh y agua en litros; listas en el idioma instalado.",
-        "pl": "Punkty wł./wył. są przełącznikami, czasy w minutach, czas pracy w godzinach, energia w kWh, woda w litrach; listy opcji w języku instalacji.",
-        "uk": "Точки ввімк/вимк стали перемикачами, тривалість у хвилинах, час роботи в годинах, енергія в кВт·год, вода в літрах; списки опцій мовою встановлення.",
-        "zh-cn": "开/关数据点改为开关，时长以分钟、总运行时间以小时、能耗以千瓦时、用水以升显示；选项列表使用安装语言。"
+      "1.6.0": {
+        "en": "Adapter requires node.js >= 22 now\nAdapter requires admin >= 7.7.22 now\nFixed adapter crash if URI is empty\nSave remaining time in active folder\nDevice monitoring starts only after the adapter has started (this may take up to 2 minutes)",
+        "de": "Adapter benötigt node.js >= 22 jetzt\nAdapter benötigt admin >= 7.7.22 jetzt\nFixed Adapter Crash, wenn URI leer ist\nRestzeit im aktiven Ordner speichern\nGeräteüberwachung beginnt erst nach dem Start des Adapters (dies kann bis zu 2 Minuten dauern)",
+        "ru": "Адаптер требует node.js >= 22 сейчас\nАдаптер требует администратора >= 7.7.22\nИсправлен сбой адаптера, если URI пуст\nЭкономьте оставшееся время в активной папке\nМониторинг устройства начинается только после запуска адаптера (это может занять до 2 минут)",
+        "pt": "Adaptador requer nod.js >= 22 agora\nAdaptador requer admin >= 7.7.22 agora\nFalha fixa do adaptador se o URI estiver vazio\nGravar o tempo restante na pasta activa\nO monitoramento do dispositivo só começa após o início do adaptador (o que pode levar até 2 minutos)",
+        "nl": "Voor de adapter zijn node.js < 22 nu nodig\nAdapter vereist admin < 7.7.22 nu\nFixed adapter crash als URI leeg is\nBespaar resterende tijd in actieve map\nApparaatbewaking begint pas nadat de adapter is gestart (dit kan tot 2 minuten duren)",
+        "fr": "Adaptateur nécessite node.js >= 22 maintenant\nAdaptateur nécessite admin >= 7.7.22 maintenant\nCrash de l'adaptateur fixe si URI est vide\nEconomisez le temps restant dans le dossier actif\nLa surveillance de l'appareil commence seulement après le démarrage de l'adaptateur (cela peut prendre jusqu'à 2 minutes)",
+        "it": "Adattatore richiede node.js >= 22 ora\nAdattatore richiede admin >= 7.7.22 ora\nAttacco fisso se URI è vuoto\nSalvare il tempo rimanente nella cartella attiva\nIl monitoraggio del dispositivo inizia solo dopo l'avvio dell'adattatore (questo può richiedere fino a 2 minuti)",
+        "es": "Adaptador requiere node.js ю= 22 ahora\nEl adaptador requiere administrador= 7.7.22 ahora\nSe bloquea el adaptador fijo si URI está vacío\nGuardar el tiempo restante en la carpeta activa\nEl monitoreo de dispositivos comienza sólo después de que el adaptador haya comenzado (esto puede tardar hasta 2 minutos)",
+        "pl": "Adapter wymaga node.js > = 22\nAdapter wymaga admin > = 7.7.22\nNaprawiono awarię adaptera, jeśli URI jest puste\nZapisz pozostały czas w aktywnym folderze\nMonitorowanie urządzenia rozpoczyna się dopiero po uruchomieniu adaptera (może to trwać do 2 minut)",
+        "uk": "Адаптер вимагає node.js >= 22 тепер\nАдаптер вимагає адмін >= 7.7.22 тепер\nВиправлено помилку адаптера, якщо URI порожній\nЗаощаджуйте час в активному папці\nПристрої моніторингу починаються тільки після запуску адаптера (це може знадобитися до 2 хвилин)",
+        "zh-cn": "适配器需要节点.js 现在22\n适任者需要管理员 \\ 7.7.22 现在\n如果 URI 是空的, 固定适配器崩溃\n在活动文件夹中保存剩余时间\n设备监测只在适配器启动后才开始(这可能需要2分钟)"
       },
-      "1.25.0": {
-        "en": "Values are shown by name in the installation's language; the encoded history, program statistics and last run become readable datapoints, and water counters show litres.",
-        "de": "Werte erscheinen mit Namen in der Sprache der Installation; kodierter Verlauf, Programmstatistik und letzter Lauf werden lesbare Datenpunkte, Wasserzähler zeigen Liter.",
-        "ru": "Значения показываются по названию на языке установки; закодированная история, статистика программ и последний запуск стали понятными точками данных, вода — в литрах.",
-        "pt": "Os valores aparecem pelo nome no idioma da instalação; histórico codificado, estatísticas e última execução tornam-se pontos de dados legíveis; a água em litros.",
-        "nl": "Waarden verschijnen met naam in de taal van de installatie; gecodeerde geschiedenis, programmastatistiek en laatste run worden leesbare datapunten, water in liter.",
-        "fr": "Les valeurs s'affichent par leur nom dans la langue de l'installation ; historique codé, statistiques et dernier cycle deviennent lisibles, l'eau est en litres.",
-        "it": "I valori appaiono per nome nella lingua dell'installazione; cronologia codificata, statistiche e ultimo ciclo diventano punti dati leggibili, l'acqua in litri.",
-        "es": "Los valores aparecen por su nombre en el idioma de la instalación; historial codificado, estadísticas y último ciclo pasan a ser datos legibles, el agua en litros.",
-        "pl": "Wartości są pokazywane z nazwą w języku instalacji; zakodowana historia, statystyki programów i ostatni cykl stają się czytelne, liczniki wody w litrach.",
-        "uk": "Значення показуються за назвою мовою встановлення; закодовані історія, статистика програм і останній запуск стали зрозумілими, лічильники води — у літрах.",
-        "zh-cn": "数值以安装所用语言按名称显示；编码的历史记录、程序统计和上次运行变为可读的数据点，用水量以升显示。"
+      "1.5.2": {
+        "en": "Rate limit of 50 requests per minute intercepted at adapter startup\nAdded custom request",
+        "de": "Rate Limit von 50 Anfragen pro Minute abgefangen bei Adapter-Start\nBenutzerdefinierte Anfrage",
+        "ru": "Ограничение скорости 50 запросов в минуту, перехваченных при запуске адаптера\nДобавлен пользовательский запрос",
+        "pt": "Limite de taxa de 50 pedidos por minuto interceptados na inicialização do adaptador\nPedido personalizado adicionado",
+        "nl": "Prijslimiet van 50 verzoeken per minuut onderschept bij het opstarten van de adapter\nAangepast verzoek toegevoegd",
+        "fr": "Limite tarifaire de 50 requêtes par minute interceptées au démarrage de l'adaptateur\nAjout d'une requête personnalisée",
+        "it": "Tasso limite di 50 richieste al minuto intercettato all'avvio dell'adattatore\nAggiunto richiesta personalizzata",
+        "es": "Límite de tarifas de 50 solicitudes por minuto interceptadas en la puesta en marcha del adaptador\nSolicitud personalizada",
+        "pl": "Oceń limit 50 żądań na minutę przechwycony przy uruchomieniu adaptera\nDodano zamówienie",
+        "uk": "Обмеження швидкості 50 запитів за хвилину, що перехоплюється при запуску адаптера\nДодати запит на замовлення",
+        "zh-cn": "适配器启动时截获每分钟50项请求的速率限制\n添加自定义请求"
       },
-      "1.24.0": {
-        "en": "Device ids are now model plus last four characters of the appliance number; the tree moves once with values, recordings, rooms and aliases. Clearer sign-in with Home Connect's reason.",
-        "de": "Geräte-Ids sind jetzt Modell plus die letzten vier Zeichen der Gerätenummer; der Baum zieht einmal um, samt Werten, Aufzeichnung, Räumen, Aliasen. Anmeldung nennt Home Connects Grund.",
-        "ru": "Идентификатор прибора теперь — модель плюс четыре последних символа номера; дерево переносится один раз со значениями, историей, комнатами и алиасами. Вход называет причину Home Connect.",
-        "pt": "Os ids passam a ser modelo mais os últimos quatro caracteres do número do aparelho; a árvore muda uma vez com valores, históricos, divisões e aliases. O login indica o motivo.",
-        "nl": "Apparaat-id's zijn nu model plus de laatste vier tekens van het apparaatnummer; de boom verhuist eenmaal met waarden, historie, ruimtes en aliassen. Aanmelden noemt de reden.",
-        "fr": "Les ids deviennent modèle plus les quatre derniers caractères du numéro d'appareil ; l'arbre migre une fois avec valeurs, historiques, pièces et alias. La connexion donne la raison.",
-        "it": "Gli id diventano modello più gli ultimi quattro caratteri del numero dell'apparecchio; l'albero si sposta una volta con valori, storici, stanze e alias. L'accesso indica il motivo.",
-        "es": "Los ids pasan a ser modelo más los cuatro últimos caracteres del número del aparato; el árbol se mueve una vez con valores, históricos, estancias y alias. El inicio indica el motivo.",
-        "pl": "Identyfikatory to teraz model plus cztery ostatnie znaki numeru urządzenia; drzewo przenosi się raz z wartościami, historią, pokojami i aliasami. Logowanie podaje przyczynę.",
-        "uk": "Ідентифікатор приладу тепер — модель плюс чотири останні символи номера; дерево переноситься один раз зі значеннями, історією, кімнатами й аліасами. Вхід називає причину Home Connect.",
-        "zh-cn": "设备 ID 现为型号加设备编号的后四位；对象树只迁移一次，并带上数值、历史记录、房间和别名。登录失败时会显示 Home Connect 给出的原因。"
-      },
-      "1.23.0": {
-        "en": "Live updates and control no longer stop after a broken answer at start, a wrong secret no longer loops the sign-in, and options stay set at program start.",
-        "de": "Live-Updates und Steuerung fallen nach einer kaputten Antwort beim Start nicht mehr aus, ein falsches Secret dreht die Anmeldung nicht mehr, Optionen bleiben beim Programmstart.",
-        "ru": "Обновления и управление больше не пропадают после сбойного ответа при запуске, неверный секрет не зацикливает вход, а опции сохраняются при старте программы.",
-        "pt": "As atualizações e o controlo já não param após uma resposta defeituosa no arranque, um segredo errado já não repete o login e as opções mantêm-se ao iniciar.",
-        "nl": "Live-updates en bediening vallen niet meer uit na een kapot antwoord bij de start, een fout secret laat de aanmelding niet meer rondjes draaien, opties blijven bij de start.",
-        "fr": "Les mises à jour et la commande ne s'arrêtent plus après une réponse défectueuse au démarrage, un mauvais secret ne boucle plus la connexion, les options restent au lancement.",
-        "it": "Aggiornamenti e controllo non si fermano più dopo una risposta difettosa all'avvio, un secret errato non ripete più l'accesso e le opzioni restano all'avvio del programma.",
-        "es": "Las actualizaciones y el control ya no se detienen tras una respuesta rota al inicio, un secreto erróneo ya no repite el inicio de sesión y las opciones se mantienen.",
-        "pl": "Aktualizacje i sterowanie nie zatrzymują się już po błędnej odpowiedzi przy starcie, zły sekret nie zapętla logowania, a opcje zostają przy starcie programu.",
-        "uk": "Оновлення й керування більше не зникають після збійної відповіді під час запуску, хибний секрет не зациклює вхід, а опції зберігаються під час старту програми.",
-        "zh-cn": "启动时收到损坏的响应后，实时更新和控制不再中断；错误的密钥不再导致登录循环；程序启动时选项保持不变，不再丢失。"
-      },
-      "1.22.0": {
-        "en": "An appliance that is switched on is read again by itself once it is ready, and neither this nor programs unknown to the Home Connect interface cause warnings any more.",
-        "de": "Ein eingeschaltetes Gerät wird von selbst neu gelesen, sobald es bereit ist, und weder das noch Programme, die die Home-Connect-Schnittstelle nicht kennt, erzeugen noch Warnungen.",
-        "ru": "Включённый прибор сам считывается заново, как только он готов, и ни это, ни программы, неизвестные интерфейсу Home Connect, больше не вызывают предупреждений.",
-        "pt": "Um aparelho ligado volta a ser lido por si quando estiver pronto, e nem isso nem programas desconhecidos da interface Home Connect geram mais avisos.",
-        "nl": "Een ingeschakeld apparaat wordt vanzelf opnieuw gelezen zodra het klaar is, en noch dat noch programma's die de Home Connect-interface niet kent, geven nog waarschuwingen.",
-        "fr": "Un appareil allumé est relu de lui-même dès qu'il est prêt, et ni cela ni les programmes inconnus de l'interface Home Connect ne provoquent plus d'avertissements.",
-        "it": "Un elettrodomestico acceso viene riletto da solo appena è pronto, e né questo né i programmi sconosciuti all'interfaccia Home Connect causano più avvisi.",
-        "es": "Un electrodoméstico encendido se vuelve a leer solo en cuanto está listo, y ni eso ni los programas que la interfaz de Home Connect no conoce generan ya avisos.",
-        "pl": "Włączone urządzenie jest samo odczytywane ponownie, gdy tylko jest gotowe, a ani to, ani programy nieznane interfejsowi Home Connect nie powodują już ostrzeżeń.",
-        "uk": "Увімкнений прилад сам зчитується знову, щойно він готовий, і ні це, ні програми, невідомі інтерфейсу Home Connect, більше не спричиняють попереджень.",
-        "zh-cn": "家电开机后一旦就绪便会自动重新读取，此过程以及 Home Connect 接口不支持的程序都不再产生警告。"
-      },
-      "1.21.0": {
-        "en": "The error code list of an appliance now carries a translated name and an explanation, and a data point's selection list no longer keeps values the appliance stopped offering.",
-        "de": "Die Fehlercode-Liste eines Geräts trägt jetzt einen übersetzten Namen samt Erklärung, und die Auswahlliste eines Datenpunkts behält keine Werte mehr, die das Gerät nicht mehr anbietet.",
-        "ru": "Список кодов ошибок прибора теперь имеет переведённое имя и пояснение, а список выбора датапоинта больше не сохраняет значения, которые прибор уже не предлагает.",
-        "pt": "A lista de códigos de erro de um aparelho passa a ter um nome traduzido e uma explicação, e a lista de seleção de um ponto de dados deixa de manter valores que o aparelho já não oferece.",
-        "nl": "De foutcodelijst van een apparaat heeft nu een vertaalde naam en uitleg, en de keuzelijst van een datapunt houdt geen waarden meer vast die het apparaat niet meer aanbiedt.",
-        "fr": "La liste des codes d'erreur d'un appareil porte désormais un nom traduit et une explication, et la liste de choix d'un point de données ne conserve plus les valeurs que l'appareil n'offre plus.",
-        "it": "L'elenco dei codici di errore di un elettrodomestico ha ora un nome tradotto e una spiegazione, e l'elenco di scelta di un punto dati non conserva più valori che l'elettrodomestico non offre più.",
-        "es": "La lista de códigos de error de un electrodoméstico tiene ahora un nombre traducido y una explicación, y la lista de selección de un punto de datos ya no conserva valores que el aparato ya no ofrece.",
-        "pl": "Lista kodów błędów urządzenia ma teraz przetłumaczoną nazwę i wyjaśnienie, a lista wyboru punktu danych nie zachowuje już wartości, których urządzenie przestało oferować.",
-        "uk": "Список кодів помилок приладу тепер має перекладену назву та пояснення, а список вибору точки даних більше не зберігає значень, які прилад уже не пропонує.",
-        "zh-cn": "家电的故障代码列表现在有了翻译后的名称和说明，数据点的选择列表也不再保留家电已不再提供的值。"
+      "1.5.1": {
+        "en": "Fixed: Name of the objects are deleted",
+        "de": "Behoben: Name der Objekte werden gelöscht",
+        "ru": "Исправлено: Имя объектов удаляется",
+        "pt": "Corrigido: Nome dos objetos são excluídos",
+        "nl": "Opgelost: Naam van de objecten wordt verwijderd",
+        "fr": "Corrigé : Le nom des objets est supprimé",
+        "it": "Risolto: Nome degli oggetti viene cancellato",
+        "es": "Corregido: Se eliminan los nombres de los objetos",
+        "pl": "Naprawione: Usuwanie nazwy obiektów",
+        "uk": "Виправлено: Назви об'єктів видаляються",
+        "zh-cn": "修复：对象的名称被删除"
       }
     },
     "titleLang": {
@@ -142,8 +103,8 @@
     "platform": "Javascript/Node.js",
     "icon": "homeconnect.png",
     "enabled": true,
-    "extIcon": "https://raw.githubusercontent.com/krobipd/ioBroker.homeconnect/main/admin/homeconnect.png",
-    "readme": "https://github.com/krobipd/ioBroker.homeconnect/blob/main/README.md",
+    "extIcon": "https://raw.githubusercontent.com/iobroker-community-adapters/ioBroker.homeconnect/master/admin/homeconnect.png",
+    "readme": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect/blob/master/README.md",
     "docs": {
       "en": [
         "docs/en/README.md"
@@ -172,7 +133,64 @@
         "admin": ">=8.0.14"
       }
     ],
-    "messagebox": true
+    "messagebox": true,
+    "messages": [
+      {
+        "condition": {
+          "operand": "and",
+          "rules": [
+            "oldVersion<2.0.0",
+            "newVersion>=2.0.0"
+          ]
+        },
+        "title": {
+          "en": "Object IDs and datapoints change",
+          "de": "Objekt-IDs und Datenpunkte ändern sich",
+          "ru": "Меняются ID объектов и точки данных",
+          "pt": "IDs de objetos e pontos de dados mudam",
+          "nl": "Object-ID’s en datapunten veranderen",
+          "fr": "Les ID d’objets et les points de données changent",
+          "it": "Cambiano ID oggetti e datapoint",
+          "es": "Cambian los ID de objetos y los puntos de datos",
+          "pl": "Zmieniają się ID obiektów i punkty danych",
+          "uk": "Змінюються ID обʼєктів і точки даних",
+          "zh-cn": "对象 ID 和数据点已更改"
+        },
+        "text": {
+          "en": "Example: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Adjust scripts and VIS. Do not go back to 1.x.",
+          "de": "Beispiel: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Skripte und VIS anpassen. Nicht auf 1.x zurückgehen.",
+          "ru": "Пример: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Исправьте скрипты и VIS. Не возвращайтесь на 1.x.",
+          "pt": "Exemplo: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Ajuste scripts e VIS. Não volte para 1.x.",
+          "nl": "Voorbeeld: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Pas scripts en VIS aan. Niet terug naar 1.x.",
+          "fr": "Exemple : homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Adaptez scripts et VIS. Ne revenez pas à 1.x.",
+          "it": "Esempio: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Adatta script e VIS. Non tornare a 1.x.",
+          "es": "Ejemplo: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Adapte scripts y VIS. No vuelva a 1.x.",
+          "pl": "Przykład: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Dostosuj skrypty i VIS. Nie wracaj do 1.x.",
+          "uk": "Приклад: homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. Виправте скрипти та VIS. Не повертайтеся на 1.x.",
+          "zh-cn": "示例： homeconnect.0.012345678901234567.status.BSH_Common_Status_DoorState → homeconnect.0.kg49nsbbf-4567.status.doorOpen. 请调整脚本和 VIS。请勿回退到 1.x。"
+        },
+        "level": "warn",
+        "buttons": [
+          "agree",
+          "cancel"
+        ],
+        "link": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect/blob/master/docs/en/README.md#updating-from-1x",
+        "linkText": {
+          "en": "Details",
+          "de": "Details",
+          "ru": "Подробнее",
+          "pt": "Detalhes",
+          "nl": "Details",
+          "fr": "Détails",
+          "it": "Dettagli",
+          "es": "Detalles",
+          "pl": "Szczegóły",
+          "uk": "Докладніше",
+          "zh-cn": "详情"
+        }
+      }
+    ],
+    "nogit": true
   },
   "notifications": [
     {
