@@ -20,7 +20,7 @@ const FIXTURES = new Map();
 const APPLIANCES = [];
 for (const type of TYPES) {
   const fixture = JSON.parse(fs.readFileSync(path.join(DIR, `${type}.json`), "utf8"));
-  // Deterministic identity: the folder id comes from the type plate's E-number.
+  // Deterministic identity: the folder id is the model code (vib) plus the haId's last four characters.
   const haId = `SIEMENS-HCFIX${type.toUpperCase()}-0001`;
   FIXTURES.set(haId, fixture);
   APPLIANCES.push({
@@ -71,7 +71,7 @@ function route(url, init) {
   const method = (init && init.method) || "GET";
 
   if (pathname === "/security/oauth/device_authorization") {
-    // interval 0 → the adapter polls immediately; the sign-in flow runs for real.
+    // interval 0 → the adapter falls back to its 5 s default; the sign-in flow runs for real.
     return new Response(
       JSON.stringify({
         device_code: "FIXTURE-DEVICE-CODE",

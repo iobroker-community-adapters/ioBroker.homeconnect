@@ -852,7 +852,7 @@ describe("ApplianceSync metadata refresh", () => {
 
   it("does not replace primed objects whose metadata is unchanged (no wave on update)", async () => {
     const port = new FakePort();
-    // Objects as a previous adapter run created them (identical to the fresh transform).
+    // Objects from an older version (derived name, BSH key as desc): priming repairs them once.
     port.primeDevices = {
       [`${NS}.oven`]: {
         _id: "",
@@ -862,7 +862,7 @@ describe("ApplianceSync metadata refresh", () => {
       } as unknown as ioBroker.Object,
     };
     port.primeStates = {
-      // Exactly what the current version writes: derived label, BSH key as desc.
+      // An older version's shape: derived label, BSH key as desc.
       [`${NS}.oven.settings.childLock`]: {
         _id: "",
         type: "state",
@@ -886,7 +886,7 @@ describe("ApplianceSync metadata refresh", () => {
     await sync.primeFromObjects();
     port.extendCalls.length = 0;
     await sync.syncAppliances();
-    // An install already on the current version writes NO object at start —
+    // After priming repaired the object, the sync writes NO object —
     // neither a rewrite (the #387 flood: every state rewritten on every start)
     // nor a delete. Only the value is set.
     expect(port.extendCalls).not.toContain("oven.settings.childLock");
@@ -1454,7 +1454,7 @@ describe("ApplianceSync failure paths", () => {
     appliance(port, "HA-1", "Oven", { status: [] });
     await sync.syncAppliances();
 
-    // The `info.reachable` value alone is just a number nobody connects to the
+    // The `info.reachable` value alone is just a value nobody connects to the
     // green/grey dot — statusStates is what makes the object browser show it, and
     // it needs the FULL id, not the device-relative one.
     const device = port.objects.get("oven-1") as { common?: { statusStates?: { onlineId?: string } } };
@@ -1818,7 +1818,7 @@ describe("ApplianceSync start payload details", () => {
     expect(port.writes[0].body?.options).toEqual([{ key: "X.Option.HasValue", value: 40 }]);
   });
 
-  it("starts with defaults when no program is selected in the tree", async () => {
+  it("sends no start when no program is selected in the tree", async () => {
     const port = new FakePort();
     port.primeDevices = {
       [`${NS}.washer`]: { _id: "", type: "device", common: {}, native: { haId: "HA-1" } } as unknown as ioBroker.Object,
@@ -2057,8 +2057,7 @@ describe("ApplianceSync definition cache across restarts", () => {
     await sync.primeFromObjects();
     await sync.activateProgramOptions("washer", "HA-1", "P.A");
     expect(port.getCalls).toHaveLength(1);
-    // The old shape is cleared before the new one is written, because a deep
-    // merge would blend a list and an object into something unreadable.
+    // No clearing is needed: a record written over the old list replaces it in the merge.
     const stored = (port.objects.get("washer")?.native as { programOptions: Record<string, unknown> }).programOptions;
     // A merge on top of the old list would leave a list carrying extra fields —
     // it must be a plain entry, not an array in disguise.
@@ -2851,7 +2850,7 @@ describe("ApplianceSync display names", () => {
     expect(ack?.native).toMatchObject({ nameSource: "i18n" });
   });
 
-  it("stores the cloud name and the technical key on every item", async () => {
+  it("names every item itself, with an explanation, and remembers the name source", async () => {
     const port = new FakePort();
     const sync = new ApplianceSync(port);
     appliance(port, "HA-1", "Oven", {
@@ -3305,7 +3304,7 @@ describe("ApplianceSync metadata refresh without deleting (shelly model)", () =>
       settings: [{ key: "BSH.Common.Setting.ChildLock", value: false }],
     });
     await sync.syncAppliances();
-    // A later sync brings a changed shape (the API now sends bounds).
+    // A later sync brings a changed shape (the API now marks it read-only).
     port.getResponses.set("/api/homeappliances/HA-1/settings", {
       settings: [{ key: "BSH.Common.Setting.ChildLock", value: false, constraints: { access: "read" } }],
     });
@@ -3574,11 +3573,10 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     });
   });
 
-  it("does not re-stamp an object this version already repaired", async () => {
+  it('does not freeze an already translated name as a cloud name ("api")', async () => {
     const port = new FakePort();
     legacyTree(port);
-    // Repaired by a current version: it carries OUR translated name and the stamp
-    // that says where the name came from.
+    // Carries OUR translated name with a stamp from an older version.
     const stamped = {
       _id: "",
       type: "state",
@@ -3812,7 +3810,7 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
 
     // And it really is once. A RESTART primes from the repaired objects, so there
     // must be nothing left to write — otherwise every start would rewrite every
-    // datapoint that has a table entry (220 of them).
+    // datapoint that has a table entry.
     const restarted = new FakePort();
     restarted.primeDevices = { [`${NS}.washer`]: port.objects.get("washer") as ioBroker.Object };
     restarted.primeChannels = { [`${NS}.washer.status`]: port.objects.get("washer.status") as ioBroker.Object };
@@ -4815,15 +4813,20 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     // Measured before the fix: one getState per datapoint per start (929 on
     // the full inventory) to find out that nothing was to be migrated.
     const restarted = new ApplianceSync(port);
-    port.primeDevices = { [`${NS}.waescher`]: port.objects.get("waescher") as ioBroker.Object };
+    const deviceId = [...port.objects.entries()].find(([, o]) => (o as { type?: string }).type === "device")?.[0];
+    expect(deviceId).toBe("waescher-1");
+    port.primeDevices = { [`${NS}.waescher-1`]: port.objects.get("waescher-1") as ioBroker.Object };
     port.primeStates = Object.fromEntries(
       [...port.objects.entries()]
         .filter(([, o]) => (o as { type?: string }).type === "state")
         .map(([id, o]) => [`${NS}.${id}`, o as ioBroker.Object]),
     );
     port.getStateCalls.length = 0;
+    port.logs.length = 0;
     await restarted.migrateRenamedStates();
     expect(port.getStateCalls).toEqual([]);
+    // A crash in the migration reads nothing either — it must not pass for "nothing to move".
+    expect(port.logs.filter(l => l.startsWith("warn"))).toEqual([]);
   });
 
   it("still writes nothing for a null value of any other key", async () => {
@@ -6960,7 +6963,7 @@ describe("readable values (2026-09-28)", () => {
      *
      * @param port the port of {@link oven}
      * @param obj the option object
-     * @param cached the programs the definition cache holds at generation 4
+     * @param cached the programs whose cache entry is already at the current generation (5)
      */
     function withOption(port: FakePort, obj: ioBroker.Object, cached: string[]): void {
       port.primeStates = { [`${NS}.${id}`]: obj };

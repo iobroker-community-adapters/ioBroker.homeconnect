@@ -53,7 +53,7 @@ describe("mergedWith", () => {
 
 describe("ObjectMirror", () => {
   /**
-   * A mirror over one stored object.
+   * A mirror over a small stored tree (device, channel, state).
    *
    * @returns the mirror
    */

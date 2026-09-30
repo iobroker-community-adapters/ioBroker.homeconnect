@@ -76,7 +76,7 @@ describe("shortEnum", () => {
 });
 
 describe("stateIdForKey", () => {
-  it("maps kind to channel and lower-cases the name", () => {
+  it("maps kind to channel and lower-cases the first letter", () => {
     expect(stateIdForKey("BSH.Common.Status.OperationState")).toEqual({ channel: "status", id: "operationState" });
     expect(stateIdForKey("Dishcare.Dishwasher.Event.SaltNearlyEmpty")).toEqual({
       channel: "events",
@@ -1012,7 +1012,7 @@ describe("enum options without a default (audit 2026-09-24, D9)", () => {
   });
 });
 
-describe("on/off as a switch (README: on/off as booleans)", () => {
+describe("on/off as a switch (README: on/off as switches)", () => {
   const P = "BSH.Common.EnumType.PowerState";
 
   it("makes the power state a power switch: On is on, Off or Standby is off", () => {

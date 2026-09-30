@@ -1,4 +1,4 @@
-// On/off as a switch (README "on/off as booleans", decision 4): a key whose every known value is on or off-like is a
+// On/off as a switch (README "on/off as switches", decision 47): a key whose every known value is on or off-like is a
 // boolean datapoint, and the appliance's own value goes back on a write. Pure. The mapping follows Home Assistant's
 // `home_connect` power switch (homeassistant/components/home_connect/switch.py, HomeConnectPowerSwitch): On is on; Off
 // or Standby is off; switching off sends Off where the appliance offers it, else Standby.

@@ -83,7 +83,7 @@ export interface DeviceAuthorization {
   expiresAt: number;
 }
 
-/** Thrown when authorization ultimately fails (device code expired, denied, bad credentials). */
+/** Thrown when a device-flow or token request fails (OAuth error code, transport failure, malformed response). */
 export class OAuthError extends Error {
   /**
    * @param message human-readable error message
@@ -276,12 +276,13 @@ export class HomeConnectAuth {
    * Exchange a device code for a token once — returns the token on success,
    * `"pending"` while the user has not yet approved, `"slow_down"` when the
    * server asks for a longer poll interval (RFC 8628: increase by 5 s), and
-   * throws on a terminal error. The caller drives the polling loop/timer
+   * throws an OAuthError on every other answer (transport failure, 5xx, OAuth
+   * error code) — the caller decides which of them end the code. The caller drives the polling loop/timer
    * (so the poll uses the adapter's managed timers, not a busy-wait here).
    *
    * @param deviceCode the device code from {@link startDeviceFlow}
    * @returns the stored token, or "pending" / "slow_down" while approval is outstanding
-   * @throws {OAuthError} on a terminal error (expired, denied, access denied)
+   * @throws {OAuthError} on every answer that is not pending or slow_down
    */
   async pollForToken(deviceCode: string): Promise<StoredToken | "pending" | "slow_down"> {
     const res = await this.post(TOKEN_PATH, {

@@ -19,8 +19,9 @@ import { ID_SCHEME } from "./device-id";
  *
  * The rooms and functions (enum members) are NOT carried here: deleting the old tree removes its ids
  * from every enum, written back from the adapter's enum cache, and would take an id written before it
- * away again. The caller deletes through the fleet helper `moveWithEnums` (`enum-carry.ts`), which
- * reads the memberships first, deletes, and writes the new ids last; {@link enumMembersUnder} names
+ * away again. The caller deletes through the fleet helper `moveAllWithEnums` (`enum-carry.ts`, via the
+ * port's `deleteTreeCarryingEnums`), which reads the memberships once, deletes once, and writes the
+ * new ids last; {@link enumMembersUnder} names
  * the ids it has to carry. Until that delete the old device object carries `native.movingTo` as a
  * journal, and an interrupted move is completed on the next start.
  */
@@ -234,7 +235,7 @@ export async function copyDeviceTree(
   const complete = !fillOnly && (all[toFull]?.native as { idScheme?: unknown } | undefined)?.idScheme === ID_SCHEME;
   if (!complete) {
     const present = fillOnly ? await deps.states(`${toFull}.*`) : {};
-    // Shallow first, the device object itself LAST: its mark says the copy is whole.
+    // Shallow first, the device object after its children; the mark itself is written last, below.
     const tree = Object.entries(all)
       .filter(
         (entry): entry is [string, ioBroker.Object] => !!entry[1] && movedId(entry[0], fromFull, toFull) !== undefined,

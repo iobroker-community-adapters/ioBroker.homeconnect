@@ -11,11 +11,11 @@ import { fromShown, shownPresentation } from "./value-units";
 export interface WriteContext {
   /** The appliance's haId. */
   haId: string;
-  /** The state's channel (settings / commands / programs). */
+  /** The state's channel (settings / commands / options / programs). */
   channel: string;
   /** The within-channel state id (e.g. "powerState", "selectedProgram", "start"). */
   id: string;
-  /** The BSH key stored in the state's native (settings / commands / selectedProgram). */
+  /** The BSH key stored in the state's native (settings / commands / options / selectedProgram). */
   bshKey?: string;
   /** The full BSH candidate values stored in native, for resolving a short enum write back. */
   bshValues?: string[];
@@ -78,7 +78,7 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
 
   // A program option → set it on the selected program (the one you configure before
   // a start). Writing to the active program is state-gated by the appliance and 409s
-  // in most states, so a single predictable target is correct for v1.
+  // in most states, so a single predictable target is correct (decision 7).
   if (ctx.channel === "options" && ctx.bshKey) {
     const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
@@ -145,8 +145,10 @@ export function resolveValue(
  * refusing it (on debug, invisible) looked like the adapter had done nothing.
  *
  * Resolution order: the full value; the list-unique short value
- * ({@link shortEnumIn} — what the dropdown offers); the bare last segment, but
- * only when it names exactly one candidate. Two programs ending in the same
+ * ({@link shortEnumIn} — what the dropdown offers); the two-segment form when
+ * exactly one candidate has it (a program only seen, outside the write
+ * candidates); the bare last segment when it names exactly one candidate (or
+ * several with `collapse`, then the first). Two programs ending in the same
  * segment are different programs — the bare segment then names neither, and
  * {@link ambiguousCandidates} tells the user which full keys to use.
  *

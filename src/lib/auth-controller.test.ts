@@ -418,7 +418,7 @@ describe("AuthController remaining paths", () => {
     expect(h.port.notifications).toHaveLength(1);
 
     // The code expired → a fresh link. Notifying again per renewal would nag the
-    // user every ten minutes for the same outstanding action.
+    // user every five minutes for the same outstanding action.
     firePending(h);
     await flush();
     expect(h.port.notifications).toHaveLength(1);
@@ -466,7 +466,7 @@ describe("AuthController remaining paths", () => {
 
     h.timers.find(t => t.interval)?.cb();
     await flush();
-    // The access token dies after an hour; the periodic check is what keeps the
+    // An access token dies at its expiry (24 h at Home Connect, 60 s here); the periodic check is what keeps the
     // stream and the REST calls alive without the user noticing.
     expect(h.calls).toHaveLength(1);
     expect(h.port.savedTokens).toHaveLength(2);
@@ -615,7 +615,7 @@ describe("AuthController token persistence", () => {
     expect(h.port.savedTokens.map(t => t.refreshToken)).toEqual(["NEW"]);
   });
 
-  it("takes one last chance at teardown", async () => {
+  it("stores the pending token when the database accepts it again (the call main makes at teardown)", async () => {
     const h = harness([ok({ ...TOKEN_BODY, refresh_token: "NEW" })]);
     h.port.refreshToken = "OLD";
     h.port.saveFails = true;
@@ -943,7 +943,7 @@ describe("AuthController tells what Home Connect said (2026-09-26)", () => {
 });
 
 describe("AuthController pauses an unconfirmed sign-in after an hour (krobi 2026-09-26)", () => {
-  /** A device flow whose code is never confirmed: every poll says pending until the code expires. */
+  /** A device flow whose code is never confirmed: each code runs out by the clock, and every second link request is refused. */
   const EXPIRED = { error: "expired_token" };
 
   it("renews the link for an hour, then stops asking Home Connect", async () => {
@@ -953,14 +953,15 @@ describe("AuthController pauses an unconfirmed sign-in after an hour (krobi 2026
     }
     const h = harness(results);
     await h.ctl.start();
-    // Each round: the poll answers "expired", a new link follows.
+    // Each round: the code expired by the clock or the retry timer fires; every second link request is refused.
     // Ten minutes a round, until nothing is pending any more.
     for (let round = 0; round < 12 && h.timers.some(t => !t.interval); round++) {
       h.clock.t += 10 * 60_000;
       firePending(h);
       await flush();
     }
-    // Minute 0 and every ten minutes up to minute 50: six links, then the pause at minute 60.
+    // Minute 0 and every ten minutes up to minute 50: six device_authorization requests (three links, three refused
+    // starts), then the pause at minute 60.
     expect(h.calls.filter(c => c.path.endsWith("device_authorization"))).toHaveLength(6);
     expect(h.port.urls.at(-1)).toBe("");
     expect(h.timers.filter(t => !t.interval)).toEqual([]);

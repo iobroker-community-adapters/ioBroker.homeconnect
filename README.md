@@ -13,7 +13,7 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 ## Features
 
 - **All appliance data** — status, settings, events, the active and selected program, and program options.
-- **A complete tree** — every data point is created upfront and stays, also while the appliance is switched off.
+- **A complete tree** — every data point is created upfront and stays while the appliance is switched off.
 - **Live updates** through the Home Connect event stream — changes on the appliance show up within seconds.
 - **Full control** — switch settings, select a program, set its options, and start, stop, pause or resume it.
 - **Readable values** — on/off as switches, fixed choices as names in your ioBroker language, measurements as numbers with their unit.
@@ -63,7 +63,7 @@ After moving to a new ioBroker system the stored login cannot be read — sign i
 
 ## Updating from 1.x
 
-Version 2.0 is a new object tree: every appliance gets a readable device folder instead of the raw Home Connect tree. Your sign-in and Client ID are kept, and rooms, functions, aliases and recording settings move to the datapoint that takes the old one's place. Three things to know:
+Version 2.0 is a new object tree: every appliance gets a readable device folder instead of the raw Home Connect tree of 1.6.x. Your sign-in and Client ID are kept, and rooms, functions and aliases move to the datapoint that takes the old one's place; recording settings only in some cases (see the documentation). Three things to know:
 
 1. Make a backup before the update — going back to 1.x is not supported, the old tree is removed once it has been handed over.
 2. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
@@ -98,7 +98,7 @@ homeconnect.0.
     └── statistics.          — Runs and running time per program
 ```
 
-Which channels and data points an appliance gets depends on its type. Every data point in detail: [documentation](docs/en/README.md#the-object-tree).
+Which channels and data points an appliance gets depends on its type. Every channel in detail: [documentation](docs/en/README.md#the-object-tree).
 
 ## Usage
 
@@ -108,7 +108,7 @@ Which channels and data points an appliance gets depends on its type. Every data
 
 A choice can be written as its short value (`eco50`), in any capitalisation, or as the full Home Connect key; the data point confirms it in its short form.
 
-Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Settings and options are written straight back to the appliance; if the appliance rejects the options for a start, the program is started with its defaults instead.
+Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Settings and options are written straight back to the appliance; if the appliance rejects the options for a start, the adapter retries the start once with the program's defaults.
 
 ## Changelog
 
@@ -123,7 +123,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 - (krobipd) Changed: values arrive as switches, numbers with units and lists in the system language instead of raw Home Connect texts; encoded program data is decoded into readable datapoints
 - (krobipd) Changed: the adapter requires js-controller 7.2.2 and Admin 8.0.14 or newer now
 - (krobipd) New: sign-in panel with the code, a connection test and a reset; login and Client ID of 1.x are kept, only the Client Secret has to be entered once
-- (krobipd) Improved: rooms, functions, aliases and recordings move to the matching new datapoints on update, and the stored login is kept encrypted
+- (krobipd) Improved: rooms, functions and aliases move to the matching new datapoints on update, recordings where one datapoint lives on, and the login stays encrypted
 - (krobipd) Fixed: the object database no longer grows with every value change (#387), and the start stays within the Home Connect request limits (#327, #58)
 
 ### 1.6.1 (2026-05-12)

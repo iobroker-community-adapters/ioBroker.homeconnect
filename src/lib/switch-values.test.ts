@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { isSwitchKey, isSwitchValueSet, switchRole, switchState, switchValue } from "./switch-values";
 
 describe("on/off switches (decision 47)", () => {
-  it("takes a value set as a switch only for On plus an off-like value and nothing else", () => {
+  it("takes a value set as a switch only for On plus an off-like value, and nothing else but Undefined", () => {
     expect(isSwitchValueSet(["Off", "On"])).toBe(true);
     expect(isSwitchValueSet(["On", "Standby", "Undefined"])).toBe(true);
     expect(isSwitchValueSet(["X.EnumType.P.MainsOff", "X.EnumType.P.On"])).toBe(true);

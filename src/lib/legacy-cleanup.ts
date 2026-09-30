@@ -1,7 +1,7 @@
 // Decide which objects are left-overs of the previous adapter generation
-// (TA2k/Lucky-ESA ≤ 1.6.x) so the adapter can remove them itself on update —
-// the user must not clean up by hand. Pure — the caller performs the actual
-// recursive deletes — so the "what is legacy" logic is unit-testable without a
+// (TA2k/Lucky-ESA ≤ 1.6.x) so the adapter can sort them out itself on update
+// (delete, or hold for adoption when rooms/aliases point into them) — the user
+// must not clean up by hand. Pure — the caller deletes or holds them — so the "what is legacy" logic is unit-testable without a
 // live adapter (pattern: fakeroku's object-cleanup).
 //
 // The old generation built its trees directly under the appliance's haId
@@ -24,7 +24,7 @@ export interface CleanupObject {
 export const LEGACY_LEAF = /^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)+$/;
 
 /**
- * Plan the removal of the previous adapter generation's object trees.
+ * Find the previous adapter generation's object trees.
  *
  * A root (first path segment) is legacy when it is not one of ours (`auth`,
  * `info`, or a device object carrying `native.haId`) AND shows an old-generation
@@ -32,7 +32,7 @@ export const LEGACY_LEAF = /^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)+$/;
  * descendant whose leaf name is an underscored raw BSH key.
  *
  * @param objects the instance's objects, keyed by namespace-RELATIVE id
- * @returns the relative root ids to delete recursively (sorted, de-duplicated)
+ * @returns the relative legacy root ids (sorted, de-duplicated)
  */
 export function planLegacyCleanup(objects: Readonly<Record<string, CleanupObject>>): string[] {
   const ourDeviceRoots = new Set<string>();

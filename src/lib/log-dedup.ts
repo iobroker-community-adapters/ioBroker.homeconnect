@@ -1,6 +1,6 @@
 // Failure-log dedup policy — warn-once-per-category-then-debug, keyed on the
-// structured HTTP result (status + BSH error.key), not on error-message string
-// matching. homeconnect's HTTP layer already returns typed results, so the
+// endpoint kind (`restLogKey`) with a category taken from the HTTP status, not
+// from error-message string matching. homeconnect's HTTP layer already returns typed results, so the
 // category comes straight off the status code; a recovery re-arms the warn.
 // (Pattern mirrors govee's log-channel-fail, without govee's classifyError
 // string-matching, which its https.request boundary needs but this one does not.)

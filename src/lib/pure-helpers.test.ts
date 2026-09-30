@@ -39,7 +39,7 @@ describe("errMessage", () => {
     expect(errMessage(Symbol("late"))).toBe("Symbol(late)");
   });
   it("renders a thrown plain object instead of [object Object]", () => {
-    // A rejected fetch and an HTTP client's error object are plain objects; the
+    // An HTTP client's or a proxy layer's rejection can be a plain object; the
     // old helper logged "[object Object]" for them — no cause, no place.
     expect(errMessage({ code: "ECONNRESET", syscall: "read" })).toBe('{"code":"ECONNRESET","syscall":"read"}');
     expect(errMessage([1, 2])).toBe("[1,2]");
@@ -47,7 +47,7 @@ describe("errMessage", () => {
   it("falls back to the type tag where JSON.stringify cannot answer", () => {
     // A circular structure makes JSON.stringify THROW and a BigInt field too —
     // a logger that throws inside a catch block turns a handled error into a
-    // crash. (A function is not an object to the master form: it renders itself.)
+    // crash. (A thrown function renders as its type tag, never as its source text.)
     const circular: Record<string, unknown> = { a: 1 };
     circular.self = circular;
     expect(errMessage(circular)).toBe("[object Object]");

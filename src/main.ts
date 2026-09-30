@@ -155,7 +155,7 @@ export class Homeconnect extends utils.Adapter {
    * "setTimeout called, but adapter is shutting down".
    */
   private terminating = false;
-  /** warn-once-per-category dedup for REST failures (keyed on call source + status band). */
+  /** warn-once-per-category dedup for REST failures (keyed on the endpoint kind of the call, category from the status band). */
   private readonly restLog = new LogDedup();
   /**
    * The two halves of `info.connection`, owned here so the flag has ONE writer:
@@ -224,7 +224,8 @@ export class Homeconnect extends utils.Adapter {
       // reachable stamp flipped every online appliance to offline. The previous
       // adapter generation's trees are sorted out first (removed, or held for
       // their appliance when something is attached to them), then device trees
-      // move to the current id rule, then renamed datapoints WITHIN a device —
+      // move to the current id rule, then renamed datapoints WITHIN a device,
+      // then the history runs and the untyped leftovers (decision 48) —
       // all BEFORE priming, so the in-memory maps only ever see current ids; the
       // unreachable stamp comes last: the previous run's values survive in the
       // database, and nothing else corrects a stale "reachable".
@@ -632,9 +633,8 @@ export class Homeconnect extends utils.Adapter {
     const sync = this.sync;
     // This is the auth controller's sign-in callback. An error thrown out of it
     // lands in the controller's catch, which can only read it as a failed
-    // sign-in: "Stored login could not be refreshed … retrying" (with a token
-    // request every retry), or — on the device-flow path — a brand-new sign-in
-    // link with a new code. The chain reports its own failures.
+    // sign-in: at start-up "Stored login could not be refreshed … retrying"
+    // (with a token request every retry). The chain reports its own failures.
     let current = "appliance sync";
     try {
       if (this.terminating) {
@@ -693,7 +693,7 @@ export class Homeconnect extends utils.Adapter {
         this.noteStreamState(connected);
       },
       onUnauthorized: () => this.authCtl?.refreshNow() ?? Promise.resolve(false),
-      // One daily quota for the stream and REST: a 429 on either pauses both.
+      // One daily quota for the stream and REST: a 429 on the stream pauses REST too.
       onRateLimited: ms => this.armRatePause(ms),
       log: (level, msg) => this.log[level](msg),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
@@ -819,7 +819,8 @@ export class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Messages from the admin (the settings panel's "Test connection" button).
+   * Messages from the settings panel: "Test connection" (`checkConnection`),
+   * "Request a new sign-in link" (`requestSignIn`) and "Reset sign-in" (`resetLogin`).
    * Async body with a top-level try/catch; every command answers, so the panel
    * never waits on a message that fell through.
    *
@@ -1236,8 +1237,8 @@ export class Homeconnect extends utils.Adapter {
       // (js-controller#3472). A lost write leaves the whole tree green while the
       // adapter is off. Waiting is safe: the manifest declares no
       // `supportedMessages.stopInstance`, so the host grants the full stopTimeout.
-      // BOTH markers, not just the connection: `auth.signedIn` is written only by
-      // `publishConnection`, which never runs during teardown — so it stayed on
+      // BOTH markers, not just the connection: at runtime `auth.signedIn` is written
+      // only by `publishConnection`, which never runs during teardown — so it stayed on
       // `true` after every signed-in stop and the sign-in panel reported
       // "signed in" for an instance that was not running. Same rule as the
       // appliance markers: whatever is set at runtime is reset on the way out.

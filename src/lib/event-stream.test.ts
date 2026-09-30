@@ -81,7 +81,7 @@ describe("EventStream reconnect/backoff", () => {
     es.start();
     await flush();
     expect(fetchMock).not.toHaveBeenCalled();
-    // one reconnect scheduled at the 5s minimum (failures == 1 → MIN * 2^0? no: 2^1 = 10s)
+    // one reconnect scheduled: failures == 1 → 5 s × 2^1 = 10 s
     expect(h.timers.at(-1)?.ms).toBe(10_000);
   });
 
@@ -264,7 +264,7 @@ describe("EventStream lifecycle guards", () => {
     es.start();
     await flush();
     // A keep-alive carries no haId — routing it would take the "no haId" exit on
-    // every heartbeat, and every 90 s of silence would look like device traffic.
+    // every heartbeat, and every heartbeat (about every 55 s) would look like device traffic.
     expect(events).toEqual(["STATUS"]);
     es.stop();
   });
@@ -279,7 +279,7 @@ describe("EventStream remaining paths", () => {
     const es = new EventStream(deps);
     es.start();
     await flush();
-    // Production has no injected clock; the stability check must work there too.
+    // Production injects no clock; the backoff must work with the real one.
     expect(h.timers.at(-1)?.ms).toBe(10_000);
     es.stop();
   });
@@ -381,8 +381,8 @@ describe("EventStream connect watchdog + failure reporting", () => {
     const es = new EventStream(h.deps);
     es.start();
     await flush();
-    // Nothing else refreshes a token the stream rejects: REST only refreshes on
-    // its own 401s, and without events there are no REST calls.
+    // Otherwise only the periodic refresh near expiry would replace it, up to a day
+    // later: REST only refreshes on its own 401s, and without events there are no REST calls.
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     es.stop();
   });

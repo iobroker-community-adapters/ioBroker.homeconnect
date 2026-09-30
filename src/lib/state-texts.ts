@@ -1,6 +1,6 @@
-// The adapter's own texts for the datapoints it knows: a readable name where
-// Home Connect delivers none (the catalog events never appear in a REST answer),
-// and a short plain-language description for every datapoint whose meaning is
+// The adapter's own texts for the datapoints it knows: a readable name in every
+// language (it beats the cloud's, which comes in one language, and the catalog
+// events never appear in a REST answer), and a short plain-language description for every datapoint whose meaning is
 // the same on every appliance.
 //
 // Fleet rule (krobi 2026-09-02): the description is an explanation a user can
@@ -14,7 +14,7 @@
 
 import type { I18nKey } from "./i18n";
 
-/** The texts for one BSH key: our own name (events) and the explanation. */
+/** The texts for one BSH key: our own name and the explanation. */
 export interface StateText {
   /**
    * Translation key for `common.name`. A name of OURS always wins over the
@@ -61,8 +61,9 @@ const DESCALING_ADVANCE: I18nKey = "evDescalingAdvanceDesc";
 const CALC_N_CLEAN_ADVANCE: I18nKey = "evCalcNCleanAdvanceDesc";
 
 /**
- * BSH key → the adapter's texts. Every entry carries the adapter's own name AND
- * its explanation: since 2026-09-12 the own name beats the cloud's (the cloud
+ * BSH key → the adapter's texts. Every entry carries its explanation and — except
+ * the two program roots, named in value-transformer — the adapter's own name:
+ * since 2026-09-12 the own name beats the cloud's (the cloud
  * answers in whatever language it likes, ours reaches eleven).
  */
 const STATE_TEXTS: Readonly<Record<string, StateText>> = {
@@ -238,7 +239,7 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   "BSH.Common.Root.SelectedProgram": { desc: "selectedProgramDesc" },
   "BSH.Common.Root.ActiveProgram": { desc: "activeProgramDesc" },
   "BSH.Common.Command.AcknowledgeEvent": { name: "acknowledgeEvent", desc: "acknowledgeEventDesc" },
-  // ─── program options: our own name where the cloud sends none ──────────────
+  // ─── program options: our own name ────────────────────────────────────────
   // The cloud names an option only in a program definition, and those are only
   // fetchable while the appliance is ON. A dishwasher that spends the day
   // switched off would otherwise carry English auto-labels forever.
@@ -496,10 +497,9 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   },
 
   // ─── status / settings / commands the cloud never names ───────────────────
-  // Home Connect sends a localized `name` with program definitions only, so a
-  // status or setting of an appliance that is switched off would end up with the
-  // English label humanizeId derives from the key — in every language. These are
-  // FALLBACK names: a cloud text still wins whenever the appliance delivers one.
+  // The cloud's names for these are missing while the appliance is off and come
+  // in whatever language the cloud picks; the adapter's own name wins (see
+  // StateText.name).
   // Keys taken verbatim from the type source (Ressourcen/homeconnect/upstream-refs).
   "BSH.Common.Command.OpenDoor": { name: "cmdOpenDoor", desc: "cmdOpenDoorDesc" },
   "BSH.Common.Command.PartlyOpenDoor": { name: "cmdPartlyOpenDoor", desc: "cmdPartlyOpenDoorDesc" },
@@ -735,8 +735,8 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   },
   // Six siblings of the same family, found at krobi's installation on
   // 2026-09-12: they stood there with the English auto-label and NO explanation,
-  // because no table entry covered them. The fixtures do not carry these keys
-  // either, so no gate could see it.
+  // because no table entry covered them. At that time no fixture carried these
+  // keys, so no gate could see it.
   "BSH.Common.Status.Program.All.Count.Started": {
     name: "stProgramAllCountStarted",
     desc: "programAllCountStartedDesc",

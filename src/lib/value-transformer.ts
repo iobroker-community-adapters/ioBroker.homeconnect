@@ -78,9 +78,10 @@ export interface TransformedState {
    */
   value: ioBroker.StateValue | undefined;
   /**
-   * For a writable enum: the full BSH candidate values (e.g.
-   * `["…PowerState.On", "…PowerState.Off"]`). `shortEnum` is lossy, so these are
-   * stored in the state's `native` to resolve a short value back on write.
+   * The full BSH candidate values (e.g. `["…PowerState.On", "…PowerState.Off"]`):
+   * the cloud's list whenever it came, otherwise — for a writable enum — the
+   * catalogue's or the value itself. `shortEnum` is lossy, so these are stored in
+   * the state's `native` to resolve a short value back on write.
    */
   bshValues?: string[];
   /**
@@ -165,7 +166,7 @@ export interface ParsedConstraints {
  * Parse the `constraints` field of a raw BSH item/definition into the typed
  * shape both {@link transformItem} and {@link transformOptionDefinition}
  * consume. Superset of both callers' needs (a status item ignores
- * `displayvalues`/`default`); one boundary parser instead of two near-identical
+ * `default`); one boundary parser instead of two near-identical
  * inline blocks (the adapter's applyBshItem + applyOptionDefinition).
  *
  * @param rawConstraints the raw `constraints` value off an API record (unknown)
@@ -312,8 +313,9 @@ export function isDoorStatusKey(key: string): boolean {
 
 /**
  * Expand one BSH item into its idiomatic states. Almost always 1:1
- * ({@link transformItem}), with two deliberate exceptions from the design
- * principles (proper datapoint types, not raw enum text):
+ * ({@link transformItem}), with these exceptions:
+ * - an encoded program record (program-records.ts) or an appliance-internal key
+ *   (device-internal.ts, decision 48) expands to nothing;
  * - a door status becomes boolean `doorOpen` (+ `doorLocked` on appliance types
  *   whose door locks), a per-compartment door becomes `door<Compartment>Open`;
  * - the operation state additionally feeds the derived boolean `programRunning`.
@@ -399,10 +401,12 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
 /**
  * Transform a program-option *definition* (from `/programs/available/{programKey}`)
  * into a writable options state. Unlike {@link transformItem} the type comes from
- * `option.type` (a definition may carry no value), and the state is always writable
- * (options are settings you configure before a start). Enum options get their
- * `common.states` labels from the parallel `displayvalues[]`, and the full allowed
- * values in `bshValues` for resolving a short write back.
+ * `option.type` (a definition may carry no value), and the state is writable unless
+ * the definition marks it `access: "read"` (then it is a display value of the
+ * program). Enum options get `common.states` labels from the adapter's own table in
+ * the system language, else the cloud's `displayvalues[]`, else a readable English
+ * label; an on/off option becomes a switch. The full allowed values go in
+ * `bshValues` for resolving a short write back.
  *
  * @param opt the option definition
  * @returns the writable options state

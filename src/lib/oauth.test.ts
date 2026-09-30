@@ -107,9 +107,9 @@ describe("HomeConnectAuth.startDeviceFlow", () => {
     const { post } = fakePoster([ok({ device_code: "DC", user_code: "1234", verification_uri: "https://verify" })]);
     const auth = new HomeConnectAuth(CONFIG, post, () => NOW);
     const dev = await auth.startDeviceFlow();
-    // Both fields are optional in RFC 8628. Without the defaults the poll runs at
-    // interval NaN (never firing) and the code counts as expired immediately —
-    // the sign-in would be impossible instead of merely slower.
+    // `interval` is optional in RFC 8628, and a server may still omit `expires_in`.
+    // Without the defaults the poll would run at a NaN interval (a tight loop) and
+    // the code would never count as expired.
     expect(dev.intervalMs).toBe(5000);
     expect(dev.expiresAt).toBe(NOW + 600_000);
   });
@@ -176,11 +176,9 @@ describe("HomeConnectAuth.refresh", () => {
 });
 
 describe("HomeConnectAuth remaining paths", () => {
-  it("uses the real clock when none is injected", () => {
+  it("constructs without an injected clock", () => {
     const before = Date.now();
     const auth = new HomeConnectAuth(CONFIG, fakePoster([]).post);
-    // The default clock is what production runs on; an injected-only path would
-    // leave the real expiry arithmetic untested.
     expect(auth).toBeInstanceOf(HomeConnectAuth);
     expect(Date.now()).toBeGreaterThanOrEqual(before);
   });

@@ -546,7 +546,7 @@ describe("Homeconnect stored login", () => {
 });
 
 describe("Homeconnect sign-in wiring", () => {
-  it("primes, syncs, subscribes and opens the stream once signed in", async () => {
+  it("runs migrations and priming at start, then syncs, subscribes and opens the stream once signed in", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     await ctx.auths[0].port.onSignedIn();
@@ -1099,7 +1099,7 @@ describe("Homeconnect state changes", () => {
     expect(ctx.syncs[0].handleWrite).not.toHaveBeenCalled();
   });
 
-  it("ignores a write before the sign-in built the sync", async () => {
+  it("ignores a write without throwing when no client id is configured", async () => {
     const ctx = setup({ clientID: "" });
     await ctx.i.onReady();
     expect(() => ctx.i.onStateChange("homeconnect.0.x.y.z", { val: 1, ack: false })).not.toThrow();
@@ -1128,9 +1128,8 @@ describe("Homeconnect onUnload", () => {
     await ctx.i.onReady();
     // The sign-in chain is fire-and-forget. Stop the adapter while it is between
     // two steps: nothing after the guard may run on a shutting-down instance.
-    // In the LAST step of the chain: the per-step guard has no iteration left to
-    // stop, so only the standalone guard in front of the subscribe can — which is
-    // exactly why it is not redundant.
+    // After the LAST step of the chain: the guard after the appliance read is the
+    // only one before the subscribe — which is exactly why it is not redundant.
     ctx.syncs[0].syncAppliances.mockImplementation(() => {
       ctx.i.onUnload(() => undefined);
       return Promise.resolve(true);
@@ -1149,7 +1148,7 @@ describe("Homeconnect onUnload", () => {
 
     await new Promise<void>(resolve => ctx.i.onUnload(() => resolve()));
 
-    // Only `publishConnection` ever writes this marker, and it does not run during
+    // Before the fix only `publishConnection` wrote this marker, and it does not run during
     // teardown — so it stayed `true` after every signed-in stop and the sign-in
     // panel showed "signed in" for an instance that was not running. Same rule as
     // the appliance markers: what is set at runtime is reset on the way out.
@@ -1423,7 +1422,7 @@ describe("Homeconnect port wiring", () => {
     expect(httpMock.putJson).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing on sign-in when the sync was never built", async () => {
+  it("skips the appliance read but still subscribes and opens the stream when the sync was never built", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     ctx.i.sync = undefined;
@@ -1881,7 +1880,7 @@ describe("Homeconnect event-stream outage", () => {
 
     // Now a routine token refresh: same values, so NOTHING may be written.
     // Writing unconditionally puts a change event and a history entry on every
-    // refresh — and that check runs every ten minutes.
+    // token refresh (the check runs every ten minutes).
     await (ctx.auths[0].port.setConnected as (c: boolean) => Promise<void>)(true);
     await settle();
     expect(writes("info.connection")).toBe(connBefore);
@@ -2058,7 +2057,7 @@ describe("Homeconnect event-stream outage", () => {
     // Between the last `terminating` check and startEventStream() there is an
     // await (subscribeStatesAsync). A stop landing in that window must not leave
     // a live stream behind on a shut-down instance — the guard sits in
-    // startEventStream itself, not only in the start-up loop above it.
+    // startEventStream itself, not only in onAuthenticated.
     const ctx = setup();
     await ctx.i.onReady();
     ctx.i.subscribeStatesAsync.mockImplementation(() => {

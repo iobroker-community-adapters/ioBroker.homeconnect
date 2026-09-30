@@ -2,16 +2,18 @@
 // testable unit (a fake AuthPort + injected timers stand in for the adapter).
 // Owns the token, the periodic refresh, the device flow including its polling,
 // and the recovery paths: a transient refresh failure retries with the login
-// kept; a revoked login (invalid_grant, at start-up OR at runtime) drops to a
-// fresh device-flow sign-in; an expired or rejected sign-in link is replaced by
-// a fresh one automatically, so the link in the admin panel is always valid.
+// kept; a login that cannot come back (invalid_grant, or a configuration
+// refusal — at start-up OR at runtime) drops to a fresh device-flow sign-in; an
+// expired or rejected sign-in link is replaced automatically for at most
+// SIGN_IN_WINDOW_MS, then the sign-in pauses until the panel asks for a new
+// link; a configuration refusal waits 5 minutes.
 
 import { needsRefresh, OAuthError, REFRESH_CHECK_INTERVAL_MS } from "./oauth";
 import type { HomeConnectAuth, DeviceAuthorization, StoredToken } from "./oauth";
 import { errMessage } from "./pure-helpers";
 import { refusalText, signInHint } from "./sign-in-help";
 
-/** Retry the initial sign-in this soon after a transient (non-auth) refresh failure. */
+/** First wait after a failed token refresh (start-up or runtime); the back-off doubles from here up to REFRESH_BACKOFF_MAX_MS. */
 export const AUTH_RETRY_MS = 30 * 1000;
 /**
  * Cap for the growing wait between FAILED token-refresh attempts. The token
@@ -208,8 +210,9 @@ export class AuthController {
 
   /**
    * Obtain a valid access token: reuse the stored refresh token if there is one,
-   * otherwise run the device flow. A refresh that fails because the token was
-   * revoked (`invalid_grant`) drops to a fresh device-flow sign-in; a transient
+   * otherwise run the device flow. A refresh that fails because the login cannot
+   * come back (`invalid_grant`, or a configuration refusal such as
+   * `invalid_client`) drops to a fresh device-flow sign-in; a transient
    * failure (network / 5xx / timeout) keeps the stored token and just retries,
    * so a blip during a restart does not force the user to re-authorise.
    */
@@ -588,8 +591,8 @@ export class AuthController {
   /**
    * Refresh the access token now, sharing one in-flight attempt across concurrent
    * callers (the periodic timer and any 401 from a REST call). A transient
-   * failure keeps the login and warns once (repeats → debug); a revoked login
-   * (`invalid_grant`) drops the dead token — which also stops the event stream's
+   * failure keeps the login and warns once (repeats → debug); a login that cannot
+   * come back (`invalid_grant`, or a configuration refusal) drops the dead token — which also stops the event stream's
    * fetches — and starts a fresh device-flow sign-in.
    *
    * @returns whether a fresh token was obtained

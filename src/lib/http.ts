@@ -1,7 +1,7 @@
 // Thin fetch-based HTTP for the Home Connect API. Node 22 global `fetch` +
-// `AbortSignal.timeout` — no extra dependency, no manual timer to leak. The REST
-// (GET/PUT with a bearer token) layer is added on top of this when devices are
-// fetched; for now it provides the OAuth token-endpoint transport.
+// `AbortSignal.timeout` — no extra dependency, no manual timer to leak.
+// `postForm` for the OAuth endpoints, `getJson`/`putJson`/`deleteJson` over one
+// `requestJson` core for the REST calls.
 
 import type { FormPostResult } from "./oauth";
 import { errMessage } from "./pure-helpers";
@@ -61,7 +61,7 @@ export async function postForm(
   return { status: res.status, ok: res.ok, body: parsed.json };
 }
 
-/** Result of a JSON GET: status, ok, the unwrapped `data`, and a BSH error key on failure. */
+/** Result of a bearer-token JSON request (GET/PUT/DELETE): status, ok, the unwrapped `data`, and an error key on failure. */
 export interface JsonResult {
   /** HTTP status code (0 on a transport error). */
   status: number;
@@ -69,7 +69,7 @@ export interface JsonResult {
   ok: boolean;
   /** The unwrapped `data` field of the `{ data: … }` envelope, or undefined on failure. */
   data: unknown;
-  /** The BSH `error.key` (or a status string) on failure, else undefined. */
+  /** The BSH `error.key`, `status <n>`, `network_error: …` or `response too large` on failure, else undefined. */
   error: string | undefined;
   /** On a 429, the `Retry-After` window in ms (from the header), else undefined. */
   retryAfterMs?: number;
@@ -225,7 +225,7 @@ async function toJsonResult(res: Response): Promise<JsonResult> {
 /**
  * Parse a `Retry-After` header into ms. Home Connect sends it as a number of
  * seconds. A missing or non-numeric value yields undefined (the caller then
- * applies its own floor).
+ * applies its own fallback pause).
  *
  * @param header the raw `Retry-After` header value
  * @returns the delay in ms, or undefined

@@ -264,7 +264,8 @@ describe("copyDeviceTree", () => {
     db.written.length = 0;
     const again = await copyDeviceTree(deps, "sx87tx02ce-60", "sx87tx02ce-5775");
     expect(again.datapoints).toBe(0);
-    // Only the aliases are pointed once more (they are rewritten on every run, idempotently).
+    // Nothing is written in the namespace, and the aliases, which already point at the new tree, are not rewritten.
+    expect(again.aliases).toBe(0);
     expect(db.written.filter(id => id.startsWith(NS))).toEqual([]);
     expect(db.states.get(`${NEW}.status.operationState`)?.val).toBe("ready");
   });

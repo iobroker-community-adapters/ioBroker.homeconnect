@@ -114,8 +114,8 @@ export interface AdapterPort {
   getEnums(): Promise<Record<string, unknown>>;
   /**
    * Delete a whole tree (namespace-relative root) and carry the room and function assignments of
-   * its objects to the ids that take their place — through the fleet helper `moveWithEnums`, which
-   * reads the assignments before the delete and writes them after it.
+   * its objects to the ids that take their place — through the fleet helper `moveAllWithEnums`, which
+   * reads the enums once before the delete and writes every affected enum once after it.
    *
    * @returns how many room/function entries now list one of the new ids
    */
@@ -581,7 +581,7 @@ export class ApplianceSync {
    * device ids that reconnected WHILE their pass was running: that pass may have
    * read the appliance before the reconnect, so one more pass follows it. A
    * CONNECTED dropped by the serialisation left the appliance unread until its
-   * next reconnect or the hourly outage re-read.
+   * next reconnect or the re-read after an event-stream outage (at most one per hour).
    */
   private readonly resyncPending = new Set<string>();
   /** device id → epoch-ms the running (or last) data pass started. */
@@ -598,8 +598,9 @@ export class ApplianceSync {
   /** device id → the appliance's display name (from the app) — for readable log lines. */
   private readonly nameByDeviceId = new Map<string, string>();
   /**
-   * device id → program key → its option state ids. The definition cache: each
-   * program definition is fetched ONCE, then remembered here and persisted in the
+   * device id → program key → its cached definition (option ids, per-program keys,
+   * generation). The definition cache: each program definition is fetched once per
+   * cache generation, then remembered here and persisted in the
    * device object's native (an internal attribute, not a datapoint) — so a program
    * change or re-sync costs no definition request at all, which keeps the daily
    * request budget untouched and sidesteps the "wrong operation state" refusal
@@ -633,15 +634,16 @@ export class ApplianceSync {
   /**
    * device id → setting key → its static definition, persisted in the device
    * object's native. Fetched once per setting per appliance; every later start
-   * and re-sync costs nothing. No generation counter: this cache is new, so it
-   * cannot hold anything written by an older version — one gets added if a future
-   * transform change ever needs a forced refresh, with the reason.
+   * and re-sync costs nothing. No generation counter: the cache stores the raw
+   * definition (type, constraints), not a transformed shape, so a transform change
+   * needs no forced refresh — one gets added if a future change ever does, with the
+   * reason.
    */
   private readonly settingDefs = new Map<string, Record<string, SettingDef>>();
   /**
    * device id → the appliance's program number → the full program key. The
-   * numbers are the appliance family's own (cotton is 28673 on a washer and 31495
-   * on a washer-dryer), so they are learned per appliance and kept in the device
+   * numbers belong to the appliance family and series (cotton is 28673 on a washer,
+   * 31495 on some washer-dryers), so they are learned per appliance and kept in the device
    * object's `native.programUids`.
    */
   private readonly programUids = new Map<string, Record<string, string>>();
@@ -668,8 +670,8 @@ export class ApplianceSync {
    * appliance known, "all connected" was true — then false as the second, offline
    * one arrived. A value that was never true must not reach a subscriber.
    *
-   * The derivation itself stays in `setReachable` (decision 11: one counting
-   * place, a second one would drift).
+   * The derivation itself stays in `writeDeviceRollup`, fed by `setReachable`
+   * (decision 11: one counting place, a second one would drift).
    */
   private rollupBatched = false;
   /**
@@ -701,8 +703,9 @@ export class ApplianceSync {
   private readonly idDecided = new Set<string>();
   /**
    * Roots of the previous adapter generation (community 1.6.x) that wait for their appliance: they
-   * are adopted — recordings, rooms, functions and aliases carried to the new datapoints — once the
-   * appliance list has created the new tree ({@link adoptLegacyTrees}). No tree pass touches them.
+   * are adopted — rooms, functions and aliases carried to the new datapoints, a recording only where
+   * exactly one successor of the same value type takes its place — after the appliance's first full
+   * data pass ({@link adoptLegacyTree}). No tree pass touches them.
    */
   private readonly pendingLegacyRoots = new Set<string>();
 
@@ -896,7 +899,8 @@ export class ApplianceSync {
             );
           }
           // Restore the persisted definition cache — across restarts no program
-          // definition is ever fetched again unless a new program appears.
+          // definition is fetched again unless a new program appears or the cache
+          // generation was raised.
           if (isRecord(native.programOptions)) {
             const defs: Record<string, ProgramDef> = {};
             for (const [program, entry] of Object.entries(native.programOptions)) {
@@ -1234,14 +1238,15 @@ export class ApplianceSync {
 
   /**
    * Bring datapoints an older version created up to the current naming, without
-   * a single cloud request: before v1.15.0 a state's name was the bare id and it
+   * a single cloud request: before v1.14.0 a state's name was the bare id and it
    * carried no desc, and only the datapoints the appliance happens to report
    * right now pass through the sync that would fix them. An appliance that is
    * switched off, and every event datapoint, would keep its bare id forever.
    *
    * A stored name that is NOT the bare id came from the cloud (older versions
-   * had no derived labels at all) — it is kept and marked as such, so the
-   * derived label never replaces it later.
+   * had no derived labels at all) — it is kept and marked `api`, so a derived
+   * label never replaces it later, unless the adapter has a name of its own,
+   * which wins.
    *
    * The label is derived through {@link expandBshItem}, not `transformItem`: one
    * BSH key can carry SEVERAL datapoints (a door status becomes `doorOpen` +
@@ -1267,7 +1272,7 @@ export class ApplianceSync {
         await this.refreshLabel(rel, known, t.common, t.nameSource);
         continue;
       }
-      // Written before v1.15.0: a name that is not the bare id came from the
+      // Written before v1.14.0: a name that is not the bare id came from the
       // cloud (older versions had no derived labels) — keep it and mark it, so
       // a derived label never replaces it.
       // A name of OURS wins over one the cloud once delivered: it reaches every
@@ -1560,7 +1565,8 @@ export class ApplianceSync {
    * first, then the copy ({@link copyDeviceTree}: objects with their recording settings, values,
    * alias targets, the mark last), then the delete of the old tree, which carries the room and
    * function assignments. A start that finds the journal again finds the copy complete and only
-   * finishes what is left.
+   * finishes what is left — as long as the delete has not begun: the recursive delete removes the
+   * old device object, and with it the journal, first.
    *
    * A tree whose stored native carries neither a model code nor an E-number yet keeps its id this
    * run; the next sync persists those fields and the next start moves it. The trees are handled in
@@ -1651,8 +1657,9 @@ export class ApplianceSync {
 
   /**
    * Move one appliance tree: journal, copy, delete with the room and function assignments carried.
-   * A failure leaves the journal in place — the next start tries again, and this run keeps the
-   * appliance where it was.
+   * A failure before the delete leaves the journal in place — the next start tries again, and this
+   * run keeps the appliance where it was. The recursive delete removes the old device object (and
+   * its journal) first.
    *
    * @param from the current device id
    * @param to the new device id
@@ -1775,6 +1782,8 @@ export class ApplianceSync {
    * along and continues its series under the old id (`aliasId`); a reshaped
    * state (text → boolean pair) starts fresh and gets its live value from the
    * next sync. Rooms, functions and aliases follow to the new place either way.
+   * The datapoints of keys that no longer become one (encoded program records,
+   * decision 40; appliance-internal keys, decision 48) are deleted.
    */
   async migrateRenamedStates(): Promise<void> {
     try {
@@ -2282,8 +2291,8 @@ export class ApplianceSync {
    * @param native the BSH parts for the state's `native`
    * @param native.bshKey the fully-qualified BSH key, when there is one
    * @param native.bshValues the full BSH candidate values of a writable enum
-   * @param nameSource where `common.name` came from (remembered in native, so a
-   *   later start can tell an auto-name from a rename by the user)
+   * @param nameSource where `common.name` came from (remembered in native, so
+   *   after a restart a derived label still never replaces a cloud name)
    * @param channelLabel the channel's name when it is none of the fixed channels (a program's statistics)
    * @returns the namespace-relative state id
    */
@@ -2407,8 +2416,9 @@ export class ApplianceSync {
 
   /**
    * Create (once) and set the per-device online indicator, fed by the appliance
-   * list's `connected` flag and the CONNECTED / DISCONNECTED / DEPAIRED stream
-   * events — so stale values are distinguishable from live ones.
+   * list's `connected` flag and the CONNECTED / PAIRED / DISCONNECTED stream
+   * events (DEPAIRED removes the tree, marker included) — so stale values are
+   * distinguishable from live ones.
    *
    * @param deviceId the id-safe device path segment
    * @param reachable whether the appliance is currently connected to Home Connect
@@ -2602,9 +2612,9 @@ export class ApplianceSync {
         () => this.syncItems(deviceId, haId, "/status", "status"),
         () => this.syncItems(deviceId, haId, "/settings", "settings"),
         () => this.syncPrograms(deviceId, haId),
-        // The status came before the program list: the datapoints that name a
-        // program by its number are drawn again against the list now complete, so
-        // the next pass finds nothing to change.
+        // The status came before the program list: the history and last-run
+        // datapoints that name a program by its number are drawn again against the
+        // list now complete (a favourite program is drawn again on the next pass).
         () => this.drawProgramNames(deviceId),
         () => this.ensureCommands(deviceId, haId),
       ];
@@ -2744,10 +2754,11 @@ export class ApplianceSync {
    *
    * One request per setting per appliance, then never again — the cache lives in
    * the device object's native. **Strictly sequential**, like
-   * {@link syncProgramDefs}: that is what keeps the burst limit (10/s, whose 429
-   * arrives with no `Retry-After`) out of reach; a 429 would still land in the
-   * transport's existing rate pause. A failed fetch leaves the entry uncached and
-   * is retried on a later sync rather than being remembered as "has none".
+   * {@link syncProgramDefs}; the transport's 100 ms minimum gap keeps the burst
+   * limit (10/s, whose 429 arrives with no `Retry-After`) out of reach, and a 429
+   * would still land in the transport's existing rate pause. A transient failure
+   * leaves the entry uncached and is retried on a later sync rather than being
+   * remembered as "has none"; a refusal for good waits FAILED_DEF_RETRY_MS.
    *
    * @param deviceId the id-safe device path segment
    * @param haId the appliance's haId
@@ -2813,8 +2824,10 @@ export class ApplianceSync {
    * A new state creates the channel + object; a known one normally only updates
    * the value. A REST-sourced item additionally refreshes the object's metadata
    * when it changed (new allowed values, changed bounds, improved transform in a
-   * newer adapter version) — stream events never touch objects, so the old
-   * adapter's object-tree flood (#387) stays impossible.
+   * newer adapter version) — stream events never refresh an object's metadata
+   * (they may create a missing datapoint, add a newly seen value to its list
+   * once, and update its label once), so the old adapter's object-tree flood
+   * (#387) stays impossible.
    *
    * @param deviceId the id-safe device path segment
    * @param raw the raw status / setting / event item
@@ -3189,7 +3202,8 @@ export class ApplianceSync {
    * else the one the appliances' own descriptions give for its type (program-uids.ts).
    * A described program the cloud also names for this appliance by the same last
    * segment IS that program — the cloud's key is taken, so the value matches the
-   * program lists ("…Spin.Spin.SpinDrain" is reported as "…Program.Spin").
+   * program lists ("…WasherDryer.Program.Cotton.Cotton.Cotton" is reported as
+   * "…WasherDryer.Program.Cotton").
    *
    * @param deviceId the id-safe device path segment
    * @param uid the appliance's program number
@@ -3631,7 +3645,8 @@ export class ApplianceSync {
    * the appliance, a process phase no source lists). Its label is ADDED to the
    * object once — a merge adds keys, so nothing is cleared and nothing else is
    * touched — and the value joins `native.seenValues`, so every later transform
-   * keeps it in the list. This is the only object write a value item can cause,
+   * keeps it in the list. Apart from creating a missing datapoint and the
+   * one-time label update, this is the only object write a value item can cause,
    * and it happens once per new value, never per event.
    *
    * @param fullId the namespace-relative state id
@@ -3987,9 +4002,10 @@ export class ApplianceSync {
 
   /**
    * Fetch the option definitions of programs the cache does not know yet —
-   * each program is fetched ONCE, ever (the cache persists in the device
-   * object's native and is restored at start). A failed fetch is simply
-   * retried on a later sync; nothing is removed.
+   * each program is fetched once per cache generation (the cache persists in the
+   * device object's native and is restored at start). A transient failure is
+   * retried on a later sync; a refusal for good waits FAILED_DEF_RETRY_MS, an
+   * unsupported program is not asked again this run. Nothing is removed.
    *
    * @param deviceId the id-safe device path segment
    * @param haId the appliance's haId
@@ -4056,7 +4072,8 @@ export class ApplianceSync {
 
   /**
    * Arm the write gate with the selected program's option ids — from the cache;
-   * only a program the cache has never seen costs a definition request.
+   * only a program the cache lacks, or holds from an older generation, costs a
+   * definition request.
    * Option states of other programs stay untouched (their objects are the
    * union across all programs and never disappear).
    *
@@ -4179,8 +4196,8 @@ export class ApplianceSync {
 
   /**
    * The union of an existing option state and a fresh definition of the same
-   * option (from another program): allowed values united (existing display
-   * labels win), numeric bounds widened, unit/step kept when the fresh
+   * option (from another program): allowed values united (the adapter's own
+   * label first, then the fresh definition's, then a stored one), numeric bounds widened, unit/step kept when the fresh
    * definition lacks them.
    *
    * @param fullId the option's namespace-relative state id
@@ -4228,8 +4245,8 @@ export class ApplianceSync {
         const short = shortEnum(v);
         // The adapter's own label, in the system language, beats whatever stands:
         // a stored label is the cloud's (English on a German installation — "1400
-        // rpm") or an older adapter's bare short value. Only a value the table
-        // does not know keeps the label it has.
+        // rpm") or an older adapter's bare short value. A value the table does not
+        // know takes the fresh definition's label, else keeps the one it has.
         const stored = exStates[short];
         states[short] =
           ownValueLabel(v, lang) ??
@@ -4410,7 +4427,8 @@ export class ApplianceSync {
         );
         await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
       } else if (typeof value === "boolean" && ctx.bshValues && ctx.bshValues.length > 0) {
-        // A switch the appliance cannot be set to remotely (a power state without Off or Standby): the user asked for
+        // A switch the appliance cannot be set to remotely (no On to switch on, or none of Off, Standby, MainsOff to
+        // switch off): the user asked for
         // something — the answer goes to info, and the datapoint goes back to what the appliance really has.
         this.port.log.info(
           `Write to ${rel} not sent: the appliance cannot be switched ${value ? "on" : "off"} remotely.`,
@@ -4518,8 +4536,8 @@ export class ApplianceSync {
   }
 
   /**
-   * Follow-up after a write was sent: a program change reloads its option
-   * definitions; a program start the appliance rejected (409) is retried once
+   * Follow-up after a write was sent: a program change re-arms the option write
+   * gate (from the cache; a definition is fetched only when missing); a program start the appliance rejected (409) is retried once
    * with defaults.
    *
    * @param channel the written state's channel
