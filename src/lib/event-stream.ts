@@ -5,7 +5,7 @@
 
 import { SseParser, type SseEvent } from "./sse-parser";
 import { errMessage, isRecord } from "./pure-helpers";
-import { errorDescription, errorKey, readBodyCapped, retryAfterMs } from "./http";
+import { errorDescription, errorKey, rateLimitText, readBodyCapped, retryAfterMs } from "./http";
 
 /** SSE endpoint for all appliances (the "all" stream also carries PAIRED/DEPAIRED). */
 const EVENTS_PATH = "/api/homeappliances/events";
@@ -49,9 +49,13 @@ const CONNECT_TIMEOUT_MS = 30_000;
  * @param refusal the BSH error key and description of the answer, if any
  * @param refusal.key the BSH error key
  * @param refusal.description Home Connect's description
+ * @param retryMs on a 429, the Retry-After window in ms
  * @returns the reason for the log line and the connection test
  */
-function refusedReason(status: number, refusal: { key?: string; description?: string } = {}): string {
+function refusedReason(status: number, refusal: { key?: string; description?: string } = {}, retryMs?: number): string {
+  if (status === 429) {
+    return rateLimitText(refusal.description, retryMs);
+  }
   const said = [refusal.key, refusal.description].filter(Boolean).join(": ");
   const detail = said ? ` (${said})` : "";
   if (status >= 500 || status === 404) {
@@ -59,9 +63,6 @@ function refusedReason(status: number, refusal: { key?: string; description?: st
   }
   if (status === 401 || status === 403) {
     return `HTTP ${status}${detail}, the login was rejected`;
-  }
-  if (status === 429) {
-    return `HTTP 429${detail}, the Home Connect rate limit`;
   }
   return `HTTP ${status}${detail}`;
 }
@@ -113,6 +114,11 @@ export interface EventStreamDeps {
    * quota is shared with REST, so the adapter pauses REST too.
    */
   onRateLimited?: (ms: number) => void;
+  /**
+   * Wait for a place in the adapter's request budget (Home Connect counts opening the stream as a request);
+   * resolves false when the adapter is shutting down.
+   */
+  takeSlot?: () => Promise<boolean>;
   /** Log sink. */
   log: (level: "debug" | "info" | "warn", msg: string) => void;
   /** Schedule a callback (the adapter's managed setTimeout). */
@@ -234,6 +240,10 @@ export class EventStream {
 
   /** One connection: stream frames to the parser until it closes or errors. */
   private async streamOnce(): Promise<void> {
+    // Opening the stream is a request like any other: it takes its place in the adapter's request budget.
+    if ((this.deps.takeSlot && !(await this.deps.takeSlot())) || this.stopped) {
+      return;
+    }
     const token = this.deps.getAccessToken();
     if (!token) {
       this.failures++;
@@ -260,9 +270,10 @@ export class EventStream {
         // holds on to one whose body is neither read nor cancelled until the
         // garbage collector finds it, once per retry of a failing spell.
         const refusal = await this.readRefusedKey(res, abort);
-        this.noteConnectFailure(refusedReason(res.status, refusal));
+        const retryMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
+        this.noteConnectFailure(refusedReason(res.status, refusal, retryMs));
         if (res.status === 429) {
-          const pause = retryAfterMs(res.headers.get("retry-after")) ?? RATE_LIMIT_FALLBACK_MS;
+          const pause = retryMs ?? RATE_LIMIT_FALLBACK_MS;
           this.rateLimitedUntil = this.now() + pause;
           this.deps.onRateLimited?.(pause);
         }

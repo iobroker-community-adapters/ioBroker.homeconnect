@@ -262,6 +262,36 @@ export function errorKey(body: Record<string, unknown>): string | undefined {
 }
 
 /**
+ * A 429 in words a user reads: how long Home Connect blocks and which limit was hit. The limit comes from
+ * Home Connect's description (`The rate limit "50 calls in 1 minute" was reached. Requests are blocked during
+ * the remaining period of 54 seconds.`); the duration from there or from the Retry-After header.
+ *
+ * @param description Home Connect's `error.description`, if any
+ * @param retryMs the Retry-After window in ms, if any
+ * @returns e.g. `Home Connect blocks requests for 54 s (limit: 50 calls in 1 minute)`
+ */
+export function rateLimitText(description?: string, retryMs?: number): string {
+  const match = /rate limit "([^"]+)".*?(\d+) seconds/.exec(description ?? "");
+  const seconds = match ? Number(match[2]) : retryMs === undefined ? undefined : Math.round(retryMs / 1000);
+  const limit = match ? ` (limit: ${match[1]})` : description ? ` (${description})` : "";
+  return `Home Connect blocks requests${seconds === undefined ? "" : ` for ${spokenDuration(seconds)}`}${limit}`;
+}
+
+/**
+ * A duration for a log line: seconds up to two minutes, then minutes, then hours and minutes.
+ *
+ * @param seconds the duration in seconds
+ * @returns e.g. `54 s`, `9 min`, `5 h 5 min`
+ */
+function spokenDuration(seconds: number): string {
+  if (seconds < 120) {
+    return `${seconds} s`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return minutes < 120 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+/**
  * Pull Home Connect's `error.description` out of an `{ error: { description } }` body, cleaned for a log line.
  *
  * @param body the parsed response body

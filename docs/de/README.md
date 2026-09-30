@@ -402,7 +402,7 @@ Die Geräte-Ordner hießen nach dem App-Namen (bis 1.12) oder nach der E-Nummer 
 
 ## Anfragegrenzen
 
-Home Connect gewährt 1000 Anfragen pro Tag je Anwendung und Konto, dazu eine kurzfristige Spitzengrenze. Der Adapter ist darauf gebaut: ein dauerhafter Ereignisstrom statt Abfragen im Takt, dauerhaft gemerkte Programmdefinitionen, und eine selbsttätige Pause nach einer Grenz-Antwort. Einzustellen ist nichts — aber eine zweite eigene Anwendung mit denselben Zugangsdaten teilt sich dasselbe Kontingent.
+Home Connect gewährt 1000 Anfragen pro Tag je Anwendung und Konto, höchstens 50 pro Minute, und sperrt für zehn Minuten nach zehn fehlgeschlagenen Anfragen in Folge. Der Adapter ist darauf gebaut: ein dauerhafter Ereignisstrom statt Abfragen im Takt, dauerhaft gemerkte Programmdefinitionen, höchstens 50 Anfragen pro Minute (der erste Start nach einem Update oder mit einem neuen Gerät liest deshalb einige Minuten), deine Befehle vor wartenden Leseanfragen, und eine selbsttätige Pause nach einer Grenz-Antwort — das Log nennt die Grenze und wie lange Home Connect sperrt. Einzustellen ist nichts — aber eine zweite eigene Anwendung mit denselben Zugangsdaten teilt sich dasselbe Kontingent.
 
 ## Fehlersuche
 

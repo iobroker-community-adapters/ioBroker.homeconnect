@@ -160,10 +160,14 @@ const httpMock = vi.hoisted(() => ({
   deleteJson: vi.fn(),
   postForm: vi.fn(),
 }));
-vi.mock("./lib/http", () => httpMock);
+// The transport is faked; the wording of a 429 is the real one.
+vi.mock("./lib/http", async importOriginal => ({
+  ...httpMock,
+  rateLimitText: (await importOriginal<{ rateLimitText: typeof rateLimitText }>()).rateLimitText,
+}));
 
 import { Homeconnect } from "./main";
-import type { JsonResult } from "./lib/http";
+import type { JsonResult, rateLimitText } from "./lib/http";
 import type { WriteRequest } from "./lib/command-dispatch";
 
 const okResult = (data: unknown = { fine: true }): JsonResult => ({
@@ -792,6 +796,61 @@ describe("Homeconnect rate limiting", () => {
     await vi.advanceTimersByTimeAsync(100);
     return pending;
   };
+
+  it("holds every request to 50 per minute and says once that the first read is spread out", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockClear();
+    httpMock.getJson.mockResolvedValue(okResult());
+    const all = Array.from({ length: 52 }, (_, n) => ctx.i.apiGet(`/api/r${n}`));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(50);
+    // The 51st waits until the first is a minute old — not only 100 ms.
+    await vi.advanceTimersByTimeAsync(55_000 - 1);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(50);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(51);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(52);
+    await Promise.all(all);
+    const said = ctx.i.log.info.mock.calls.filter(([m]) => String(m).includes("allows 50 requests per minute"));
+    expect(said).toHaveLength(1);
+  });
+
+  it("puts a user's write before the reads that wait for their place", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const order: string[] = [];
+    httpMock.getJson.mockImplementation((_base: string, path: string) => {
+      order.push(`GET ${path}`);
+      return Promise.resolve(okResult());
+    });
+    httpMock.putJson.mockImplementation((_base: string, path: string) => {
+      order.push(`PUT ${path}`);
+      return Promise.resolve(okResult());
+    });
+    const reads = [1, 2, 3].map(n => ctx.i.apiGet(`/api/r${n}`));
+    const write = ctx.i.apiWrite({ method: "PUT", path: "/api/w", body: { key: "X", value: 1 } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all([...reads, write]);
+    expect(order).toEqual(["GET /api/r1", "PUT /api/w", "GET /api/r2", "GET /api/r3"]);
+  });
+
+  it("tells the sync the error budget is used up after eight failed answers in a row, and free after a success", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const left = ctx.syncs[0].port.errorBudgetLeft as () => boolean;
+    httpMock.getJson.mockResolvedValue(failResult(409, { error: "SDK.Error.Refused" }));
+    for (let n = 0; n < 7; n++) {
+      await get(ctx, `/api/f${n}`);
+    }
+    expect(left()).toBe(true);
+    await get(ctx, "/api/f7");
+    expect(left()).toBe(false);
+    httpMock.getJson.mockResolvedValue(okResult());
+    await get(ctx, "/api/ok");
+    expect(left()).toBe(true);
+  });
 
   it("honours the Retry-After the API sent", async () => {
     const ctx = setup();
@@ -1439,6 +1498,18 @@ describe("Homeconnect port wiring", () => {
     expect(ctx.i.log.warn).toHaveBeenCalledWith("GET /api/x failed: unknown");
   });
 
+  it("adds Home Connect's own words to any other failure", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValue(
+      failResult(400, { error: "SDK.Error.InvalidSettingState", description: "Setting cannot be changed now" }),
+    );
+    await ctx.i.apiGet("/api/x");
+    expect(ctx.i.log.warn).toHaveBeenCalledWith(
+      "GET /api/x failed: SDK.Error.InvalidSettingState (Setting cannot be changed now)",
+    );
+  });
+
   it("says which limit a 429 hit and for how long, in Home Connect's words", async () => {
     const ctx = setup();
     await ctx.i.onReady();
@@ -1452,7 +1523,7 @@ describe("Homeconnect port wiring", () => {
     });
     await ctx.i.apiGet("/api/x");
     expect(ctx.i.log.warn).toHaveBeenCalledWith(
-      'GET /api/x failed: 429 (The rate limit "10 successive error calls in 10 minutes" was reached. Requests are blocked during the remaining period of 544 seconds.)',
+      "GET /api/x failed: Home Connect blocks requests for 9 min (limit: 10 successive error calls in 10 minutes) — the adapter waits and continues by itself",
     );
   });
 });
@@ -2213,6 +2284,27 @@ describe("Homeconnect §7 improvements (2026-09-15)", () => {
     }
   });
 
+  it("spaces three queued requests 100 ms apart each — one queue hands out the places", async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = setup();
+      await ctx.i.onReady();
+      httpMock.getJson.mockResolvedValue(okResult());
+      const delay = (ctx.i as unknown as { delay: ReturnType<typeof vi.fn> }).delay;
+      delay.mockClear();
+      const all = ["/api/a", "/api/b", "/api/c"].map(p => ctx.i.apiGet(p));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(3);
+      await Promise.all(all);
+      // One wait per gap: a second hand-out loop would arm its own timer for the same place.
+      expect(delay).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not send a request whose spacing wait ran into the teardown", async () => {
     vi.useFakeTimers();
     try {
@@ -2391,6 +2483,17 @@ describe("Homeconnect findings of the 2026-09-24 audit (rate pause)", () => {
     expect(ctx.i.restBlockedUntil).toBeGreaterThan(Date.now() + 25_000);
   });
 
+  it("the connection test adds Home Connect's own words to any other refusal", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValueOnce(
+      failResult(400, { error: "SDK.Error.Invalid", description: "The request is not valid" }),
+    );
+    await expect(ctx.i.checkConnection()).resolves.toEqual({
+      error: "Home Connect answered HTTP 400: SDK.Error.Invalid (The request is not valid)",
+    });
+  });
+
   it("the connection test names the limit a 429 hit, in Home Connect's words", async () => {
     const ctx = setup();
     await ctx.i.onReady();
@@ -2402,8 +2505,7 @@ describe("Homeconnect findings of the 2026-09-24 audit (rate pause)", () => {
       }),
     );
     await expect(ctx.i.checkConnection()).resolves.toEqual({
-      error:
-        'Home Connect answered HTTP 429: 429 (The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.)',
+      error: "Home Connect blocks requests for 5 h 5 min (limit: 1000 calls in 1 day) — try again later.",
     });
   });
 

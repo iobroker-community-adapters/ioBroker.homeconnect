@@ -275,6 +275,12 @@ class FakePort implements AdapterPort {
 
   /** Called on every GET before it answers — lets a test interleave a stop with a read in flight. */
   onGet: ((path: string) => void) | undefined;
+  /** What the transport says about Home Connect's error limit (see `AdapterPort.errorBudgetLeft`). */
+  errorBudget = true;
+
+  errorBudgetLeft(): boolean {
+    return this.errorBudget;
+  }
 
   apiGet(path: string): Promise<unknown> {
     this.getCalls.push(path);
@@ -945,6 +951,29 @@ describe("ApplianceSync metadata refresh", () => {
 
     const after = port.objects.get("dishwasher-1.programs.selectedProgram");
     expect((after?.common as ioBroker.StateCommon).name).toMatchObject({ en: "Selected program" });
+  });
+
+  it("leaves definition reads for a later pass while Home Connect's error limit is near", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Washer", {
+      type: "Washer",
+      status: [],
+      settings: [{ key: "BSH.Common.Setting.ChildLock", value: false }],
+      available: ["LaundryCare.Washer.Program.Cotton"],
+    });
+    const defs = (): string[] =>
+      port.getCalls.filter(p => p.includes("/programs/available/") || p.includes("/settings/BSH.Common.Setting."));
+    port.errorBudget = false;
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    expect(defs()).toEqual([]);
+    // The budget is back: the next pass asks for what it left out.
+    port.errorBudget = true;
+    await sync.syncAppliances();
+    expect(defs()).toEqual([
+      "/api/homeappliances/HA-1/settings/BSH.Common.Setting.ChildLock",
+      "/api/homeappliances/HA-1/programs/available/LaundryCare.Washer.Program.Cotton",
+    ]);
   });
 
   it("unions an option's allowed values across programs and keeps the chosen value", async () => {

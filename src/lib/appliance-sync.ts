@@ -126,6 +126,11 @@ export interface AdapterPort {
    * active); `undefined` = nothing is known (failure, rate pause, busy appliance).
    */
   apiGet(path: string): Promise<unknown>;
+  /**
+   * Whether an optional read may still risk an error answer: Home Connect blocks for ten minutes after ten
+   * successive requests that end in one, so definition reads stop short of it.
+   */
+  errorBudgetLeft(): boolean;
   /** Send a Home Connect write (token + 401-refresh handled by main). */
   apiWrite(req: WriteRequest): Promise<JsonResult | undefined>;
   /** Arm a managed timeout (the adapter's `setTimeout`, never the native one). */
@@ -2796,7 +2801,7 @@ export class ApplianceSync {
     this.settingDefs.set(deviceId, cached);
     let def = cached[raw.key];
     if (!def) {
-      if (!this.mayFetchDef(deviceId, raw.key)) {
+      if (!this.mayFetchDef(deviceId, raw.key) || !this.port.errorBudgetLeft()) {
         return raw;
       }
       const path = appliancePath(haId, `/settings/${encodeURIComponent(raw.key)}`);
@@ -4036,7 +4041,9 @@ export class ApplianceSync {
     let changed = false;
     const refused = this.unsupportedPrograms.get(haId);
     for (const programKey of programKeys) {
-      if (this.notReady.has(deviceId)) {
+      // Near Home Connect's error limit the remaining definitions wait: a later pass asks again, and a selected
+      // program fetches its own.
+      if (this.notReady.has(deviceId) || !this.port.errorBudgetLeft()) {
         break;
       }
       const entry = cached[programKey];

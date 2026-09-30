@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { postForm, getJson, putJson, deleteJson, retryAfterMs } from "./http";
+import { postForm, getJson, putJson, deleteJson, rateLimitText, retryAfterMs } from "./http";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -15,6 +15,30 @@ describe("retryAfterMs", () => {
     expect(retryAfterMs("")).toBeUndefined();
     expect(retryAfterMs("soon")).toBeUndefined();
     expect(retryAfterMs("Wed, 21 Oct 2026 07:28:00 GMT")).toBeUndefined();
+  });
+});
+
+describe("rateLimitText", () => {
+  it("names the limit and the block in words a user reads", () => {
+    const said = (limit: string, seconds: number): string =>
+      `The rate limit "${limit}" was reached. Requests are blocked during the remaining period of ${seconds} seconds.`;
+    expect(rateLimitText(said("50 calls in 1 minute", 54))).toBe(
+      "Home Connect blocks requests for 54 s (limit: 50 calls in 1 minute)",
+    );
+    expect(rateLimitText(said("10 successive error calls in 10 minutes", 544))).toBe(
+      "Home Connect blocks requests for 9 min (limit: 10 successive error calls in 10 minutes)",
+    );
+    expect(rateLimitText(said("1000 calls in 1 day", 18_295))).toBe(
+      "Home Connect blocks requests for 5 h 5 min (limit: 1000 calls in 1 day)",
+    );
+  });
+
+  it("falls back to the Retry-After window, and to Home Connect's own words for an unknown shape", () => {
+    expect(rateLimitText(undefined, 60_000)).toBe("Home Connect blocks requests for 60 s");
+    expect(rateLimitText("Too many parallel monitoring connections. Maximum is 10.")).toBe(
+      "Home Connect blocks requests (Too many parallel monitoring connections. Maximum is 10.)",
+    );
+    expect(rateLimitText()).toBe("Home Connect blocks requests");
   });
 });
 

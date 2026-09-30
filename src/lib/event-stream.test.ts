@@ -261,7 +261,7 @@ describe("EventStream lifecycle guards", () => {
     await flush();
     expect(h.connected).not.toContain(true);
     expect(
-      h.logs.some(l => l.msg.includes("connect failed: HTTP 429 (429.Rate.Limit), the Home Connect rate limit")),
+      h.logs.some(l => l.msg.includes("connect failed: Home Connect blocks requests — live updates are paused")),
     ).toBe(true);
     // No Retry-After: the 60 s fallback pause beats the 10 s backoff.
     expect(h.timers.at(-1)?.ms).toBe(60_000);
@@ -289,9 +289,54 @@ describe("EventStream lifecycle guards", () => {
     await flush();
     expect(h.logs.map(l => l.msg)).toContainEqual(
       expect.stringContaining(
-        'HTTP 429 (429: The rate limit "1000 calls in 1 day" was reached. Requests are blocked during the remaining period of 18295 seconds.), the Home Connect rate limit',
+        "connect failed: Home Connect blocks requests for 5 h 5 min (limit: 1000 calls in 1 day) — live updates are paused until it reconnects.",
       ),
     );
+  });
+
+  it("adds Home Connect's key and words to any other refused connect", async () => {
+    const h = harness({ onUnauthorized: () => Promise.resolve(false) });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { key: "insufficient_scope", description: "Scope Monitor missing" } }), {
+          status: 403,
+        }),
+      ),
+    );
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(h.logs.find(l => l.level === "warn")?.msg).toBe(
+      "event stream connect failed: HTTP 403 (insufficient_scope: Scope Monitor missing), the login was rejected — live updates are paused until it reconnects.",
+    );
+    es.stop();
+  });
+
+  it("opens the stream only once the adapter's request budget gives it a place", async () => {
+    let give: (go: boolean) => void = () => {};
+    const h = harness({ takeSlot: () => new Promise<boolean>(resolve => (give = resolve)) });
+    const fetchMock = vi.fn().mockImplementation(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+    give(true);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    es.stop();
+  });
+
+  it("does not open the stream when the budget says the adapter is shutting down", async () => {
+    const h = harness({ takeSlot: () => Promise.resolve(false) });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
+    es.stop();
   });
 
   it("does not hand a KEEP-ALIVE frame to the adapter", async () => {
@@ -471,12 +516,12 @@ describe("EventStream connect watchdog + failure reporting", () => {
       [404, "HTTP 404, a problem on the Home Connect side"],
       [401, "HTTP 401, the login was rejected"],
       [403, "HTTP 403, the login was rejected"],
-      [429, "HTTP 429, the Home Connect rate limit"],
+      [429, "Home Connect blocks requests"],
       [400, "HTTP 400"],
     ];
     for (const [status, reason] of cases) {
       const h = harness({ onUnauthorized: () => Promise.resolve(false) });
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, body: null }));
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, body: null, headers: new Headers() }));
       const es = new EventStream(h.deps);
       es.start();
       await flush();

@@ -402,7 +402,7 @@ The device folders were named after the app name (up to 1.12) or the E-number fr
 
 ## Rate limits
 
-Home Connect grants 1000 requests per day per application and account, plus a short-term burst limit. The adapter is built around that: it uses one persistent event stream instead of polling, remembers program definitions permanently, and pauses on its own after a rate-limit answer. There is nothing to configure — but a second application of your own using the same credentials shares the same budget.
+Home Connect grants 1000 requests per day per application and account, at most 50 per minute, and blocks for ten minutes after ten failed requests in a row. The adapter is built around that: it uses one persistent event stream instead of polling, remembers program definitions permanently, sends at most 50 requests per minute (so the first start after an update or with a new appliance reads for a few minutes), puts your commands before waiting reads, and pauses on its own after a rate-limit answer — the log names the limit and how long Home Connect blocks. There is nothing to configure — but a second application of your own using the same credentials shares the same budget.
 
 ## Troubleshooting
 

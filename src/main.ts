@@ -2,7 +2,7 @@ import { join } from "node:path";
 import * as utils from "@iobroker/adapter-core";
 import { I18n } from "@iobroker/adapter-core";
 import { HomeConnectAuth, extractRefreshToken, type StoredToken } from "./lib/oauth";
-import { getJson, postForm, putJson, deleteJson, type JsonResult } from "./lib/http";
+import { getJson, postForm, putJson, deleteJson, rateLimitText, type JsonResult } from "./lib/http";
 import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
 import { AuthController, type AuthPort } from "./lib/auth-controller";
 import { moveAllWithEnums } from "./lib/enum-carry";
@@ -29,6 +29,17 @@ const RATE_PAUSE_FALLBACK_MS = 60_000;
  * 100 ms; this makes the limit mechanically true on every path.
  */
 const MIN_REQUEST_GAP_MS = 100;
+/**
+ * Home Connect allows 50 requests per minute per application and account and blocks further ones for a minute
+ * (api-docs → Rate Limiting). A first read with empty definition caches — the update from 1.x — asks dozens of
+ * requests per appliance; the transport holds every request to this budget, the event stream's connect included.
+ */
+const REQUESTS_PER_MINUTE = 50;
+/**
+ * Home Connect blocks for ten minutes after ten successive requests that end in an error. Definition reads are
+ * optional (a selected program fetches its own later), so they stop two short of the limit.
+ */
+const ERROR_STREAK_LIMIT = 8;
 /**
  * An event-stream outage at least this long makes the appliances worth re-reading.
  * Home Connect guarantees NO snapshot after a (re)connect (API research §4.5), so
@@ -146,8 +157,18 @@ export class Homeconnect extends utils.Adapter {
    * the state on every call).
    */
   private readonly stateMirror = new StateMirror();
-  /** Epoch-ms of the next REST request slot (see {@link MIN_REQUEST_GAP_MS}). */
-  private nextRequestAt = 0;
+  /** Send times of the requests within the last minute (see {@link REQUESTS_PER_MINUTE}). */
+  private sentAt: number[] = [];
+  /** Epoch-ms of the last request sent (see {@link MIN_REQUEST_GAP_MS}). */
+  private lastSentAt = 0;
+  /** Requests waiting for their place; a user's write stands before every waiting read. */
+  private readonly slotQueue: Array<{ write: boolean; resolve: (go: boolean) => void }> = [];
+  /** Whether {@link pumpSlots} is handing out places right now. */
+  private pumping = false;
+  /** Whether this run already said that the request budget spreads the reads out. */
+  private budgetNoted = false;
+  /** Successive requests that ended in an error (see {@link ERROR_STREAK_LIMIT}). */
+  private errorStreak = 0;
   /**
    * Set the moment onUnload runs. The sign-in/sync chain is fire-and-forget; on
    * a stop right after start it would otherwise keep syncing past the teardown
@@ -519,6 +540,7 @@ export class Homeconnect extends utils.Adapter {
       getEnums: async () => (await this.getForeignObjectsAsync("enum.*", "enum")) ?? {},
       deleteTreeCarryingEnums: (root, carry) => this.deleteTreeCarryingEnums(root, carry),
       apiGet: path => this.apiGet(path),
+      errorBudgetLeft: () => this.errorStreak < ERROR_STREAK_LIMIT,
       apiWrite: req => this.apiWrite(req),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: handle => this.clearTimeout(handle as ioBroker.Timeout),
@@ -695,6 +717,7 @@ export class Homeconnect extends utils.Adapter {
       onUnauthorized: () => this.authCtl?.refreshNow() ?? Promise.resolve(false),
       // One daily quota for the stream and REST: a 429 on the stream pauses REST too.
       onRateLimited: ms => this.armRatePause(ms),
+      takeSlot: () => this.spaceRequests(),
       log: (level, msg) => this.log[level](msg),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: handle => this.clearTimeout(handle as ioBroker.Timeout),
@@ -886,20 +909,21 @@ export class Homeconnect extends utils.Adapter {
       return { error: `Home Connect REST is paused after a rate limit for another ${seconds} s — try again later.` };
     }
     const sent = this.authCtl.accessToken;
-    // The test request takes a slot like every other request (10/s limit) and a
-    // 429 pauses REST like on every other path.
-    if (!(await this.spaceRequests())) {
+    // The test request takes a slot like every other request and a 429 pauses REST like on every other path.
+    if (!(await this.spaceRequests(true))) {
       return { error: "The adapter is shutting down." };
     }
     let res = await getJson(DEFAULT_BASE_URL, "/api/homeappliances", sent, this.acceptLanguage());
     if (res.status === 401) {
       const fresh = await this.tokenAfter401(sent);
-      if (fresh && (await this.spaceRequests())) {
+      if (fresh && (await this.spaceRequests(true))) {
         res = await getJson(DEFAULT_BASE_URL, "/api/homeappliances", fresh, this.acceptLanguage());
       }
     }
+    this.countAnswer(res);
     if (res.status === 429) {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
+      return { error: `${rateLimitText(res.description, res.retryAfterMs)} — try again later.` };
     }
     if (res.status === 401 || res.status === 403) {
       return { error: `Home Connect rejected the login (HTTP ${res.status}) — a new sign-in is required.` };
@@ -955,6 +979,7 @@ export class Homeconnect extends utils.Adapter {
         res = await getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage());
       }
     }
+    this.countAnswer(res);
     if (!res.ok) {
       // An expected answer ("no program active", "busy") is appliance state, not
       // a failure — it never warns. It IS proof that the endpoint answers, so it
@@ -1029,7 +1054,7 @@ export class Homeconnect extends utils.Adapter {
     }
     // Re-checked after the wait: a 429 that arrived while this write queued for
     // its slot pauses it too.
-    if (!(await this.spaceRequests()) || this.dropWhilePaused(source)) {
+    if (!(await this.spaceRequests(true)) || this.dropWhilePaused(source)) {
       return undefined;
     }
     let res = await this.sendWrite(req, token);
@@ -1039,6 +1064,7 @@ export class Homeconnect extends utils.Adapter {
         res = await this.sendWrite(req, fresh);
       }
     }
+    this.countAnswer(res);
     if (res.ok) {
       this.log.debug(`${source} ok`);
       if (this.restLog.recovered(source)) {
@@ -1108,21 +1134,74 @@ export class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Take the next REST request slot: wait until it is at least
-   * {@link MIN_REQUEST_GAP_MS} after the previous one. Callers that overlap
-   * (two appliances re-syncing at once) queue up behind each other.
+   * Take a place for one request: at least {@link MIN_REQUEST_GAP_MS} after the previous one and at most
+   * {@link REQUESTS_PER_MINUTE} in any minute. Callers queue up; a user's write goes before every waiting read, so a
+   * button does not wait behind the first read of all appliances.
    *
-   * @returns false when the adapter started shutting down during the wait —
-   *   the request must not go out then
+   * @param write whether the request carries a user action (a write or the connection test)
+   * @returns false when the adapter started shutting down during the wait — the request must not go out then
    */
-  private async spaceRequests(): Promise<boolean> {
-    const now = Date.now();
-    const untilSlot = this.nextRequestAt - now;
-    this.nextRequestAt = Math.max(now, this.nextRequestAt) + MIN_REQUEST_GAP_MS;
-    if (untilSlot > 0) {
-      await this.delay(untilSlot);
+  private spaceRequests(write = false): Promise<boolean> {
+    return new Promise<boolean>(resolve => {
+      const firstRead = write ? this.slotQueue.findIndex(entry => !entry.write) : -1;
+      this.slotQueue.splice(firstRead === -1 ? this.slotQueue.length : firstRead, 0, { write, resolve });
+      void this.pumpSlots();
+    });
+  }
+
+  /** Hand out the places in queue order, waiting out the gap and the minute budget between them. */
+  private async pumpSlots(): Promise<void> {
+    if (this.pumping) {
+      return;
     }
-    return !this.terminating;
+    this.pumping = true;
+    try {
+      while (this.slotQueue.length > 0) {
+        const now = Date.now();
+        this.sentAt = this.sentAt.filter(at => now - at < 60_000);
+        const budgetWait = this.sentAt.length >= REQUESTS_PER_MINUTE ? this.sentAt[0] + 60_000 - now : 0;
+        const wait = Math.max(this.lastSentAt + MIN_REQUEST_GAP_MS - now, budgetWait);
+        if (budgetWait > 0 && !this.budgetNoted) {
+          this.budgetNoted = true;
+          this.log.info(
+            `Home Connect allows ${REQUESTS_PER_MINUTE} requests per minute — reading the appliances is spread over the next minutes; the datapoints fill in as they arrive.`,
+          );
+        }
+        if (wait > 0 && !this.terminating) {
+          await this.delay(wait);
+          continue;
+        }
+        const next = this.slotQueue.shift();
+        if (this.terminating) {
+          next?.resolve(false);
+          continue;
+        }
+        this.lastSentAt = Date.now();
+        this.sentAt.push(this.lastSentAt);
+        next?.resolve(true);
+      }
+    } catch (e) {
+      // The wait itself failed (the adapter's timer refused during shutdown): nothing that waits may go out.
+      this.log.debug(`request queue stopped: ${errMessage(e)}`);
+      for (const entry of this.slotQueue.splice(0)) {
+        entry.resolve(false);
+      }
+    } finally {
+      this.pumping = false;
+    }
+  }
+
+  /**
+   * Keep count of successive requests that ended in an error — Home Connect blocks after ten.
+   *
+   * @param res the answer of a request that went out
+   */
+  private countAnswer(res: JsonResult): void {
+    if (res.status >= 400) {
+      this.errorStreak++;
+    } else if (res.ok) {
+      this.errorStreak = 0;
+    }
   }
 
   /**
@@ -1152,7 +1231,11 @@ export class Homeconnect extends utils.Adapter {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
     }
     const level = this.restLog.note(source, categorize(res.status));
-    this.log[level](`${source} failed: ${res.error ?? "unknown"}${res.description ? ` (${res.description})` : ""}`);
+    const why =
+      res.status === 429
+        ? `${rateLimitText(res.description, res.retryAfterMs)} — the adapter waits and continues by itself`
+        : `${res.error ?? "unknown"}${res.description ? ` (${res.description})` : ""}`;
+    this.log[level](`${source} failed: ${why}`);
   }
 
   /**
