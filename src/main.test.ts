@@ -817,6 +817,31 @@ describe("Homeconnect rate limiting", () => {
     expect(said).toHaveLength(1);
   });
 
+  it("lets the fixture environment widen the budget, never narrow it", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValue(okResult());
+    try {
+      // Widened (the inventory run's fixture server): 60 requests pass at the 100 ms gap alone.
+      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "100000");
+      httpMock.getJson.mockClear();
+      const wide = Array.from({ length: 60 }, (_, n) => ctx.i.apiGet(`/api/w${n}`));
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(60);
+      await Promise.all(wide);
+      // Narrowed: ignored — Home Connect's 50 stays the floor of what the adapter allows itself.
+      await vi.advanceTimersByTimeAsync(60_000);
+      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "10");
+      httpMock.getJson.mockClear();
+      const narrow = Array.from({ length: 20 }, (_, n) => ctx.i.apiGet(`/api/n${n}`));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(20);
+      await Promise.all(narrow);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("puts a user's write before the reads that wait for their place", async () => {
     const ctx = setup();
     await ctx.i.onReady();

@@ -36,6 +36,17 @@ const MIN_REQUEST_GAP_MS = 100;
  */
 const REQUESTS_PER_MINUTE = 50;
 /**
+ * The budget in force: {@link REQUESTS_PER_MINUTE}, widened only by `HOMECONNECT_REQUESTS_PER_MINUTE` — which the
+ * inventory run's fixture server sets (`test/inventory-fetch-hook.cjs`): it answers at once and lists every program of
+ * every model, over a thousand requests. The variable can only widen the budget, never narrow it.
+ *
+ * @returns requests allowed in any minute
+ */
+function requestsPerMinute(): number {
+  const widened = Number(process.env.HOMECONNECT_REQUESTS_PER_MINUTE);
+  return Number.isInteger(widened) && widened > REQUESTS_PER_MINUTE ? widened : REQUESTS_PER_MINUTE;
+}
+/**
  * Home Connect blocks for ten minutes after ten successive requests that end in an error. Definition reads are
  * optional (a selected program fetches its own later), so they stop two short of the limit.
  */
@@ -1159,7 +1170,7 @@ export class Homeconnect extends utils.Adapter {
       while (this.slotQueue.length > 0) {
         const now = Date.now();
         this.sentAt = this.sentAt.filter(at => now - at < 60_000);
-        const budgetWait = this.sentAt.length >= REQUESTS_PER_MINUTE ? this.sentAt[0] + 60_000 - now : 0;
+        const budgetWait = this.sentAt.length >= requestsPerMinute() ? this.sentAt[0] + 60_000 - now : 0;
         const wait = Math.max(this.lastSentAt + MIN_REQUEST_GAP_MS - now, budgetWait);
         if (budgetWait > 0 && !this.budgetNoted) {
           this.budgetNoted = true;

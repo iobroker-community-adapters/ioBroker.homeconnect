@@ -3,8 +3,13 @@
 // Replaces global fetch with a routing table over test/fixtures/inventory/*.json and
 // REFUSES every unknown address: no call leaves this machine, and a forgotten route
 // surfaces as an error instead of silently going to the real Home Connect cloud.
-// The adapter knows neither this hook nor a "fixture mode".
+// The adapter knows neither this hook nor a "fixture mode" — only the one variable below.
 const fs = require("node:fs");
+
+// The fixtures list every program of every model of a type, over a thousand requests for a cold start. Held to Home
+// Connect's 50 per minute that is more than twenty minutes per suite; this answers at once, so the adapter's budget is
+// widened here (the 100 ms gap stays). The production default is untouched.
+process.env.HOMECONNECT_REQUESTS_PER_MINUTE = "100000";
 const path = require("node:path");
 
 const BASE = "https://api.home-connect.com";
