@@ -69,36 +69,36 @@ Version 2.0 is a new object tree: every appliance gets a readable device folder 
 2. Enter your application's **Client Secret** once in the adapter settings — the previous adapter never asked for it.
 3. Point your scripts and visualization at the new data points — the [documentation](docs/en/README.md#updating-from-1x) lists the new datapoint for every old ID.
 
-## Data points
+## State Tree
 
-At instance level:
+```
+homeconnect.0.
+├── info.
+│   ├── connection           — Signed in and live updates connected
+│   ├── devicesTotal         — Appliances in your Home Connect account
+│   ├── devicesOnline        — Appliances connected right now
+│   └── devicesAllOnline     — Every appliance connected
+├── auth.
+│   ├── signedIn             — The adapter holds a usable login
+│   └── lastError            — Home Connect's answer when a sign-in was refused
+└── {model}-{last 4}.        — One device per appliance, e.g. sx87tx02ce-5775
+    ├── info.reachable       — Appliance connected to Home Connect
+    ├── status.              — Operation state, door, remote control …
+    ├── settings.            — Power, child lock, temperatures … (writable)
+    ├── events.              — Program finished, salt low, door alarm …
+    ├── programs.
+    │   ├── selectedProgram  — Program to start (writable)
+    │   ├── activeProgram    — Running program
+    │   ├── start            — Start the selected program (button)
+    │   └── stop             — Stop the active program (button)
+    ├── options.             — Program options: temperature, spin speed … (writable)
+    ├── commands.            — Pause, resume, open door … (buttons)
+    ├── lastRun.             — The last run: program, start, end, duration, consumption
+    ├── history.             — Previous runs: latest, previous, thirdLatest …
+    └── statistics.          — Runs and running time per program
+```
 
-| Data point | Contents |
-|---|---|
-| `info.connection` | Whether the adapter is signed in **and** its live event stream is connected — only then do values flow |
-| `auth.signedIn` | Whether the adapter holds a usable Home Connect login |
-| `auth.lastError` | What Home Connect answered when it refused the sign-in, in its own words — empty while signed in, `Unknown` while nothing was asked yet |
-| `info.devicesTotal` | How many appliances are paired with your Home Connect account |
-| `info.devicesOnline` | How many of them are connected right now |
-| `info.devicesAllOnline` | True only while every appliance is connected |
-
-Each paired appliance appears under a device folder named by its model and the last four characters of its own Home Connect number (e.g. `sx87tx02ce-5775`), with the name from your Home Connect app as display name. Each device has these channels:
-
-| Channel | Contents |
-|---|---|
-| `info.reachable` | Whether the appliance is currently connected to Home Connect — this is what puts the green/grey dot on the device in the object browser |
-| `status.*` | Read-only state: operation state (plus the derived boolean `programRunning`), the door as booleans (`doorOpen`, `doorLocked` on appliances whose door locks, one `door…Open` per compartment on refrigeration appliances), remote control, battery … |
-| `settings.*` | **Writable** device settings: power state, child lock, temperatures, lighting … |
-| `events.*` | Boolean event flags, created upfront from the appliance type's catalog: program finished/aborted, salt/rinse low, door alarm, descaling due … |
-| `programs.selectedProgram` | The selected program — **writable** dropdown of the available programs (appliances without programs get no `programs` channel at all). Two programs whose names end the same get a two-part value, e.g. `heatingmode.doughproving` and `steammodes.doughproving` |
-| `programs.activeProgram` | The running program (read-only, empty when idle) |
-| `programs.start` / `programs.stop` | **Buttons** — start the selected program / stop the active one |
-| `options.*` | **Writable** program options: temperature, spin speed, delayed start … — the options of all programs; one that does not belong to the selected program is not sent |
-| `commands.*` | **Buttons** — pause, resume, open door, acknowledge event |
-
-Every data point has a name and a description in your ioBroker system language. The adapter maintains them itself — keep your own data points under `0_userdata`. While the adapter is stopped, every appliance shows as not reachable.
-
-An appliance you remove from your Home Connect account is removed here too, once Home Connect reports it as removed.
+Which channels and data points an appliance gets depends on its type. Every data point in detail: [documentation](docs/en/README.md#the-object-tree).
 
 ## Usage
 
