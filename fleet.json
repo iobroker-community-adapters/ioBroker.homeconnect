@@ -26,5 +26,33 @@
       "info.devicesAllOnline": "devicesAllOnlineDesc"
     }
   },
-  "forumThread": null
+  "forumThread": null,
+  "serverTest": {
+    "_why": "Sign-in, event stream and the appliances come up on the real account, and a switched setting is confirmed only by the appliance's NOTIFY on the stream (decision 8).",
+    "observeSeconds": 120,
+    "connectSeconds": 180,
+    "startSpacingSeconds": 60,
+    "reads": [
+      {
+        "id": "info.connection",
+        "expect": "true"
+      },
+      {
+        "id": "*.info.reachable",
+        "expect": "true"
+      },
+      {
+        "id": "*.status.operationState",
+        "expect": "nonEmpty"
+      }
+    ],
+    "commands": [
+      {
+        "id": "*.settings.lightExternalPower",
+        "online": "*.info.reachable",
+        "value": "toggle",
+        "timeoutSeconds": 60
+      }
+    ]
+  }
 }

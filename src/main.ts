@@ -13,6 +13,7 @@ import { looksLikeClientId } from "./lib/sign-in-help";
 import { migrateNativeKeys } from "./lib/native-key-migration";
 import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { LogDedup, categorize } from "./lib/log-dedup";
+import { declaredLimit } from "./lib/api-limits";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import type { I18nKey } from "./lib/i18n";
 
@@ -31,10 +32,10 @@ const RATE_PAUSE_FALLBACK_MS = 60_000;
 const MIN_REQUEST_GAP_MS = 100;
 /**
  * Home Connect allows 50 requests per minute per application and account and blocks further ones for a minute
- * (api-docs → Rate Limiting). A first read with empty definition caches — the update from 1.x — asks dozens of
+ * (api-docs → Rate Limiting, declared in src/lib/api-limits.json). A first read with empty definition caches — the update from 1.x — asks dozens of
  * requests per appliance; the transport holds every request to this budget, the event stream's connect included.
  */
-const REQUESTS_PER_MINUTE = 50;
+const REQUESTS_PER_MINUTE = declaredLimit(60);
 /**
  * The budget in force: {@link REQUESTS_PER_MINUTE}, widened only by `HOMECONNECT_REQUESTS_PER_MINUTE` — which the
  * inventory run's fixture server sets (`test/inventory-fetch-hook.cjs`): it answers at once and lists every program of

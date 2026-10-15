@@ -1,0 +1,30 @@
+{
+  "counterparts": [
+    {
+      "name": "Home Connect API",
+      "match": {
+        "host": "api.home-connect.com"
+      },
+      "limits": [
+        {
+          "max": 20,
+          "seconds": 1,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 requests per second on average, 20 max. burst)"
+        },
+        {
+          "max": 50,
+          "seconds": 60,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (50 requests per client and user account per minute)"
+        },
+        {
+          "max": 1000,
+          "seconds": 86400,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (1000 requests per client and user account per day)"
+        }
+      ]
+    }
+  ]
+}

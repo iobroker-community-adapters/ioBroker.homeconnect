@@ -66,6 +66,7 @@
     "build/",
     "admin/",
     "io-package.json",
+    "src/lib/api-limits.json",
     "LICENSE"
   ],
   "scripts": {
