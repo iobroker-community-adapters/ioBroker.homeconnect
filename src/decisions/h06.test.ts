@@ -19,7 +19,8 @@ describe("H-06 empty leftovers are removed at start", () => {
 
   it("deletes them in the start chain, before priming, reading nothing on them", () => {
     // The wiring in main: the list is taken from the start-up read, and the leftover step deletes each id.
-    const main = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8");
+    // Line endings as the checkout has them (CRLF on Windows), compared as LF.
+    const main = readFileSync(join(process.cwd(), "src", "main.ts"), "utf8").replace(/\r\n/g, "\n");
     expect(main).toContain("this.untypedAtStart = this.objectMirror.untyped();");
     const steps = main.slice(main.indexOf("const steps: Array<[string, () => Promise<unknown>]> = ["));
     const leftover = steps.indexOf('["leftover cleanup", () => this.dropUntypedObjects()]');
