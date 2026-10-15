@@ -68,6 +68,8 @@ Zwei Eigenschaften sind wichtig zu wissen:
 - **Ein Programm stoppen:** `programs.stop` auf `true` setzen.
 - **Einen Befehl auslösen:** die Schaltfläche unter `commands` auf `true` setzen; sie fällt von selbst auf `false` zurück.
 
+Ein geschriebener Wert gilt als erledigt (`ack`), sobald das Gerät ihn zurückmeldet. Lehnt das Gerät ihn ab, springt der Datenpunkt auf den echten Wert des Geräts zurück.
+
 Home Connect lässt eine Fernbedienung nur zu, wenn das Gerät es erlaubt — die meisten Maschinen brauchen dafür **Fernstart** am Gerät selbst, und viele verweigern eine Änderung, während ein Programm läuft. `status.remoteControlActive` und `status.remoteControlStartAllowed` sagen, was das Gerät gerade zulässt.
 
 ## Namen und Beschreibungen der Datenpunkte

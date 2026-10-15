@@ -81,6 +81,8 @@ class FakePort implements AdapterPort {
 
   readonly objects = new Map<string, ioBroker.PartialObject>();
   readonly states = new Map<string, ioBroker.StateValue>();
+  /** The ack each state carries — `false` after a user write, `true` once the adapter (the device) confirmed it. */
+  readonly acks = new Map<string, boolean>();
   readonly deleted: string[] = [];
   readonly writes: WriteRequest[] = [];
   readonly getCalls: string[] = [];
@@ -112,22 +114,43 @@ class FakePort implements AdapterPort {
     const val = (state as { val: ioBroker.StateValue }).val;
     this.stateWrites.push({ id, val });
     this.states.set(id, val);
+    this.acks.set(id, (state as { ack?: boolean }).ack === true);
     return Promise.resolve();
+  }
+  /**
+   * What js-controller does with a user's write before the adapter sees it: the
+   * value lands in the database unconfirmed (ack:false).
+   *
+   * @param id the state id relative to the namespace
+   * @param val the written value
+   */
+  userWrite(id: string, val: ioBroker.StateValue): void {
+    this.states.set(id, val);
+    this.acks.set(id, false);
   }
   setStateChanged(id: string, state: ioBroker.SettableState): Promise<unknown> {
     // js-controller writes only when the value actually differs. A fake that
     // always writes cannot tell the two calls apart — and then no test notices
     // when a value write turns into an unconditional one (history churn, a
     // change event on every sync).
+    // Like js-controller 7.2.5 `_setStateChangedHelper`: a different ack is a change too —
+    // the device confirming the value a user just wrote must reach the database.
     const val = (state as { val: ioBroker.StateValue }).val;
-    if (this.states.has(id) && this.states.get(id) === val) {
+    const ack = (state as { ack?: boolean }).ack;
+    if (
+      this.states.has(id) &&
+      this.states.get(id) === val &&
+      (ack === undefined || (this.acks.get(id) ?? true) === ack)
+    ) {
       return Promise.resolve();
     }
     return this.setState(id, state);
   }
   getState(id: string): Promise<ioBroker.State | null | undefined> {
     this.getStateCalls.push(id);
-    return Promise.resolve(this.states.has(id) ? ({ val: this.states.get(id), ack: true } as ioBroker.State) : null);
+    return Promise.resolve(
+      this.states.has(id) ? ({ val: this.states.get(id), ack: this.acks.get(id) ?? true } as ioBroker.State) : null,
+    );
   }
   getObject(id: string): Promise<ioBroker.Object | null | undefined> {
     // A copy, like the controller hands every read: with the stored object itself,
@@ -326,6 +349,22 @@ class FakePort implements AdapterPort {
 
 /** Let the fire-and-forget stream/write chains settle. */
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
+
+/**
+ * The appliance confirming values over the event stream (a NOTIFY), then let it land.
+ *
+ * @param sync the sync under test
+ * @param items the confirmed key/value pairs
+ * @param haId the appliance
+ */
+async function notify(
+  sync: ApplianceSync,
+  items: Array<{ key: string; value: unknown }>,
+  haId = "HA-1",
+): Promise<void> {
+  sync.handleStreamEvent({ event: "NOTIFY", data: JSON.stringify({ haId, items }), id: undefined });
+  await flush();
+}
 
 /**
  * Configure the endpoints one connected appliance's full sync hits.
@@ -1337,15 +1376,20 @@ describe("ApplianceSync write results", () => {
     return { port, sync: new ApplianceSync(port) };
   }
 
-  it("switches the power off with the appliance's Off and confirms the switch as false", async () => {
+  it("switches the power off with the appliance's Off; the appliance confirms the switch as false", async () => {
     const { port, sync } = washer();
     await sync.primeFromObjects();
+    port.userWrite("washer.settings.powerState", false);
     await sync.handleWrite(`${NS}.washer.settings.powerState`, false);
     expect(port.writes.at(-1)?.body).toEqual({
       key: "BSH.Common.Setting.PowerState",
       value: "BSH.Common.EnumType.PowerState.Off",
     });
+    // Home Connect accepting the request is not the appliance taking it.
+    expect(port.acks.get("washer.settings.powerState")).toBe(false);
+    await notify(sync, [{ key: "BSH.Common.Setting.PowerState", value: "BSH.Common.EnumType.PowerState.Off" }]);
     expect(port.states.get("washer.settings.powerState")).toBe(false);
+    expect(port.acks.get("washer.settings.powerState")).toBe(true);
   });
 
   it("says on info that an appliance without an off value cannot be switched off remotely", async () => {
@@ -3066,18 +3110,29 @@ describe("ApplianceSync typed writes", () => {
     return { port, sync: new ApplianceSync(port) };
   }
 
-  it("sends and confirms the typed value, not the script's text", async () => {
+  it("sends the typed value, not the script's text, and the appliance confirms it typed", async () => {
     const { port, sync } = oven();
     await sync.primeFromObjects();
+    port.userWrite("oven.settings.childLock", "true");
     await sync.handleWrite(`${NS}.oven.settings.childLock`, "true");
     expect(port.writes[0]?.body).toEqual({ key: "BSH.Common.Setting.ChildLock", value: true });
-    // The ack carries what was sent — a string in a boolean state would be a
-    // type violation the next reader trips over.
-    expect(port.states.get("oven.settings.childLock")).toBe(true);
+    expect(port.acks.get("oven.settings.childLock")).toBe(false);
 
+    port.userWrite("oven.settings.setpointTemperature", "180");
     await sync.handleWrite(`${NS}.oven.settings.setpointTemperature`, "180");
     expect(port.writes[1]?.body).toEqual({ key: "Cooking.Oven.Setting.SetpointTemperature", value: 180 });
+    expect(port.acks.get("oven.settings.setpointTemperature")).toBe(false);
+
+    // The confirmation carries the appliance's value in the datapoint's type — a
+    // string in a boolean state would be a type violation the next reader trips over.
+    await notify(sync, [
+      { key: "BSH.Common.Setting.ChildLock", value: true },
+      { key: "Cooking.Oven.Setting.SetpointTemperature", value: 180 },
+    ]);
+    expect(port.states.get("oven.settings.childLock")).toBe(true);
+    expect(port.acks.get("oven.settings.childLock")).toBe(true);
     expect(port.states.get("oven.settings.setpointTemperature")).toBe(180);
+    expect(port.acks.get("oven.settings.setpointTemperature")).toBe(true);
   });
 
   it("does not send a value that cannot be read as the state's type", async () => {
@@ -4120,6 +4175,7 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
 
     // The gate must now belong to program B: its own option is writable …
     port.writes.length = 0;
+    port.userWrite(`${deviceId}.options.intensivZone`, true);
     await sync.handleWrite(`${NS}.${deviceId}.options.intensivZone`, true);
     expect(port.writes.map(w => w.path)).toEqual([
       "/api/homeappliances/HA-1/programs/selected/options/Dishcare.Dishwasher.Option.IntensivZone",
@@ -5013,30 +5069,37 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     port.getResponses.set(`${base}/programs/active`, {});
   }
 
-  it("F4: a tolerant spelling is confirmed in the datapoint's form and still goes out with the next start", async () => {
+  it("F4: a tolerant spelling goes out with the next start and the appliance confirms it in the datapoint's form", async () => {
     const port = new FakePort();
     washerDryer(port);
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
     port.writes.length = 0;
+    port.userWrite("wd-1.options.dryingTarget", "IRONDRY");
     await sync.handleWrite(`${NS}.wd-1.options.dryingTarget`, "IRONDRY");
     expect(port.writes.at(-1)?.body).toEqual({ key: dryerKey, value: dryerValues[0] });
-    // Confirmed as "irondry", not verbatim — the start below matches on it.
-    expect(port.states.get("wd-1.options.dryingTarget")).toBe("irondry");
+    // Unconfirmed, the start still finds the option in the user's spelling.
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body).toEqual({ key: A, options: [{ key: dryerKey, value: dryerValues[0] }] });
+    // Confirmed as "irondry", not verbatim.
+    await notify(sync, [{ key: dryerKey, value: dryerValues[0] }]);
+    expect(port.states.get("wd-1.options.dryingTarget")).toBe("irondry");
+    expect(port.acks.get("wd-1.options.dryingTarget")).toBe(true);
   });
 
-  it("F4: a full program key is confirmed as the short value, and the start sends it", async () => {
+  it("F4: a full program key goes out with the start and the appliance confirms it as the short value", async () => {
     const port = new FakePort();
     washerDryer(port);
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
+    port.userWrite("wd-1.programs.selectedProgram", B);
     await sync.handleWrite(`${NS}.wd-1.programs.selectedProgram`, B);
-    expect(port.states.get("wd-1.programs.selectedProgram")).toBe("mix");
     port.writes.length = 0;
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body?.key).toBe(B);
+    await notify(sync, [{ key: "BSH.Common.Root.SelectedProgram", value: B }]);
+    expect(port.states.get("wd-1.programs.selectedProgram")).toBe("mix");
+    expect(port.acks.get("wd-1.programs.selectedProgram")).toBe(true);
   });
 
   it("F6: an option goes out with the selected program's own key and value family", async () => {
@@ -5052,6 +5115,7 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     });
     await flush();
     port.writes.length = 0;
+    port.userWrite("wd-1.options.dryingTarget", "irondry");
     await sync.handleWrite(`${NS}.wd-1.options.dryingTarget`, "irondry");
     // Measured before: the WasherDryer key with the Dryer family's value.
     expect(port.writes.at(-1)?.path).toBe(`${base}/programs/selected/options/${wdKey}`);

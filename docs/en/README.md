@@ -68,6 +68,8 @@ Two properties are worth knowing:
 - **Stop a program:** set `programs.stop` to `true`.
 - **A command:** set the button under `commands` to `true`; it falls back to `false` by itself.
 
+A written value counts as done (`ack`) once the appliance reports it back. If the appliance refuses it, the data point returns to the appliance's real value.
+
 Home Connect only accepts remote operation when the appliance allows it — most machines need **Remote Start** enabled on the appliance itself, and many refuse a change while a program is running. `status.remoteControlActive` and `status.remoteControlStartAllowed` tell you what the appliance currently permits.
 
 ## Data point names and descriptions

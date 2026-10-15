@@ -299,38 +299,6 @@ function familyOf(values: string[] | undefined, key: string | undefined): string
 }
 
 /**
- * The value a successful write is confirmed with — the datapoint's own form.
- *
- * @param channel the state's channel
- * @param stateId the within-channel id
- * @param req the request that went out
- * @param bshValues the datapoint's candidate values (enums only)
- * @param written the value as written (already type-coerced)
- * @returns the value to confirm
- */
-function confirmedValue(
-  channel: string,
-  stateId: string,
-  req: WriteRequest,
-  bshValues: string[] | undefined,
-  written: ioBroker.StateValue,
-): ioBroker.StateValue {
-  // A switch confirms its own true/false — the appliance got On or Off, the datapoint stays a boolean.
-  if (!bshValues || bshValues.length === 0 || typeof written === "boolean") {
-    return written;
-  }
-  if (channel === "programs" && stateId === "selectedProgram") {
-    return typeof req.body?.key === "string" ? shortEnumIn(req.body.key, bshValues) : written;
-  }
-  const sent = req.body?.value;
-  if (typeof sent !== "string") {
-    return written;
-  }
-  // Options share one short value across value families (see familyOf).
-  return channel === "options" ? shortEnum(sent) : shortEnumIn(sent, bshValues);
-}
-
-/**
  * Delays of the re-reads after an appliance answered that its connection is
  * still initializing — one per attempt, then the adapter waits for the next
  * reconnect. An appliance that was just switched on sends CONNECTED before it
@@ -4502,23 +4470,16 @@ export class ApplianceSync {
       if (req) {
         const res = await this.port.apiWrite(req);
         await this.postWrite(channel, stateId, deviceId, haId, req, res);
-        if (!this.isMomentaryButton(channel, stateId)) {
-          if (res?.ok) {
-            // Confirmed in the datapoint's own form: a tolerant spelling ("EXTRA",
-            // a full program key) was sent correctly but confirmed verbatim — and
-            // the next program start matched the stored value against the short
-            // form, found nothing and dropped the option without a word.
-            await this.port.setState(rel, {
-              val: confirmedValue(channel, stateId, req, meta?.bshValues, value),
-              ack: true,
-            });
-          } else if (res) {
-            // Rejected (409 "wrong operation state", 4xx): the user's wish stayed in
-            // the datapoint with ack:false and nothing corrected it — no poll, and
-            // the stream reports changes at the appliance, where nothing changed.
-            // One targeted read restores the real value. `undefined` = not sent.
-            await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
-          }
+        // An accepted write is not confirmed here: Home Connect accepting the request
+        // is not the appliance taking the value. The appliance confirms it with a
+        // NOTIFY on the event stream, which writes the value in the datapoint's own
+        // form (the fleet rule "a command is confirmed only by the device").
+        if (!this.isMomentaryButton(channel, stateId) && res && !res.ok) {
+          // Rejected (409 "wrong operation state", 4xx): the user's wish stayed in
+          // the datapoint with ack:false and nothing corrected it — no poll, and
+          // the stream reports changes at the appliance, where nothing changed.
+          // One targeted read restores the real value. `undefined` = not sent.
+          await this.readBackAfterRejection(deviceId, haId, channel, stateId, meta?.bshKey);
         }
       } else if (channel === "programs" && stateId === "selectedProgram" && this.isSeenOnlyProgram(deviceId, value)) {
         // A program the appliance ran but the cloud does not offer: it is in the
