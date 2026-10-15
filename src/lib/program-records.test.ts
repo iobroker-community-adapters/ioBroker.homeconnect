@@ -44,6 +44,38 @@ describe("program records", () => {
     expect(decodeSessionSummary(DW_SUMMARY)?.programUid).toBe(8195);
   });
 
+  it("reads the summary the event stream hands over already parsed", () => {
+    // Verbatim from krobi's server log (2026-10-10 09:53:59, washer-dryer): the
+    // stream sent the record as an object, and the adapter reported it unreadable.
+    const streamed: unknown = JSON.parse(
+      '{"counter":374,"end":"2026-10-10T07:53:53.882Z","sequence":[{"configuration":{"options":[{"uid":27143,"value":false},{"uid":24833,"value":true},{"uid":24834,"value":true},{"uid":24584,"value":false},{"uid":24578,"value":254},{"uid":24581,"value":8},{"uid":24577,"value":254},{"uid":27395,"value":0},{"uid":531,"value":4680},{"uid":551,"value":4680},{"uid":12289,"value":1}],"program":31491},"details":[{"uid":616,"value":354},{"uid":627,"value":140320},{"uid":617,"value":2096520},{"uid":622,"value":12340000},{"uid":628,"value":462},{"uid":630,"value":6300},{"uid":623,"value":84000},{"uid":626,"value":0},{"uid":8197,"value":7372},{"uid":8198,"value":59},{"uid":8199,"value":5609},{"uid":8200,"value":35}]}],"start":"2026-10-10T06:08:20.480Z"}',
+    );
+    expect(decodeSessionSummary(streamed)).toEqual({
+      counter: 374,
+      start: Date.parse("2026-10-10T06:08:20.480Z"),
+      end: Date.parse("2026-10-10T07:53:53.882Z"),
+      programUid: 31491,
+      details: {
+        616: 354,
+        617: 2096520,
+        622: 12340000,
+        623: 84000,
+        626: 0,
+        627: 140320,
+        628: 462,
+        630: 6300,
+        8197: 7372,
+        8198: 59,
+        8199: 5609,
+        8200: 35,
+      },
+    });
+    // The same holds for the other JSON records the stream may send parsed.
+    expect(decodeErrorCodes(["E15"])).toBe("E15");
+    expect(decodeErrorCodes({ length: 0, list: [] })).toBe("");
+    expect(decodeFavoriteProgram({ length: 1, list: [{ program: 8200 }] })).toBe(8200);
+  });
+
   it("reads the fault codes as one text, empty when there is none", () => {
     expect(decodeErrorCodes("[]")).toBe("");
     expect(decodeErrorCodes('["E15", "E24"]')).toBe("E15, E24");

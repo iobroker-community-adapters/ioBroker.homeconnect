@@ -7691,6 +7691,27 @@ describe("decoded program records (decision 40)", () => {
     );
   });
 
+  it("draws the last run from a summary the stream hands over as an object", async () => {
+    // krobi's washer-dryer (2026-10-10): the run summary came through the stream
+    // already parsed, and no last-run datapoint was ever drawn.
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    sync.handleStreamEvent({
+      event: "STATUS",
+      id: "HA-1",
+      data: JSON.stringify({
+        items: [{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: JSON.parse(SUMMARY) as unknown }],
+      }),
+    });
+    await flush();
+    expect(port.states.get("wt-1.lastRun.program")).toBe("spin");
+    expect(port.states.get("wt-1.lastRun.duration")).toBe(12);
+    expect(port.states.get("wt-1.lastRun.water")).toBe(35.9);
+    expect(port.logs.filter(l => l.includes("cannot read yet"))).toEqual([]);
+  });
+
   it("shows nothing for a record of a shape it cannot read, and says so once", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", {

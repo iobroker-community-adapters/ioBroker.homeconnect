@@ -170,7 +170,7 @@ export function decodeProgramDetails(value: unknown): ProgramDetails | undefined
 /**
  * The summary of the last finished run.
  *
- * @param value the `ProgramSessionSummary.Latest` value (JSON text)
+ * @param value the `ProgramSessionSummary.Latest` value (JSON text, or the stream's parsed object)
  * @returns the summary, or undefined for another shape
  */
 export function decodeSessionSummary(value: unknown): SessionSummary | undefined {
@@ -199,7 +199,7 @@ export function decodeSessionSummary(value: unknown): SessionSummary | undefined
 /**
  * The appliance's current fault codes as one readable text — "" when there is no fault.
  *
- * @param value the `ErrorCodesList` value (JSON text)
+ * @param value the `ErrorCodesList` value (JSON text, or the stream's parsed object)
  * @returns the codes joined by ", ", or undefined for another shape
  */
 export function decodeErrorCodes(value: unknown): string | undefined {
@@ -218,7 +218,7 @@ export function decodeErrorCodes(value: unknown): string | undefined {
 /**
  * The program number a favourite slot holds.
  *
- * @param value the `Favorite.NNN.Program` value (JSON text)
+ * @param value the `Favorite.NNN.Program` value (JSON text, or the stream's parsed object)
  * @returns the program number, or undefined for another shape
  */
 export function decodeFavoriteProgram(value: unknown): number | undefined {
@@ -229,12 +229,17 @@ export function decodeFavoriteProgram(value: unknown): number | undefined {
 }
 
 /**
- * JSON text → value, or undefined when it is not JSON.
+ * JSON text → value, or undefined when it is not JSON. The event stream hands
+ * the same record over already parsed (a washer-dryer's run summary, 2026-10-10)
+ * — an object or a list is that value itself.
  *
  * @param value the value off the wire
  * @returns the parsed value
  */
 function parseJson(value: unknown): unknown {
+  if (isRecord(value) || Array.isArray(value)) {
+    return value;
+  }
   if (typeof value !== "string") {
     return undefined;
   }
