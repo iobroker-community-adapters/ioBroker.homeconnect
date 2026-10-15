@@ -223,6 +223,18 @@ export class StateMirror {
   }
 
   /**
+   * What a state holds, as the start-up read and every write since left it — a read-only state is read here, never
+   * one by one from the database (the adapter is its only writer).
+   *
+   * @param id the full id
+   * @returns the held value, ack and quality, or undefined when the state is not held
+   */
+  held(id: string): { val: ioBroker.StateValue; ack: boolean; q: number } | undefined {
+    const held = this.states.get(id);
+    return held ? { val: held.val as ioBroker.StateValue, ack: held.ack, q: held.q } : undefined;
+  }
+
+  /**
    * Hold what was written.
    *
    * @param id the full id

@@ -71,6 +71,65 @@ if (dir) {
       },
     })
     .enable();
+  // Round 113: where every outgoing TCP connection really goes. The probe loads first, so its connect is the innermost
+  // one — it sees the address a fixture hook rerouted to, not the one the adapter asked for. A connection that leaves
+  // this machine reached the real world: a forgotten route to a cloud, a device on the LAN (yamaha lab run 2026-10-14:
+  // the router at 10.47.4.1 answered a discovery while the fixtures were missing).
+  const LOOPBACK = /^(?:127\.|::1$|::ffff:127\.|localhost$)/;
+  const leftMachine = args => {
+    const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+    const o =
+      first && typeof first === "object"
+        ? first
+        : { port: first, host: typeof args[1] === "string" ? args[1] : undefined };
+    if (typeof o.path === "string" || o.port === undefined || o.port === null) {
+      return;
+    }
+    const host = String(o.host ?? "localhost");
+    if (!LOOPBACK.test(host)) {
+      land("tcp", host, Number(o.port));
+    }
+  };
+  const land = (kind, host, port) =>
+    fs.appendFileSync(
+      path.join(dir, `${process.pid}.lands`),
+      `${JSON.stringify({ t: Date.now(), kind, host, port })}\n`,
+    );
+  // a unicast datagram leaves this machine as well (a LAN protocol on UDP alone, govee's); a multicast or broadcast
+  // search does on purpose and is not judged
+  const broadcasts = new Set(["255.255.255.255"]);
+  for (const list of Object.values(require("node:os").networkInterfaces())) {
+    for (const a of list ?? []) {
+      if (a.family === "IPv4" && a.netmask) {
+        const n = s => s.split(".").reduce((v, b) => v * 256 + Number(b), 0);
+        const b = (n(a.address) | (~n(a.netmask) >>> 0)) >>> 0;
+        broadcasts.add([24, 16, 8, 0].map(s => (b >>> s) & 255).join("."));
+      }
+    }
+  }
+  const sendDatagram = dgram.Socket.prototype.send;
+  dgram.Socket.prototype.send = function (...args) {
+    // send(msg, port, address) or send(msg, offset, length, port, address); an unbound socket binds and sends again
+    const portAt = typeof args[1] === "number" && typeof args[2] === "number" ? 3 : 1;
+    const host =
+      typeof args[portAt] === "number" && typeof args[portAt + 1] === "string" ? args[portAt + 1] : undefined;
+    let bound = true;
+    try {
+      this.address();
+    } catch {
+      bound = false;
+    }
+    if (
+      bound &&
+      host !== undefined &&
+      !LOOPBACK.test(host) &&
+      !/^(?:22[4-9]|23\d)\.|^ff/i.test(host) &&
+      !broadcasts.has(host)
+    ) {
+      land("udp", host, args[portAt]);
+    }
+    return sendDatagram.apply(this, args);
+  };
   // a server or socket gets its handle in an internal nextTick — its owner is whoever calls listen/connect/bind
   const OWNER = Symbol("resourceProbeOwner");
   for (const [proto, method] of [
@@ -82,6 +141,9 @@ if (dir) {
     proto[method] = function (...args) {
       if (!this[OWNER]) {
         this[OWNER] = owner();
+      }
+      if (method === "connect") {
+        leftMachine(args);
       }
       return original.apply(this, args);
     };
@@ -117,6 +179,53 @@ if (dir) {
     }
     return write.call(this, chunk, ...args);
   };
+  // Round 77: the single reads the ADAPTER asks for — getState/getForeignState, and setStateChanged/
+  // setForeignStateChanged, which read the state before they write (js-controller 7.2.2 _setStateChangedHelper), also
+  // through their …Async forms (promisify in js-controller-common-db, 7.2.2). A read js-controller makes for itself —
+  // extendObject or setObjectNotExists read a state to set its `def` — runs through js-controller-adapter frames and does
+  // not count. A bulk read
+  // (getStatesAsync) is no single read.
+  const singleReads = new Map();
+  const Module = require("node:module");
+  const load = Module._load;
+  const WRAPPED = Symbol("resourceProbeWrapped");
+  const askedByAdapter = () => {
+    const stack = new Error().stack || "";
+    for (const line of stack.split("\n").slice(3)) {
+      const m = line.match(/\(?((?:file:\/\/)?\/[^():]+):\d+/);
+      if (!m || line.includes("node:") || /\/@iobroker\/js-controller-common(-db)?\//.test(m[1])) {
+        continue;
+      }
+      return !m[1].includes("/@iobroker/js-controller-adapter/");
+    }
+    return false;
+  };
+  Module._load = function (...args) {
+    const exported = load.apply(this, args);
+    const cls = exported && typeof exported === "object" ? exported.AdapterClass : undefined;
+    if (typeof cls === "function" && !cls.prototype[WRAPPED]) {
+      cls.prototype[WRAPPED] = true;
+      for (const [method, foreign] of [
+        ["getState", false],
+        ["getForeignState", true],
+        ["setStateChanged", false],
+        ["setForeignStateChanged", true],
+      ]) {
+        const original = cls.prototype[method];
+        if (typeof original !== "function") {
+          continue;
+        }
+        cls.prototype[method] = function (id, ...rest) {
+          if (typeof id === "string" && askedByAdapter()) {
+            const full = foreign || id.startsWith(`${this.namespace}.`) ? id : `${this.namespace}.${id}`;
+            singleReads.set(full, (singleReads.get(full) || 0) + 1);
+          }
+          return original.call(this, id, ...rest);
+        };
+      }
+    }
+    return exported;
+  };
   const mine = o => o.startsWith("adapter ") || o.startsWith("library ");
   process.on("exit", () => {
     let quiet = {};
@@ -143,6 +252,9 @@ if (dir) {
         left.push(`${h.constructor.name} from ${h[OWNER]}`);
       }
     }
-    fs.writeFileSync(path.join(dir, `${process.pid}.json`), JSON.stringify({ left, quiet }));
+    fs.writeFileSync(
+      path.join(dir, `${process.pid}.json`),
+      JSON.stringify({ left, quiet, single: Object.fromEntries(singleReads) }),
+    );
   });
 }

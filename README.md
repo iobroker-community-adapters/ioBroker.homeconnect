@@ -81,10 +81,13 @@ homeconnect.0.
 │   ├── signedIn             — The adapter holds a usable login
 │   └── lastError            — Home Connect's answer when a sign-in was refused
 └── {model}-{last 4}.        — One device per appliance, e.g. sx87tx02ce-5775
-    ├── info.reachable       — Appliance connected to Home Connect
+    ├── info.
+    │   ├── reachable        — Appliance connected to Home Connect
+    │   └── firmware         — Firmware version (washer, dryer, washer-dryer)
     ├── status.              — Operation state, door, remaining time, progress …
     ├── settings.            — Power, child lock, temperatures … (writable)
-    ├── events.              — All events of the appliance type from the first start: program finished, salt low …
+    ├── events.              — One channel per event of the appliance type from the first start, each with `active`
+    ├── doors.               — Refrigerators: one channel per compartment door, each with `open`
     ├── programs.
     │   ├── selectedProgram  — Program to start (writable)
     │   ├── activeProgram    — Running program

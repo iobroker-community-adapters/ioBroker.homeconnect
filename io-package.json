@@ -120,6 +120,7 @@
     "compact": true,
     "connectionType": "cloud",
     "dataSource": "push",
+    "dataFolder": "homeconnect.%INSTANCE%",
     "adminUI": {
       "config": "json"
     },

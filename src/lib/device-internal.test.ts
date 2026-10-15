@@ -7,7 +7,8 @@ describe("appliance-internal keys (decision 48)", () => {
     expect(isDeviceInternalKey("BSH.Common.Setting.AllowBackendConnection")).toBe(true);
     expect(isDeviceInternalKey("BSH.Common.Command.DeactivateWiFi")).toBe(true);
     expect(isDeviceInternalKey("BSH.Common.Status.SoftwareUpdateTransactionID")).toBe(true);
-    expect(isDeviceInternalKey("LaundryCare.Common.Status.Version.Smm.DomainFw")).toBe(true);
+    expect(isDeviceInternalKey("LaundryCare.Common.Status.Version.Smm.HcFw")).toBe(true);
+    expect(isDeviceInternalKey("LaundryCare.Common.Status.Version.Smm.UiLogicFw")).toBe(true);
     expect(isDeviceInternalKey("LaundryCare.Common.Status.Version.E2e.Scope")).toBe(true);
     expect(isDeviceInternalKey("Dishcare.Dishwasher.Status.Version.Anything")).toBe(true);
   });
@@ -25,5 +26,9 @@ describe("appliance-internal keys (decision 48)", () => {
     expect(isDeviceInternalKey("LaundryCare.Dryer.Status.ConnectedDry.Version")).toBe(false);
     expect(isDeviceInternalKey("BSH.Common.Status.OperationState")).toBe(false);
     expect(isDeviceInternalKey("BSH.Common.Setting.PowerState")).toBe(false);
+  });
+
+  it("keeps the domain firmware, which info.firmware shows (krobi 2026-10-15)", () => {
+    expect(isDeviceInternalKey("LaundryCare.Common.Status.Version.Smm.DomainFw")).toBe(false);
   });
 });

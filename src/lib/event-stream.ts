@@ -36,6 +36,17 @@ const STABLE_CONNECTION_MS = 60_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 
 /**
+ * Whether a refused connect is Home Connect being away rather than refusing the adapter: a 5xx, or a 404 on the fixed
+ * stream endpoint (the cloud's doing as much as a 5xx).
+ *
+ * @param status the HTTP status of the refused connect
+ * @returns whether the stream connect failed because Home Connect is away
+ */
+function awayStatus(status: number): boolean {
+  return status >= 500 || status === 404;
+}
+
+/**
  * The reason of a refused connect, with its likely cause as a half sentence —
  * the fleet rule for a warning. The stream endpoint is fixed, so a 404 is the
  * cloud's doing as much as a 5xx (measured live 2026-09-23: 503, 504 and 404 in
@@ -58,7 +69,7 @@ function refusedReason(status: number, refusal: { key?: string; description?: st
   }
   const said = [refusal.key, refusal.description].filter(Boolean).join(": ");
   const detail = said ? ` (${said})` : "";
-  if (status >= 500 || status === 404) {
+  if (awayStatus(status)) {
     return `HTTP ${status}${detail}, a problem on the Home Connect side`;
   }
   if (status === 401 || status === 403) {
@@ -271,7 +282,9 @@ export class EventStream {
         // garbage collector finds it, once per retry of a failing spell.
         const refusal = await this.readRefusedKey(res, abort);
         const retryMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
-        this.noteConnectFailure(refusedReason(res.status, refusal, retryMs));
+        // A problem on the Home Connect side (5xx, 404) is Home Connect being away; the other refusals are ones the
+        // user can act on (login, quota).
+        this.noteConnectFailure(refusedReason(res.status, refusal, retryMs), awayStatus(res.status));
         if (res.status === 429) {
           const pause = retryMs ?? RATE_LIMIT_FALLBACK_MS;
           this.rateLimitedUntil = this.now() + pause;
@@ -285,7 +298,7 @@ export class EventStream {
         return;
       }
       if (!res.body) {
-        this.noteConnectFailure(`HTTP ${res.status}, connected without a body`);
+        this.noteConnectFailure(`HTTP ${res.status}, connected without a body`, true);
         return;
       }
       connectedAt = this.now();
@@ -307,7 +320,7 @@ export class EventStream {
       if (!this.stopped) {
         if (connectedAt === undefined) {
           // The watchdog's abort surfaces as "This operation was aborted" — say what happened.
-          this.noteConnectFailure(timedOut ? `no answer within ${CONNECT_TIMEOUT_MS / 1000} s` : errMessage(e));
+          this.noteConnectFailure(timedOut ? `no answer within ${CONNECT_TIMEOUT_MS / 1000} s` : errMessage(e), true);
         } else {
           this.deps.log("debug", `event stream ended: ${errMessage(e)}`);
         }
@@ -328,17 +341,19 @@ export class EventStream {
   }
 
   /**
-   * Report a failed connect attempt: the first of a failing spell warns (the
-   * user should know live updates are paused), repeats stay on debug, and the
-   * next successful connect announces the recovery.
+   * Report a failed connect attempt. Home Connect being away (no answer, a transport error, a 5xx) is a state —
+   * `info.connection` shows it — and stays on debug, its return too (the fleet rule "offline is a state, not a log
+   * line"). A refusal the user can act on (login, quota) warns once per spell, and the next successful connect
+   * announces the recovery.
    *
    * @param reason what went wrong ({@link refusedReason}, a transport error)
+   * @param away whether Home Connect is just not there right now
    */
-  private noteConnectFailure(reason: string): void {
+  private noteConnectFailure(reason: string, away: boolean): void {
     this.lastFailure = reason;
-    const level = this.failureWarned ? "debug" : "warn";
+    const level = away || this.failureWarned ? "debug" : "warn";
     this.deps.log(level, `event stream connect failed: ${reason} — live updates are paused until it reconnects.`);
-    this.failureWarned = true;
+    this.failureWarned ||= !away;
   }
 
   /**

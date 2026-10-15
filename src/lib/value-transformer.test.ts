@@ -29,6 +29,7 @@ vi.mock("@iobroker/adapter-core", () => {
 import {
   shortEnum,
   shortEnumIn,
+  numberRole,
   stateIdForKey,
   transformItem,
   transformOptionDefinition,
@@ -94,7 +95,7 @@ describe("transformItem", () => {
       key: "BSH.Common.Event.ProgramFinished",
       value: "BSH.Common.EnumType.EventPresentState.Present",
     });
-    expect(present).toMatchObject({ channel: "events", id: "programFinished", value: true });
+    expect(present).toMatchObject({ channel: "events.programFinished", id: "active", value: true });
     expect(present.common).toMatchObject({ type: "boolean", read: true, write: false });
 
     const off = transformItem({
@@ -225,7 +226,7 @@ describe("transformItem", () => {
       constraints: { min: 0, max: 86400 },
     });
     expect(t).toMatchObject({ channel: "status", id: "remainingProgramTime", value: 151 });
-    expect(t.common).toMatchObject({ type: "number", role: "value", unit: "min", min: 0, max: 1440 });
+    expect(t.common).toMatchObject({ type: "number", role: "time.span", unit: "min", min: 0, max: 1440 });
     // A number the table does not convert keeps its value; the cloud's unit word reads the ioBroker way.
     const kept = transformItem({ key: "BSH.Common.Option.ProgramProgress", value: 40, unit: "%" });
     expect(kept.value).toBe(40);
@@ -285,7 +286,14 @@ describe("transformItem", () => {
       unit: "°C",
       constraints: { min: 2, max: 8 },
     });
-    expect(t.common).toMatchObject({ type: "number", role: "level", read: true, write: true, min: 2, max: 8 });
+    expect(t.common).toMatchObject({
+      type: "number",
+      role: "level.temperature",
+      read: true,
+      write: true,
+      min: 2,
+      max: 8,
+    });
   });
 
   it("carries the constraints' step size into common.step", () => {
@@ -386,7 +394,7 @@ describe("transformOptionDefinition", () => {
     });
     expect(t.common).toMatchObject({
       type: "number",
-      role: "level",
+      role: "level.timer",
       write: true,
       unit: "min",
       min: 0,
@@ -546,7 +554,7 @@ describe("value-transformer edge inputs", () => {
       key: "BSH.Common.EnumType.EventPresentState",
       value: "BSH.Common.EnumType.EventPresentState.Present",
     });
-    expect(t).toMatchObject({ channel: "events", id: "unnamedEvent", value: true, nameSource: "i18n" });
+    expect(t).toMatchObject({ channel: "events.unnamedEvent", id: "active", value: true, nameSource: "i18n" });
     expect(t.common).toMatchObject({ type: "boolean", write: false });
   });
 });
@@ -611,13 +619,44 @@ describe("expandBshItem — doors and the derived programRunning", () => {
     expect(locked[1]?.value).toBe(true);
   });
 
-  it("maps a per-compartment door to its own <compartment>Open boolean", () => {
+  it("gives a number the catalogue's detailed role by the unit it shows", () => {
+    expect(numberRole("min", false)).toBe("time.span");
+    expect(numberRole("s", true)).toBe("level.timer");
+    expect(numberRole("°C", false)).toBe("value.temperature");
+    expect(numberRole("°F", true)).toBe("level.temperature");
+    expect(numberRole("kWh", false)).toBe("value.energy.consumed");
+    // Any other number: the plain role, set or read.
+    expect(numberRole("%", true)).toBe("level");
+    expect(numberRole("%", false)).toBe("value");
+    expect(numberRole(undefined, true)).toBe("level");
+  });
+
+  it("shows the domain firmware's version as info.firmware, and no other version part (krobi 2026-10-15)", () => {
+    const [fw, ...rest] = expandBshItem(
+      { key: "LaundryCare.Common.Status.Version.Smm.DomainFw", value: "2.5.0 17.10.2024 07:55:52" },
+      false,
+    );
+    expect(rest).toHaveLength(0);
+    expect(fw).toMatchObject({ channel: "info", id: "firmware", value: "2.5.0" });
+    expect(fw?.common).toMatchObject({ type: "string", role: "info.firmware", read: true, write: false });
+    expect(
+      expandBshItem({ key: "LaundryCare.Common.Status.Version.Smm.DomainFw", value: undefined }, false)[0]?.value,
+    ).toBeUndefined();
+    // An empty text is no version either.
+    expect(
+      expandBshItem({ key: "LaundryCare.Common.Status.Version.Smm.DomainFw", value: "  " }, false)[0]?.value,
+    ).toBeUndefined();
+    expect(expandBshItem({ key: "LaundryCare.Common.Status.Version.Smm.HcFw", value: "2.2.0" }, false)).toEqual([]);
+  });
+
+  it("maps a per-compartment door to the open boolean of its own channel", () => {
     const states = expandBshItem(
       { key: "Refrigeration.Common.Status.Door.Freezer", value: "BSH.Common.EnumType.DoorState.Closed" },
       false,
     );
     expect(states).toHaveLength(1);
-    expect(states[0]).toMatchObject({ channel: "status", id: "doorFreezerOpen", value: false });
+    expect(states[0]).toMatchObject({ channel: "doors.freezer", id: "open", value: false });
+    expect(states[0]?.common.role).toBe("sensor.door");
   });
 
   it("leaves a door SETTING on the generic path", () => {
@@ -846,7 +885,8 @@ describe("compartment doors of a refrigeration appliance", () => {
     };
     for (const [segment, texts] of Object.entries(expected)) {
       const [t] = expandBshItem({ key: `Refrigeration.Common.Status.Door.${segment}`, value: undefined }, false);
-      expect(t.id, segment).toBe(`door${segment}Open`);
+      expect(t.channel, segment).toBe(`doors.${segment.charAt(0).toLowerCase()}${segment.slice(1)}`);
+      expect(t.id, segment).toBe("open");
       expect(t.common.name, segment).toMatchObject(texts);
     }
   });
@@ -1137,7 +1177,7 @@ describe("run values the cloud delivers as options (decision 49)", () => {
 
   it("shows a run value read-only and keeps the short value it had as an option", () => {
     const t = transformItem({ key: "BSH.Common.Option.RemainingProgramTime", value: 600, unit: "seconds" });
-    expect(t.common).toMatchObject({ write: false, role: "value", unit: "min" });
+    expect(t.common).toMatchObject({ write: false, role: "time.span", unit: "min" });
     expect(t.value).toBe(10);
     const phase = transformItem({
       key: "LaundryCare.Common.Option.ProcessPhase",

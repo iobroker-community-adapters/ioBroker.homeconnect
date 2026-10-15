@@ -442,7 +442,7 @@ describe("EventStream connect watchdog + failure reporting", () => {
     es.stop();
   });
 
-  it("warns once about a failing spell, repeats on debug, and announces the recovery", async () => {
+  it("warns once about a refusal the user can act on, repeats on debug, and announces the recovery", async () => {
     const h = harness();
     let calls = 0;
     vi.stubGlobal(
@@ -451,7 +451,7 @@ describe("EventStream connect watchdog + failure reporting", () => {
         .fn()
         .mockImplementation(() =>
           Promise.resolve(
-            ++calls <= 2 ? { ok: false, status: 503, body: null } : { ok: true, body: bodyLasting(h.clock, 70_000) },
+            ++calls <= 2 ? { ok: false, status: 400, body: null } : { ok: true, body: bodyLasting(h.clock, 70_000) },
           ),
         ),
     );
@@ -467,6 +467,33 @@ describe("EventStream connect watchdog + failure reporting", () => {
     h.fireReconnect();
     await flush();
     expect(h.logs.some(l => l.level === "info" && l.msg.includes("connected again"))).toBe(true);
+    es.stop();
+  });
+
+  it("keeps Home Connect being away and its return on debug — a state, not a log line", async () => {
+    const h = harness();
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        calls++;
+        if (calls === 1) {
+          return Promise.reject(new Error("fetch failed"));
+        }
+        return Promise.resolve(
+          calls === 2 ? { ok: false, status: 503, body: null } : { ok: true, body: bodyLasting(h.clock, 70_000) },
+        );
+      }),
+    );
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    h.fireReconnect();
+    await flush();
+    h.fireReconnect();
+    await flush();
+    expect(h.logs.filter(l => l.msg.includes("connect failed")).map(l => l.level)).toEqual(["debug", "debug"]);
+    expect(h.logs.filter(l => l.level !== "debug" && /connected again/.test(l.msg))).toEqual([]);
     es.stop();
   });
 
@@ -525,9 +552,10 @@ describe("EventStream connect watchdog + failure reporting", () => {
       const es = new EventStream(h.deps);
       es.start();
       await flush();
-      expect(h.logs.find(l => l.level === "warn")?.msg).toBe(
-        `event stream connect failed: ${reason} — live updates are paused until it reconnects.`,
-      );
+      const line = h.logs.find(l => l.msg.includes("connect failed"));
+      expect(line?.msg).toBe(`event stream connect failed: ${reason} — live updates are paused until it reconnects.`);
+      // Home Connect being away is a state; a refusal the user can act on warns.
+      expect(line?.level).toBe(status >= 500 || status === 404 ? "debug" : "warn");
       es.stop();
     }
   });

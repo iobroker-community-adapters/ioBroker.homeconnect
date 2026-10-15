@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import * as utils from "@iobroker/adapter-core";
 import { I18n } from "@iobroker/adapter-core";
-import { HomeConnectAuth, extractRefreshToken, type StoredToken } from "./lib/oauth";
+import { HomeConnectAuth, extractRefreshToken, type FormPostResult, type StoredToken } from "./lib/oauth";
 import { getJson, postForm, putJson, deleteJson, rateLimitText, type JsonResult } from "./lib/http";
 import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
 import { AuthController, type AuthPort } from "./lib/auth-controller";
@@ -14,6 +14,7 @@ import { migrateNativeKeys } from "./lib/native-key-migration";
 import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { LogDedup, categorize } from "./lib/log-dedup";
 import { declaredLimit } from "./lib/api-limits";
+import { readSentTimes, writeSentTimes } from "./lib/request-budget";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import type { I18nKey } from "./lib/i18n";
 
@@ -38,7 +39,8 @@ const MIN_REQUEST_GAP_MS = 100;
 const REQUESTS_PER_MINUTE = declaredLimit(60);
 /**
  * The budget in force: {@link REQUESTS_PER_MINUTE}, widened only by `HOMECONNECT_REQUESTS_PER_MINUTE` — which the
- * inventory run's fixture server sets (`test/inventory-fetch-hook.cjs`): it answers at once and lists every program of
+ * inventory run's pacing hook sets (`test/inventory-pacing-hook.cjs`, never in the installations its limit tests judge):
+ * the fixture server answers at once and lists every program of
  * every model, over a thousand requests. The variable can only widen the budget, never narrow it.
  *
  * @returns requests allowed in any minute
@@ -171,6 +173,8 @@ export class Homeconnect extends utils.Adapter {
   private readonly stateMirror = new StateMirror();
   /** Send times of the requests within the last minute (see {@link REQUESTS_PER_MINUTE}). */
   private sentAt: number[] = [];
+  /** Where the send times of the last minute outlive a restart (request-budget.ts); empty until onReady knows it. */
+  private budgetFile = "";
   /** Epoch-ms of the last request sent (see {@link MIN_REQUEST_GAP_MS}). */
   private lastSentAt = 0;
   /** Requests waiting for their place; a user's write stands before every waiting read. */
@@ -234,6 +238,8 @@ export class Homeconnect extends utils.Adapter {
       // write is compared against them.
       await this.readOwnObjects();
       await this.readOwnStates();
+      // Before the first request: the minute a previous process spent still counts — Home Connect counts per account.
+      this.takeOverRequestBudget();
       // Whatever goes offline at a stop goes offline at the start too: after a
       // crash, a kill or a power cut the teardown never ran, and nothing else
       // would correct a green marker until a sign-in succeeds — which can take
@@ -308,7 +314,7 @@ export class Homeconnect extends utils.Adapter {
       }
 
       const auth = new HomeConnectAuth({ clientId, clientSecret, baseUrl: DEFAULT_BASE_URL }, (path, form) =>
-        postForm(DEFAULT_BASE_URL, path, form),
+        this.sendForm(path, form),
       );
       this.authCtl = this.makeAuthController(auth, this.makeAuthPort());
       await this.authCtl.start();
@@ -447,6 +453,65 @@ export class Homeconnect extends utils.Adapter {
   }
 
   /**
+   * One sign-in request (device code, token poll, refresh): it goes to the same host Home Connect counts per minute,
+   * so it takes a place in the request budget — ahead of waiting reads, like a user's write.
+   *
+   * @param path the OAuth endpoint path
+   * @param form the form fields
+   * @returns the answer, or a transport failure when the adapter shut down while it waited
+   */
+  private async sendForm(path: string, form: Record<string, string>): Promise<FormPostResult> {
+    if (!(await this.spaceRequests(true))) {
+      return {
+        status: 0,
+        ok: false,
+        body: { error: "network_error", error_description: "the adapter is shutting down" },
+      };
+    }
+    return postForm(DEFAULT_BASE_URL, path, form);
+  }
+
+  /**
+   * Take over the send times of the last minute a previous process of this instance left in its data folder.
+   */
+  private takeOverRequestBudget(): void {
+    try {
+      this.budgetFile = join(utils.getAbsoluteInstanceDataDir(this), "request-times.json");
+      this.sentAt = readSentTimes(this.budgetFile, Date.now());
+      this.lastSentAt = this.sentAt.at(-1) ?? 0;
+    } catch (e) {
+      this.log.debug(`Could not read the request budget of the previous run: ${errMessage(e)}`);
+    }
+  }
+
+  /** Leave the send times of the last minute for the next process of this instance. */
+  private handOverRequestBudget(): void {
+    try {
+      writeSentTimes(this.budgetFile, this.sentAt, Date.now());
+    } catch (e) {
+      this.log.debug(`Could not keep the request budget for the next run: ${errMessage(e)}`);
+    }
+  }
+
+  /**
+   * Read one of the own states: a read-only one from what the start-up read and the adapter's own writes hold (the
+   * adapter is its only writer — one bulk read at the start, never one by one), a writable one from the database,
+   * where a user's write may stand.
+   *
+   * @param id the namespace-relative or full own id
+   * @returns the state, or null when there is none
+   */
+  private async readState(id: string): Promise<ioBroker.State | null | undefined> {
+    if (this.objectMirror.readOnly(id)) {
+      const held = this.stateMirror.held(this.objectMirror.fullId(id));
+      if (held) {
+        return held as ioBroker.State;
+      }
+    }
+    return this.getStateAsync(id);
+  }
+
+  /**
    * Write a state only when its value changes. A read-only state is written by the
    * adapter alone and compared in memory; a writable one goes through
    * `setStateChangedAsync`, whose database compare also sees a user's write.
@@ -508,11 +573,15 @@ export class Homeconnect extends utils.Adapter {
       extendObject: (id, obj) => this.extendChangedObject(id, obj),
       setState: (id, state) => this.setStateRemembered(id, state),
       setStateChanged: (id, state) => this.setStateIfChanged(id, state),
-      getState: id => this.getStateAsync(id),
+      getState: id => this.readState(id),
       getObject: id => this.getObjectAsync(id),
       delObject: async id => {
         await this.delObjectAsync(id);
         this.objectMirror.forget(id);
+        this.stateMirror.forget(this.objectMirror.fullId(id), false);
+      },
+      delState: async id => {
+        await this.delStateAsync(id);
         this.stateMirror.forget(this.objectMirror.fullId(id), false);
       },
       delObjectRecursive: async id => {
@@ -638,7 +707,7 @@ export class Homeconnect extends utils.Adapter {
    * @returns the refresh token, or undefined if none is stored
    */
   private async loadRefreshToken(): Promise<string | undefined> {
-    const state = await this.getStateAsync("auth.session");
+    const state = await this.readState("auth.session");
     const raw = typeof state?.val === "string" ? state.val : "";
     // Fast exit for the common "never signed in" case. (Both readers below would
     // also return undefined for "", so this is clarity, not a guard.)
@@ -839,10 +908,9 @@ export class Homeconnect extends utils.Adapter {
       // so the tree stayed on its pre-outage state for another 57 minutes.
       if (await this.sync.syncAppliances()) {
         this.lastReconnectSync = Date.now();
-        // Worth an info line: the values in the tree jump, and without this the
-        // user has no way to tell a live update from a catch-up. A deferred one
-        // says so — it came minutes after the stream was back (measured live
-        // 2026-09-23: 21 minutes), which the line alone did not tell.
+        // On debug: an outage and its return are a state (`info.connection`), not a log line (the fleet rule,
+        // inventory suite "counterpart gone and back"). A deferred catch-up says so — it came minutes after the
+        // stream was back (measured live 2026-09-23: 21 minutes), which the line alone did not tell.
         // The hold-back is the adapter's own one-hour cooldown that PROTECTS the
         // daily quota — not an exhausted quota; below a minute it says seconds.
         const heldBack =
@@ -851,7 +919,7 @@ export class Homeconnect extends utils.Adapter {
             : heldBackMs < 60_000
               ? ` (held back ${Math.max(1, Math.round(heldBackMs / 1000))} s to protect the daily request quota)`
               : ` (held back ${Math.round(heldBackMs / 60_000)} min to protect the daily request quota)`;
-        this.log.info(
+        this.log.debug(
           `Live updates were interrupted for ${Math.round(outageMs / 1000)} s — re-read the appliances${heldBack}.`,
         );
       }
@@ -1337,6 +1405,8 @@ export class Homeconnect extends utils.Adapter {
   private onUnload(callback: () => void): void {
     try {
       this.terminating = true;
+      // No request goes out from here on: the minute spent so far goes to the next process.
+      this.handOverRequestBudget();
       this.signedIn = false;
       this.streamUp = false;
       const authCtl = this.authCtl;

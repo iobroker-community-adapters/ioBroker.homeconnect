@@ -11,7 +11,7 @@ import { tName } from "./i18n";
 import { stateText, DOOR_COMPARTMENT_NAMES } from "./state-texts";
 import { catalogValues, DEFAULT_LABEL_LANGUAGE, noProgramLabel, valueLabel } from "./value-labels";
 import { isProgramRecordKey } from "./program-records";
-import { isDeviceInternalKey } from "./device-internal";
+import { FIRMWARE_KEY, isDeviceInternalKey } from "./device-internal";
 import { boundShown, presentationFor, shownUnit, toShown } from "./value-units";
 import { isSwitchKey, switchRole, switchState } from "./switch-values";
 import { isRunValueKey, runValueChannel } from "./run-values";
@@ -226,6 +226,22 @@ export function stateIdForKey(key: string): { channel: string; id: string } {
   return { channel: "misc", id: lowerFirst(parts[parts.length - 1] ?? key) };
 }
 
+/** The state every event channel carries: whether the event is present right now. */
+export const EVENT_STATE_ID = "active";
+
+/**
+ * Where a key's datapoint lives: {@link stateIdForKey}, except that every event is a channel of its own below the
+ * `events` folder — `events.<event>.active`. The role catalogue allows a detailed role once per channel, and an
+ * appliance reports up to twenty events (krobi 2026-10-15: "Eigener Kanal je Tür/Ereignis").
+ *
+ * @param key the fully-qualified BSH key
+ * @returns the channel path and the within-channel id
+ */
+export function statePathForKey(key: string): { channel: string; id: string } {
+  const { channel, id } = stateIdForKey(key);
+  return channel === "events" ? { channel: `events.${id}`, id: EVENT_STATE_ID } : { channel, id };
+}
+
 /**
  * Join key segments after the kind into one speaking camelCase id:
  * ["Door", "Freezer"] → "doorFreezer"; ["Favorite", "001", "ExternalTrigger"] →
@@ -258,7 +274,7 @@ export function sharesShortValue(key: string): boolean {
  * @returns the transformed state ready to create and set
  */
 export function transformItem(item: BshItem): TransformedState {
-  const { channel, id } = stateIdForKey(item.key);
+  const { channel, id } = statePathForKey(item.key);
   const { common, value, bshValues, nameSource, seenValues } = transformValue(item);
   return { channel, id, common, nameSource, value, bshValues, ...(seenValues ? { seenValues } : {}) };
 }
@@ -345,8 +361,30 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
   if (isProgramRecordKey(item.key)) {
     return [];
   }
-  // An appliance-internal key (connection, firmware) never becomes a datapoint, and an old one is migrated away
-  // (decision 48).
+  // The appliance's firmware is the version of its domain firmware, under `info` (krobi 2026-10-15: "sowas wie
+  // firmware version wäre schon interessant unter info", chosen on his washer-dryer's values: "DomainFw, nur die
+  // Version"). The cloud sends it with the build time ("2.5.0 17.10.2024 07:55:52"); the datapoint carries "2.5.0".
+  if (item.key === FIRMWARE_KEY) {
+    const version = typeof item.value === "string" ? item.value.trim().split(/\s+/)[0] : undefined;
+    return [
+      {
+        channel: "info",
+        id: "firmware",
+        common: {
+          name: tName("firmware"),
+          desc: tName("firmwareDesc"),
+          type: "string",
+          role: "info.firmware",
+          read: true,
+          write: false,
+        },
+        nameSource: "i18n",
+        value: version === undefined || version.length === 0 ? undefined : version,
+      },
+    ];
+  }
+  // An appliance-internal key (connection, the other version parts) never becomes a datapoint, and an old one is
+  // migrated away (decision 48).
   if (isDeviceInternalKey(item.key)) {
     return [];
   }
@@ -377,14 +415,15 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
       }
       return states;
     }
-    const id = `${stateIdForKey(item.key).id}Open`;
-    // The compartment is the key's last segment ("Freezer", "Refrigerator", …).
+    // The compartment is the key's last segment ("Freezer", "Refrigerator", …). Each compartment door is a channel
+    // of its own below the `doors` folder: a refrigerator reports up to eleven doors, and the role catalogue allows
+    // `sensor.door` once per channel (krobi 2026-10-15: "Eigener Kanal je Tür/Ereignis").
     const compartment = item.key.split(".").at(-1) ?? "";
     const named = DOOR_COMPARTMENT_NAMES[compartment];
     return [
       {
-        channel: "status",
-        id,
+        channel: `doors.${lowerFirst(compartment)}`,
+        id: "open",
         common: {
           ...booleanCommon(named ? tName(named) : tName("doorCompartmentOpen", compartment), "sensor.door", false),
           desc: tName("doorCompartmentOpenDesc"),
@@ -667,6 +706,36 @@ function transformValue(item: BshItem): {
   };
 }
 
+/** Time units of the role catalogue (`time.span`, `level.timer`: "s, min, h, ms or d"). */
+const DURATION_UNITS: ReadonlySet<string> = new Set(["ms", "s", "min", "h", "d"]);
+/** Temperature units of the role catalogue (`value.temperature`: "°C or °F or K"). */
+const TEMPERATURE_UNITS: ReadonlySet<string> = new Set(["°C", "°F", "K"]);
+/** Energy units of the role catalogue (`value.energy.consumed`: "Ws, Wh, kWh"). */
+const ENERGY_UNITS: ReadonlySet<string> = new Set(["Ws", "Wh", "kWh"]);
+
+/**
+ * The role of a number by the unit it is shown in — the role catalogue asks for the most detailed role: a duration is
+ * `time.span` (read) or `level.timer` (set), a temperature `value.temperature` or `level.temperature`, an energy an
+ * appliance reports `value.energy.consumed` (what it used, like the last run's energy); any other number is `value` or
+ * `level`.
+ *
+ * @param unit the unit the datapoint shows
+ * @param writable whether the datapoint is set by the user
+ * @returns the role
+ */
+export function numberRole(unit: string | undefined, writable: boolean): string {
+  if (unit !== undefined && DURATION_UNITS.has(unit)) {
+    return writable ? "level.timer" : "time.span";
+  }
+  if (unit !== undefined && TEMPERATURE_UNITS.has(unit)) {
+    return writable ? "level.temperature" : "value.temperature";
+  }
+  if (unit !== undefined && ENERGY_UNITS.has(unit) && !writable) {
+    return "value.energy.consumed";
+  }
+  return writable ? "level" : "value";
+}
+
 /**
  * A number `common` in the unit a user reads: the unit, bounds and step of the appliance, converted where the
  * datapoint shows another unit (value-units.ts), the cloud's unit word in ioBroker's spelling otherwise.
@@ -687,16 +756,16 @@ function numberCommon(
   unit: string | undefined,
   constraints: ParsedConstraints | undefined,
 ): ioBroker.StateCommon {
+  const shown = shownUnit(key, unit);
   const common: ioBroker.StateCommon = {
     name,
     desc,
     type: "number",
-    role: writable ? "level" : "value",
+    role: numberRole(shown, writable),
     read: true,
     write: writable,
   };
   const p = presentationFor(key, unit);
-  const shown = shownUnit(key, unit);
   if (shown) {
     common.unit = shown;
   }
