@@ -4,7 +4,8 @@
 // `requestJson` core for the REST calls.
 
 import type { FormPostResult } from "./oauth";
-import { cleanLabel, errMessage } from "./pure-helpers";
+import { errText } from "./err-text";
+import { cleanLabel } from "./pure-helpers";
 
 /** Default per-request timeout (Home Connect research pins request timeout at 20 s). */
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -45,7 +46,7 @@ export async function postForm(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
-    return { status: 0, ok: false, body: { error: "network_error", error_description: errMessage(e) } };
+    return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) } };
   }
   // fetch resolves with the headers; the body can still break off (socket reset,
   // the timeout firing mid-stream). That is a transport failure like any other.
@@ -53,7 +54,7 @@ export async function postForm(
   try {
     parsed = await parseJsonBody(res);
   } catch (e) {
-    return { status: 0, ok: false, body: { error: "network_error", error_description: errMessage(e) } };
+    return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) } };
   }
   if (parsed.tooLarge) {
     return { status: 0, ok: false, body: { error: "response_too_large" } };
@@ -199,7 +200,7 @@ async function requestJson(
   try {
     res = await fetch(new URL(path, baseUrl), { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
-    return { status: 0, ok: false, data: undefined, error: `network_error: ${errMessage(e)}` };
+    return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}` };
   }
   // fetch resolves with the headers; the body can still break off (socket reset,
   // the timeout firing mid-stream). A rejection here travelled up through the
@@ -208,7 +209,7 @@ async function requestJson(
   try {
     return await toJsonResult(res);
   } catch (e) {
-    return { status: 0, ok: false, data: undefined, error: `network_error: ${errMessage(e)}` };
+    return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}` };
   }
 }
 

@@ -1,5 +1,6 @@
+// Fleet master — the release run copies this file into every adapter's src-admin/ and keeps only the adapter's own
+// Module-Federation name (the jsonConfig of the adapter refers to it); change it in Entwicklung/.consistency-master.
 import react from "@vitejs/plugin-react";
-import commonjs from "vite-plugin-commonjs";
 import { federation } from "@module-federation/vite";
 import { moduleFederationShared } from "@iobroker/gui-components/modulefederation.admin.config";
 import { readFileSync } from "node:fs";
@@ -7,6 +8,10 @@ import { readFileSync } from "node:fs";
 const config = {
   plugins: [
     federation({
+      // The component imports the adapter's own rules from ../src/lib; the plugin's type step would compile them
+      // under rootDir src-admin/src and fail (TS6059). The admin loads the remote at runtime — nothing consumes
+      // its types.
+      dts: false,
       manifest: true,
       name: "HomeConnectComponentSet",
       filename: "customComponents.js",
@@ -15,15 +20,8 @@ const config = {
       },
       remotes: {},
       shared: moduleFederationShared(JSON.parse(readFileSync("./package.json").toString())),
-      // The admin loads this remote at runtime; nobody consumes it as a typed
-      // module. Without this the plugin runs its own `tsc` over the exposed
-      // files with `rootDir: src` — and the shared `../../src/lib/pure-helpers`
-      // module lies outside it (TS6059), which fails the type step and drops a
-      // stray `.d.ts` next to the shared source.
-      dts: false,
     }),
     react(),
-    commonjs(),
   ],
   // Vite 8 resolves tsconfig paths natively — replaces the vite-tsconfig-paths plugin.
   resolve: {

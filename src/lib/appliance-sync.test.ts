@@ -790,6 +790,29 @@ describe("ApplianceSync.handleWrite", () => {
     expect(port.acks.get("oven.commands.pauseProgram")).toBe(false);
   });
 
+  it("lets a button fall back once Home Connect answered, also with a refusal (fleet suite D9)", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.oven`]: { _id: "", type: "device", common: {}, native: { haId: "HA-1" } } as unknown as ioBroker.Object,
+    };
+    port.primeStates = {
+      [`${NS}.oven.commands.pauseProgram`]: {
+        _id: "",
+        type: "state",
+        common: { type: "boolean", role: "button", read: false, write: true },
+        native: { bshKey: "BSH.Common.Command.PauseProgram" },
+      } as unknown as ioBroker.Object,
+    };
+    const sync = new ApplianceSync(port);
+    await sync.primeFromObjects();
+    port.userWrite("oven.commands.pauseProgram", true);
+    // The appliance is in no state to pause: Home Connect answers, and the press is over.
+    port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.WrongOperationState" };
+    await sync.handleWrite(`${NS}.oven.commands.pauseProgram`, true);
+    expect(port.states.get("oven.commands.pauseProgram")).toBe(false);
+    expect(port.acks.get("oven.commands.pauseProgram")).toBe(true);
+  });
+
   it("ignores a write to an unknown device", async () => {
     const port = new FakePort();
     const sync = new ApplianceSync(port);

@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { LogDedup, categorize, restLogKey } from "./log-dedup";
+import { describe, it, expect, vi } from "vitest";
+import { categorize, restLogKey } from "./log-dedup";
+import { LogOnce } from "./log-once";
 
 describe("categorize", () => {
   it("maps status bands to categories", () => {
@@ -12,38 +13,6 @@ describe("categorize", () => {
     expect(categorize(404)).toBe("http-4xx");
     expect(categorize(409)).toBe("http-4xx");
     expect(categorize(200)).toBe("other");
-  });
-});
-
-describe("LogDedup", () => {
-  it("warns on a new category, drops repeats to debug", () => {
-    const d = new LogDedup();
-    expect(d.note("GET /status", "rate")).toBe("warn");
-    expect(d.note("GET /status", "rate")).toBe("debug");
-    expect(d.note("GET /status", "rate")).toBe("debug");
-  });
-
-  it("warns again when the category changes at the same source", () => {
-    const d = new LogDedup();
-    expect(d.note("GET /status", "rate")).toBe("warn");
-    expect(d.note("GET /status", "auth")).toBe("warn");
-    expect(d.note("GET /status", "auth")).toBe("debug");
-  });
-
-  it("dedups sources independently", () => {
-    const d = new LogDedup();
-    expect(d.note("GET /status", "net")).toBe("warn");
-    expect(d.note("GET /settings", "net")).toBe("warn");
-    expect(d.note("GET /status", "net")).toBe("debug");
-  });
-
-  it("re-arms the warn after a recovery", () => {
-    const d = new LogDedup();
-    expect(d.note("GET /status", "rate")).toBe("warn");
-    expect(d.note("GET /status", "rate")).toBe("debug");
-    expect(d.recovered("GET /status")).toBe(true);
-    expect(d.recovered("GET /status")).toBe(false); // already cleared
-    expect(d.note("GET /status", "rate")).toBe("warn");
   });
 });
 
@@ -68,14 +37,19 @@ describe("restLogKey (2026-09-15, F10)", () => {
 
   it("dedups the same failure across appliances and keys, and recovers once", () => {
     // One 503 during the start-up used to warn once per path — 25 lines for
-    // one outage — and say "succeeded again" 25 times when it cleared.
-    const d = new LogDedup();
-    expect(d.note("GET /api/homeappliances/HA-1/settings/A", "http-5xx")).toBe("warn");
-    expect(d.note("GET /api/homeappliances/HA-1/settings/B", "http-5xx")).toBe("debug");
-    expect(d.note("GET /api/homeappliances/HA-2/settings/A", "http-5xx")).toBe("debug");
+    // one outage — and said it succeeded 25 times when it cleared.
+    const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const d = new LogOnce(log);
+    const fail = (source: string): boolean => d.report(restLogKey(source), `${source} failed`, { kind: "http-5xx" });
+    expect(fail("GET /api/homeappliances/HA-1/settings/A")).toBe(true);
+    expect(fail("GET /api/homeappliances/HA-1/settings/B")).toBe(false);
+    expect(fail("GET /api/homeappliances/HA-2/settings/A")).toBe(false);
     // A different kind still gets its own warning.
-    expect(d.note("GET /api/homeappliances/HA-2/status", "http-5xx")).toBe("warn");
-    expect(d.recovered("GET /api/homeappliances/HA-2/settings/B")).toBe(true);
-    expect(d.recovered("GET /api/homeappliances/HA-1/settings/A")).toBe(false);
+    expect(fail("GET /api/homeappliances/HA-2/status")).toBe(true);
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    const back = (source: string): boolean => d.recovered(restLogKey(source), `${source} succeeded.`);
+    expect(back("GET /api/homeappliances/HA-2/settings/B")).toBe(true);
+    expect(back("GET /api/homeappliances/HA-1/settings/A")).toBe(false);
+    expect(log.info).toHaveBeenCalledTimes(1);
   });
 });

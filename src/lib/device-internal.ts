@@ -2,9 +2,8 @@
 // firmware version itself, which `info.firmware` shows (FIRMWARE_KEY). They never
 // become a datapoint on any appliance type: the extended data access delivers them undocumented, and some of
 // them cut the adapter off. Sources, across appliance types (not one household): the appliance descriptions
-// in `Ressourcen/homeconnect/device-dumps-2026-09-07/` and `werte-recherche-2026-09-28/uid_tables.json`
-// (openHAB homeconnectdirect, chris-mc1, SMH4ECX14E, WQ46B2C40), hcpy, and Home Assistant `home_connect`,
-// which creates entities from a fixed key list that names none of them.
+// of openHAB homeconnectdirect and chris-mc1/homeconnect_local_hass (SMH4ECX14E, WQ46B2C40), hcpy, and
+// Home Assistant `home_connect`, which creates entities from a fixed key list that names none of them.
 
 /** The single keys of the class. */
 const DEVICE_INTERNAL_KEYS: ReadonlySet<string> = new Set([

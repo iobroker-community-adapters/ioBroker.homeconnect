@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { stateText } from "../../src/lib/state-texts";
+import { stateText } from "./state-texts";
 
 /**
  * Assertions over the generated object inventory (`npm run test:inventory`,
@@ -9,10 +9,9 @@ import { stateText } from "../../src/lib/state-texts";
  * that the rule survives for EVERY appliance type, across the whole tree the
  * adapter really builds.
  */
-const inventory = JSON.parse(readFileSync(join(__dirname, "..", "objects.inventory.json"), "utf8")) as Record<
-  string,
-  { common?: Record<string, unknown>; native?: Record<string, unknown> }
->;
+const inventory = JSON.parse(
+  readFileSync(join(__dirname, "..", "..", "test", "objects.inventory.json"), "utf8"),
+) as Record<string, { common?: Record<string, unknown>; native?: Record<string, unknown> }>;
 
 describe("object inventory", () => {
   it("gives every writable enum setting more than one candidate value", () => {

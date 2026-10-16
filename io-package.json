@@ -101,9 +101,9 @@
       "type": "free"
     },
     "platform": "Javascript/Node.js",
-    "icon": "homeconnect.png",
-    "enabled": true,
-    "extIcon": "https://raw.githubusercontent.com/iobroker-community-adapters/ioBroker.homeconnect/master/admin/homeconnect.png",
+    "icon": "homeconnect.svg",
+    "enabled": false,
+    "extIcon": "https://cdn.jsdelivr.net/gh/iobroker-community-adapters/ioBroker.homeconnect@master/admin/homeconnect.svg",
     "readme": "https://github.com/iobroker-community-adapters/ioBroker.homeconnect/blob/master/README.md",
     "docs": {
       "en": [
@@ -126,7 +126,7 @@
     },
     "dependencies": [
       {
-        "js-controller": ">=7.2.2"
+        "js-controller": ">=7.2.5"
       }
     ],
     "globalDependencies": [

@@ -10,7 +10,6 @@ function clean() {
 function copyAllFiles() {
   // Module-Federation Vite output: the remote entry + its referenced asset chunks + manifest.
   copyFiles(["src-admin/build/customComponents.js"], "admin/custom");
-  copyFiles(["src-admin/build/customComponents.js.map"], "admin/custom");
   copyFiles(["src-admin/build/mf-manifest.json"], "admin/custom");
   copyFiles(["src-admin/build/assets/*"], "admin/custom/assets");
   copyFiles(["src-admin/src/i18n/*.json"], "admin/custom/i18n");

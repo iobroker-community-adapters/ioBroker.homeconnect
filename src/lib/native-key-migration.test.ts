@@ -103,6 +103,12 @@ describe("buildNativeKeyPatch", () => {
     expect(buildNativeKeyPatch({}, DROP_OLD)).toEqual({});
   });
 
+  it("never treats a drop as a rename, whatever the native keys are called", () => {
+    expect(buildNativeKeyPatch({ undefined: "x", pollInterval: 30 }, [{ drop: "pollInterval" }])).toEqual({
+      pollInterval: null,
+    });
+  });
+
   it("moves the old value to the new key and nulls the old key", () => {
     expect(buildNativeKeyPatch({ host: "192.168.1.10", bind: "0.0.0.0", port: 8080 }, HOST_TO_BIND)).toEqual({
       bind: "192.168.1.10",
@@ -149,15 +155,27 @@ describe("buildNativeKeyPatch", () => {
   it("prefers the meaningful source when several old keys compete for one new key", () => {
     // The upgrade injected the default into `networkInterface`; the concrete address the
     // user entered years ago still sits under `BIND` — it must not lose to the default.
-    expect(buildNativeKeyPatch({ networkInterface: "0.0.0.0", BIND: "10.47.88.2" }, IFACE_AND_BIND)).toEqual({
-      bind: "10.47.88.2",
+    expect(buildNativeKeyPatch({ networkInterface: "0.0.0.0", BIND: "192.0.2.2" }, IFACE_AND_BIND)).toEqual({
+      bind: "192.0.2.2",
       networkInterface: null,
       BIND: null,
     });
-    expect(buildNativeKeyPatch({ networkInterface: "", BIND: "10.47.88.2" }, IFACE_AND_BIND)).toEqual({
-      bind: "10.47.88.2",
+    expect(buildNativeKeyPatch({ networkInterface: "", BIND: "192.0.2.2" }, IFACE_AND_BIND)).toEqual({
+      bind: "192.0.2.2",
       networkInterface: null,
       BIND: null,
+    });
+  });
+
+  it("counts a value that is not text as meaningful — a stored port number beats an empty default", () => {
+    const ports: NativeKeyMigration[] = [
+      { from: "httpPort", to: "port" },
+      { from: "PORT", to: "port" },
+    ];
+    expect(buildNativeKeyPatch({ httpPort: "", PORT: 8080 }, ports)).toEqual({
+      port: 8080,
+      httpPort: null,
+      PORT: null,
     });
   });
 
@@ -299,6 +317,12 @@ describe("migrateNativeKeys", () => {
     const write = fakeAdapter({ host: "192.168.1.10", bind: "0.0.0.0", port: "8080" }, { writeFails: true });
     await expect(migrateNativeKeys(write.adapter, HOST_TO_BIND, errText)).resolves.toBe(false);
     expect(write.adapter.log.warn.mock.calls[0][0]).toContain("[via helper] write refused");
+  });
+
+  it("says what it ignores when only obsolete keys could not be removed", async () => {
+    const { adapter } = fakeAdapter({ pollInterval: 30, bind: "0.0.0.0" }, { writeFails: true });
+    await expect(migrateNativeKeys(adapter, DROP_OLD, errText)).resolves.toBe(false);
+    expect(adapter.log.warn.mock.calls[0][0]).toContain("ignoring pollInterval for this run");
   });
 
   it("patches the in-memory config and continues when the write fails", async () => {

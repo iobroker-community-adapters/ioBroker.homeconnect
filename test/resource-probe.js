@@ -3,16 +3,87 @@
 // process exits, it records every timer, server and socket the adapter or one of its own dependencies left open after
 // onUnload. js-controller (with everything it loads) and a test hook are not the adapter's and are left out.
 // A start marker is written at load: a process that never reaches its exit (killed, crashed) has no report.
+// Round 125 (fleet suites D10, D4 — every start loads this file, an adapter without a counterpart too): it notes every state
+// id a write handed to the adapter's stateChange (<pid>.delivered, once per id) and every write of the adapter after it
+// called its unload callback (<pid>.unload) — js-controller closes the databases after the callback, such a write is
+// lost; js-controller's own last writes go through its internal client and are not counted.
 // Fleet master (.consistency-master/test/resource-probe.js) — never edit the copy in an adapter.
 const fs = require("node:fs");
 const net = require("node:net");
 const dgram = require("node:dgram");
 const path = require("node:path");
 const asyncHooks = require("node:async_hooks");
+const { EventEmitter } = require("node:events");
 
 const dir = process.env.RESOURCE_PROBE_DIR;
 if (dir) {
   fs.writeFileSync(path.join(dir, `${process.pid}.start`), "");
+  const delivered = path.join(dir, `${process.pid}.delivered`);
+  const deliveredIds = new Set();
+  const unloadLog = path.join(dir, `${process.pid}.unload`);
+  const ADAPTER_WRITES = [
+    "setState",
+    "setStateAsync",
+    "setForeignState",
+    "setForeignStateAsync",
+    "setStateChanged",
+    "setStateChangedAsync",
+    "setForeignStateChanged",
+    "setForeignStateChangedAsync",
+    "setObject",
+    "setObjectAsync",
+    "setObjectNotExists",
+    "setObjectNotExistsAsync",
+    "setForeignObject",
+    "setForeignObjectAsync",
+    "extendObject",
+    "extendObjectAsync",
+    "extendForeignObject",
+    "extendForeignObjectAsync",
+    "delObject",
+    "delObjectAsync",
+    "delForeignObject",
+    "delForeignObjectAsync",
+    "delState",
+    "delStateAsync",
+  ];
+  const watchUnload = (adapter, callback) => {
+    let done = 0;
+    for (const name of ADAPTER_WRITES) {
+      const original = adapter[name];
+      if (typeof original !== "function") {
+        continue;
+      }
+      adapter[name] = function afterUnload(...args) {
+        if (done) {
+          fs.appendFileSync(
+            unloadLog,
+            `${JSON.stringify({ t: Date.now(), kind: "write", via: name, id: typeof args[0] === "string" ? args[0] : "" })}\n`,
+          );
+        }
+        return original.apply(this, args);
+      };
+    }
+    return function unloadCallback(...rest) {
+      if (!done) {
+        done = Date.now();
+        fs.appendFileSync(unloadLog, `${JSON.stringify({ t: done, kind: "callback" })}\n`);
+      }
+      return callback.apply(this, rest);
+    };
+  };
+  const probeEmit = EventEmitter.prototype.emit;
+  EventEmitter.prototype.emit = function handOverEmit(event, ...args) {
+    if (event === "stateChange" && typeof args[0] === "string" && args[1] && args[1].ack === false) {
+      if (!deliveredIds.has(args[0])) {
+        deliveredIds.add(args[0]);
+        fs.appendFileSync(delivered, `${JSON.stringify({ t: Date.now(), id: args[0] })}\n`);
+      }
+    } else if (event === "unload" && typeof args[0] === "function") {
+      args[0] = watchUnload(this, args[0]);
+    }
+    return probeEmit.call(this, event, ...args);
+  };
   const root = process.cwd();
   let own = [];
   try {

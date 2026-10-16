@@ -128,9 +128,6 @@ const isPresent = (v: unknown): boolean => v !== undefined && v !== null;
  * @param v the candidate value
  */
 const isMeaningful = (v: unknown): boolean => {
-  if (!isPresent(v)) {
-    return false;
-  }
   if (typeof v === "string") {
     const s = v.trim();
     return s !== "" && s !== "0.0.0.0";

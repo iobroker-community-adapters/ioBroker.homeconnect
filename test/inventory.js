@@ -23,7 +23,7 @@
 //   card asks — no datapoint, no value and no file for a report, and no live read of an unconnected device.
 //
 // homeconnect: the fixtures cover EVERY appliance type Home Connect knows (test/fixtures/inventory/*.json, derived from
-// the verbatim type source Ressourcen/homeconnect/upstream-refs/api-value-types.ts — not the maintainer's own three
+// the verbatim type source, thoukydides/homebridge-homeconnect src/api-value-types.ts — not the maintainer's own three
 // appliances). The adapter is a pure cloud client, so the fixtures reach it through the ENVIRONMENT: the fixture hook
 // test/inventory-fetch-hook.cjs replaces global fetch inside the adapter process and refuses every unknown address.
 // The adapter has no test seam and knows nothing about this.
@@ -2058,6 +2058,7 @@ tests.integration(ADAPTER_DIR, {
             exit: harness.adapterExit,
             paths: [...open, ...via(readAnswers(since))],
             before: via(readAnswers(0, since)),
+            errors: harness.getLogs().filter(l => l.level === "error" && l.from === `${ADAPTER}.0`),
           };
         });
         after(() => Promise.all(held.map(h => new Promise(resolve => h.close(() => resolve())))));
@@ -2069,6 +2070,10 @@ tests.integration(ADAPTER_DIR, {
               verdict.exit,
               0,
               `stopped with exit code 0 while ${ports} was taken — a port it cannot do without is a fatal error`,
+            );
+            assert.ok(
+              verdict.errors.length > 0,
+              `stopped while ${ports} was taken without an error line — the user reads the log, not the exit code`,
             );
             assert.deepStrictEqual(
               [...verdict.paths, ...verdict.before],
@@ -2610,7 +2615,7 @@ tests.integration(ADAPTER_DIR, {
           for (const [origin, ids] of carriers) {
             if (ids.length > 1) {
               wrong.push(`${origin} → ${ids.join(", ")}: one recording on several datapoints`);
-            } else if (ids[0] !== origin && origin in live) {
+            } else if (ids[0] !== origin && live[origin]?.type === "state") {
               wrong.push(`${origin} → ${ids[0]}: copied while ${origin} lives on`);
             } else if (ids[0] !== origin && live[ids[0]].common?.type !== previous[origin]?.common?.type) {
               wrong.push(`${origin} → ${ids[0]}: another value type — a new datapoint, not the same one moved`);
@@ -2654,6 +2659,33 @@ tests.integration(ADAPTER_DIR, {
         });
       });
     }
+
+    // Round 124 (plan P5): the fleet suites — one master for every adapter, called with this copy's own helpers.
+    require("./fleet-suites.js")(suite, {
+      ADAPTER_DIR,
+      ADAPTER,
+      NS,
+      FIRST_LANGUAGE,
+      SECOND_LANGUAGE,
+      NETWORK_HOOK,
+      OUTAGE_FLAG,
+      RESOURCE_DIR,
+      HANG_DEADLINE_MS,
+      CHOSEN_ADDRESS,
+      clearInstanceData,
+      resetInstanceNative,
+      fixtureNative,
+      setSystemLanguage,
+      playControllerRestarts,
+      restartAsTheHost,
+      adapterEnv,
+      feedFixtures,
+      waitForAdapterWork,
+      dumpObjects,
+      dumpStates,
+      withinDeadline,
+      readCalls,
+    });
   },
 });
 

@@ -1,4 +1,4 @@
-// Generated from the Home Connect type catalogue (Ressourcen/homeconnect/upstream-refs/api-value-types.ts):
+// Generated from the Home Connect type catalogue (thoukydides/homebridge-homeconnect src/api-value-types.ts):
 // which value set a BSH key draws from. It fills the selection list of a value the cloud sends
 // without constraints — the appliance reports ONE value, the list names all it can take.
 

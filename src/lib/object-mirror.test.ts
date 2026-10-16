@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { ObjectMirror, StateMirror, coveredBy, mergedWith } from "./object-mirror";
+import { coveredBy, mergedWith } from "./known-objects";
+import { ObjectMirror, StateMirror } from "./object-mirror";
 
 const NS = "homeconnect.0";
 
@@ -20,9 +21,11 @@ describe("coveredBy", () => {
     expect(coveredBy({ common: { states: null } }, stored)).toBe(false);
   });
 
-  it("compares arrays and values as a whole", () => {
+  it("compares as the database merges: arrays index by index, a value as a whole", () => {
     expect(coveredBy({ native: { list: ["a", "b"] } }, { native: { list: ["a", "b"] } })).toBe(true);
-    expect(coveredBy({ native: { list: ["a"] } }, { native: { list: ["a", "b"] } })).toBe(false);
+    // extendObject keeps the stored tail of a longer array — writing the shorter one changes nothing.
+    expect(coveredBy({ native: { list: ["a"] } }, { native: { list: ["a", "b"] } })).toBe(true);
+    expect(coveredBy({ native: { list: ["c"] } }, { native: { list: ["a", "b"] } })).toBe(false);
     expect(coveredBy({ common: { max: 0 } }, { common: {} })).toBe(false);
   });
 

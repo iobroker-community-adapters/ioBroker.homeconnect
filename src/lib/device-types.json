@@ -1,0 +1,19 @@
+[
+  "AirConditioner",
+  "CleaningRobot",
+  "CoffeeMaker",
+  "CookProcessor",
+  "Dishwasher",
+  "Dryer",
+  "Freezer",
+  "FridgeFreezer",
+  "Hob",
+  "Hood",
+  "Microwave",
+  "Oven",
+  "Refrigerator",
+  "WarmingDrawer",
+  "Washer",
+  "WasherDryer",
+  "WineCooler"
+]

@@ -3,8 +3,8 @@
 // REST response (they only ever arrive over the stream), so creating them upfront
 // — every datapoint exists from the first sync, none appears only on first use —
 // requires this catalog. Source, verbatim and cross-checked against the full type
-// list in api-value-types.ts: Ressourcen/homeconnect/device-type-catalog-2026-09-01.md
-// (thoukydides/homebridge-homeconnect, the most complete typed API mapping).
+// list in src/api-value-types.ts: the appliance classes of thoukydides/homebridge-homeconnect
+// (the most complete typed API mapping; upstream.json names the version checked).
 //
 // Every Home Connect appliance type is first-class here — the adapter is built
 // for the whole community of users and whatever appliances they own.

@@ -1,0 +1,18 @@
+{
+  "_comment": "Release gate A15: every appliance type a source knows is in the catalogue or excluded with a reason. Home Connect devices are handled by their type, so the catalogue is the list of types (kept equal to src/lib/device-catalog.ts by device-catalog.test.ts).",
+  "catalog": "src/lib/device-types.json",
+  "pattern": "(?m)^\\s+(?:[A-Z][A-Z_]+ = \"|)([A-Z][a-z]+(?:[A-Z][a-z]+)*)(?:\"$|:\\s+Appliance[A-Z])",
+  "sources": [
+    {
+      "name": "homebridge-homeconnect (appliance type to class)",
+      "url": "https://raw.githubusercontent.com/thoukydides/homebridge-homeconnect/master/src/platform.ts"
+    },
+    {
+      "name": "aiohomeconnect, the Home Assistant library (ApplianceType)",
+      "url": "https://raw.githubusercontent.com/MartinHjelmare/aiohomeconnect/main/src/aiohomeconnect/model/appliance.py"
+    }
+  ],
+  "excluded": {
+    "Cooktop": "Home Connect reports hobs with the type Hob, not Cooktop (Home Assistant PR #182039, 2026-09-12) - the adapter knows the type as Hob."
+  }
+}

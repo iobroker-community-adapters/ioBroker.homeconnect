@@ -19,6 +19,13 @@ const TYPES = fs
   .filter(type => process.env.INVENTORY_COUNTED !== "1" || LIMIT_ACCOUNT.includes(type))
   .sort();
 
+// The switches of the fleet suites (test/fleet-suites.js, fleet.json `suites`): the account renames its appliances
+// (INVENTORY_RENAME), one appliance drops off the account's connection (INVENTORY_DROP_DEVICE: listed, not connected —
+// switched off or out of Wi-Fi), the token endpoint refuses the sign-in (INVENTORY_REJECT_LOGIN).
+const RENAMED = process.env.INVENTORY_RENAME === "1";
+const DROPPED = process.env.INVENTORY_DROP_DEVICE === "1";
+const REJECTED = process.env.INVENTORY_REJECT_LOGIN === "1";
+
 /** type → fixture, and the appliance record the account lists for it. */
 const FIXTURES = new Map();
 const APPLIANCES = [];
@@ -29,12 +36,12 @@ for (const type of TYPES) {
   FIXTURES.set(haId, fixture);
   APPLIANCES.push({
     haId,
-    name: `Fixture ${type}`,
+    name: RENAMED ? `Renamed ${type}` : `Fixture ${type}`,
     type,
     brand: "Siemens",
     vib: `HCFIX${type}`,
     enumber: `HCFIX${type}/01`,
-    connected: true,
+    connected: !(DROPPED && APPLIANCES.length === 0),
   });
 }
 
@@ -59,7 +66,12 @@ const json = (data, status = 200) =>
 const bshError = (key, status) =>
   new Response(JSON.stringify({ error: { key } }), { status, headers: { "content-type": "application/json" } });
 
-/** The endless event stream: one KEEP-ALIVE, then quiet until the adapter aborts (a PAIRED once the reserved flag stands). */
+/**
+ * The endless event stream: one KEEP-ALIVE, then quiet until the adapter aborts (a PAIRED once the reserved flag stands).
+ *
+ * @param {AbortSignal | undefined} signal the adapter's abort signal of the request
+ * @returns {Response} the streaming answer
+ */
 function eventStream(signal) {
   let watch;
   const body = new ReadableStream({
@@ -117,6 +129,15 @@ function route(url, init) {
     );
   }
   if (pathname === "/security/oauth/token") {
+    if (REJECTED) {
+      return new Response(
+        JSON.stringify({ error: "access_denied", error_description: "The user denied the request" }),
+        {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }
     return new Response(
       JSON.stringify({
         access_token: "FIXTURE-ACCESS-TOKEN",
@@ -192,12 +213,13 @@ function route(url, init) {
     // program definition.
     return json({ key: fixture.programs[0], options: fixture.selectedOptions || [] });
   }
+  if (method === "PUT" || method === "DELETE") {
+    // Every write is taken, like the cloud does — starting and stopping a program included (PUT/DELETE on
+    // /programs/active). A 204 carries no body: `new Response("", …)` throws "Invalid response status code 204".
+    return new Response(null, { status: 204 });
+  }
   if (sub === "/programs/active") {
     return bshError("SDK.Error.NoProgramActive", 404);
-  }
-  if (method === "PUT" || method === "DELETE") {
-    // A 204 carries no body — `new Response("", …)` throws "Invalid response status code 204".
-    return new Response(null, { status: 204 });
   }
   return undefined;
 }

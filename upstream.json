@@ -1,0 +1,6 @@
+{
+  "source": "github:thoukydides/homebridge-homeconnect",
+  "verified": "v1.12.3",
+  "_verified": "The type source of the value catalogue, the appliance-type catalogue and the inventory fixtures: src/api-value-types.ts (keys, enum and union types, program keys) and the appliance classes (events per type, door form). Raising `verified` means diffing these files against the adapter's catalogues and value-label table again. v1.12.3 (2026-10-14): one new undocumented dryer program, LaundryCare.Dryer.Program.CottonEco.CottonEco.EcoCottonEU23 - it has a row in the value-label table; the other changes are typings and the plugin's own UI.",
+  "watch": ["src/api-value-types.ts", "src/appliance-", "src/has-door.ts", "src/has-events.ts"]
+}

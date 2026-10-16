@@ -6,6 +6,9 @@
 
 **Support:** [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5e5b?logo=ko-fi)](https://ko-fi.com/krobipd) [![PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/krobipd)
 
+> [!IMPORTANT]
+> This adapter cannot be installed from github
+
 Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances through the official [Home Connect](https://www.home-connect.com/) cloud API — dishwashers, washers, dryers, ovens, fridges, coffee makers and more. Every value comes through in a form you can use directly, updates live, and programs can be selected, configured and started from ioBroker.
 
 ---
@@ -22,11 +25,9 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 ## Requirements
 
 - Node.js >= 22
-- js-controller >= 7.2.2
+- js-controller >= 7.2.5
 - Admin >= 8.0.14
 - A free Home Connect developer account (for a Client ID and Client Secret)
-
-> The adapter CANNOT be installed via GitHub: The adapter must be installed via the ioBroker repository (stable or latest).
 
 ## Configuration
 
@@ -100,7 +101,7 @@ homeconnect.0.
     └── statistics.          — Runs and running time per program
 ```
 
-Which channels and data points an appliance gets depends on its type. Every channel in detail: [documentation](docs/en/README.md#the-object-tree).
+Which channels and data points an appliance gets depends on its type. Every channel in detail: [documentation](docs/en/README.md#the-object-tree) ([Deutsch](docs/de/README.md#der-objektbaum)).
 
 ## Usage
 
@@ -111,6 +112,13 @@ Which channels and data points an appliance gets depends on its type. Every chan
 A choice can be written as its short value (`eco50`), in any capitalisation, or as the full Home Connect key; the data point confirms it in its short form.
 
 Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Settings and options are written straight back to the appliance; if the appliance rejects the options for a start, the adapter retries the start once with the program's defaults.
+
+## Troubleshooting
+
+- **`info.connection` stays red:** use **Test connection** in the instance settings — it names the reason (not signed in, Home Connect refused the sign-in, or the event stream is down).
+- **No appliances appear:** the developer account must be linked to your Home Connect app account, and the sign-in must be approved.
+
+Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/README.md#troubleshooting) ([Deutsch](docs/de/README.md#fehlersuche)).
 
 ## Changelog
 
@@ -123,7 +131,7 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 
 - (krobipd) Changed: complete rewrite with a new object tree — every appliance gets its own readable folder and datapoints, so scripts and VIS need the new IDs (table in the documentation)
 - (krobipd) Changed: values arrive as switches, numbers with units and lists in the system language instead of raw Home Connect texts; encoded program data is decoded into readable datapoints
-- (krobipd) Changed: the adapter requires js-controller 7.2.2 and Admin 8.0.14 or newer now
+- (krobipd) Changed: the adapter requires js-controller 7.2.5 and Admin 8.0.14 or newer now
 - (krobipd) New: sign-in panel with the code, a connection test and a reset; login and Client ID of 1.x are kept, nothing has to be entered again
 - (krobipd) Improved: rooms, functions and aliases move to the matching new datapoints on update, recordings where one datapoint lives on, and the login stays encrypted
 - (krobipd) Fixed: the object database no longer grows with every value change (#387), and the start stays within the Home Connect request limits (#327, #58)
@@ -162,6 +170,11 @@ Stop with `programs.stop`, pause and resume through the `commands.*` buttons. Se
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 
+## Support
+
+- [ioBroker Forum](https://forum.iobroker.net/)
+- [GitHub Issues](https://github.com/iobroker-community-adapters/ioBroker.homeconnect/issues)
+
 ## License
 
 The MIT License (MIT)
@@ -187,4 +200,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-

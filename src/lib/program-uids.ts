@@ -1,7 +1,7 @@
 // Generated from the appliances' own descriptions (FeatureMapping / DeviceDescription of 25 real
 // appliances: openHAB homeconnectdirect test data, chris-mc1/homeconnect_local_hass issues #14, #104,
 // #179, #201, vemboy200/homeconnect_local_hass #9, eifel-tech/ioBroker.cloudless-homeconnect #68 and
-// Ressourcen/homeconnect/device-dumps-2026-09-07), research 2026-09-28. The numbers are the appliance
+// further appliance descriptions collected from user reports), research 2026-09-28. The numbers are the appliance
 // family's own and differ between types (and between series of one type — their blocks do not overlap),
 // so the table is per appliance type. A local name is shortened to the cloud's program key only where the
 // type catalogue has that key and no other program of the same appliance shortens to it.

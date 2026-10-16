@@ -1,7 +1,7 @@
 // Value transformer — the core of the greenfield: turn BSH's raw enum strings
 // into idiomatic ioBroker states (boolean / short enum + states / number+unit)
-// and derive a speaking state id from the BSH key. Enum catalogue + wire shapes:
-// `Ressourcen/homeconnect/bsh-api-research-2026-08-05.md` / reference_bsh_home_connect_api.
+// and derive a speaking state id from the BSH key. Enum catalogue + wire shapes: the official API
+// documentation (api-docs.home-connect.com) and thoukydides/homebridge-homeconnect src/api-value-types.ts.
 //
 // Unknown keys/values are NOT dropped: they fall back to the raw value as a
 // string, so nothing is lost — the mapping is then extended device by device.
@@ -361,9 +361,9 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
   if (isProgramRecordKey(item.key)) {
     return [];
   }
-  // The appliance's firmware is the version of its domain firmware, under `info` (krobi 2026-10-15: "sowas wie
-  // firmware version wäre schon interessant unter info", chosen on his washer-dryer's values: "DomainFw, nur die
-  // Version"). The cloud sends it with the build time ("2.5.0 17.10.2024 07:55:52"); the datapoint carries "2.5.0".
+  // The appliance's firmware is the version of its domain firmware, under `info` (krobi 2026-10-15: "something like the
+  // firmware version would be interesting under info", chosen on his washer-dryer's values: "DomainFw, version only").
+  // The cloud sends it with the build time ("2.5.0 17.10.2024 07:55:52"); the datapoint carries "2.5.0".
   if (item.key === FIRMWARE_KEY) {
     const version = typeof item.value === "string" ? item.value.trim().split(/\s+/)[0] : undefined;
     return [

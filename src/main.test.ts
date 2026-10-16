@@ -1084,7 +1084,7 @@ describe("Homeconnect rate limiting", () => {
 
     httpMock.getJson.mockResolvedValue(okResult());
     await get(ctx, "/api/x");
-    expect(ctx.i.log.info).toHaveBeenCalledWith("GET /api/x succeeded again.");
+    expect(ctx.i.log.info).toHaveBeenCalledWith("GET /api/x succeeded.");
 
     ctx.i.log.info.mockClear();
     await get(ctx, "/api/x");
@@ -1149,7 +1149,7 @@ describe("Homeconnect rate limiting", () => {
       await get(ctx, "/api/homeappliances/A/programs/active");
       httpMock.getJson.mockResolvedValue(failResult(error.endsWith("State") ? 409 : 404, { error }));
       await get(ctx, "/api/homeappliances/A/programs/active");
-      expect(ctx.i.log.info).toHaveBeenCalledWith("GET /api/homeappliances/A/programs/active succeeded again.");
+      expect(ctx.i.log.info).toHaveBeenCalledWith("GET /api/homeappliances/A/programs/active succeeded.");
 
       // Cleared for real: the next failure of the kind is news again.
       ctx.i.log.warn.mockClear();
@@ -1174,7 +1174,7 @@ describe("Homeconnect rate limiting", () => {
       await get(ctx, "/api/homeappliances/B/programs/active");
     }
     expect(ctx.i.log.warn.mock.calls.filter(c => String(c[0]).includes("programs/active failed"))).toHaveLength(2);
-    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes("succeeded again"))).toHaveLength(2);
+    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes("succeeded."))).toHaveLength(2);
   });
 
   it("reads a refused program list (ProgramNotAvailable) as a busy appliance, not a failure", async () => {
@@ -1204,7 +1204,7 @@ describe("Homeconnect rate limiting", () => {
     expect(ctx.i.log.warn).not.toHaveBeenCalled();
     expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("SDK.Error.UnsupportedProgram"));
     // The answer proves the endpoint kind healthy.
-    expect(ctx.i.log.info).toHaveBeenCalledWith(`GET ${path} succeeded again.`);
+    expect(ctx.i.log.info).toHaveBeenCalledWith(`GET ${path} succeeded.`);
     expect(ctx.syncs[0].noteUnsupportedProgram).toHaveBeenCalledWith(path);
   });
 
@@ -1227,10 +1227,10 @@ describe("Homeconnect rate limiting", () => {
     expect(ctx.syncs[0].noteNotReady).toHaveBeenCalledWith(path);
     // Neither a failure nor a proof the endpoint works: the earlier 503 is still
     // the open failure, and the next real success reports its recovery.
-    expect(ctx.i.log.info).not.toHaveBeenCalledWith(`GET ${path} succeeded again.`);
+    expect(ctx.i.log.info).not.toHaveBeenCalledWith(`GET ${path} succeeded.`);
     httpMock.getJson.mockResolvedValue(okResult());
     await get(ctx, path);
-    expect(ctx.i.log.info).toHaveBeenCalledWith(`GET ${path} succeeded again.`);
+    expect(ctx.i.log.info).toHaveBeenCalledWith(`GET ${path} succeeded.`);
   });
 });
 
@@ -1281,7 +1281,7 @@ describe("Homeconnect REST writes", () => {
     await ctx.i.apiWrite(req);
     // The user saw the warning; without this they have no way to know the button
     // works again.
-    expect(ctx.i.log.info).toHaveBeenCalledWith("PUT /api/p succeeded again.");
+    expect(ctx.i.log.info).toHaveBeenCalledWith("PUT /api/p succeeded.");
 
     ctx.i.log.info.mockClear();
     await ctx.i.apiWrite(req);
@@ -2437,7 +2437,7 @@ describe("Homeconnect REST log dedup per endpoint kind (2026-09-15, F10)", () =>
     ctx.i.log.info.mockClear();
     await ctx.i.apiGet("/api/homeappliances/HA-2/settings/BSH.Common.Setting.ChildLock");
     await ctx.i.apiGet("/api/homeappliances/HA-1/settings/BSH.Common.Setting.PowerState");
-    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes("succeeded again"))).toHaveLength(1);
+    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes("succeeded."))).toHaveLength(1);
   });
 });
 
@@ -2513,9 +2513,38 @@ describe("Homeconnect §7 improvements (2026-09-15)", () => {
       vi.useRealTimers();
     }
   });
+
+  it("refuses a place asked for during the teardown at once, without arming a wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = setup();
+      await ctx.i.onReady();
+      httpMock.getJson.mockResolvedValue(okResult());
+      await ctx.i.apiGet("/api/a");
+      ctx.i.onUnload(() => undefined);
+      const delay = (ctx.i as unknown as { delay: ReturnType<typeof vi.fn> }).delay;
+      delay.mockClear();
+      // The gap after /api/a is still open — the adapter's timer refuses during shutdown and its promise would
+      // never settle, so the queue must not wait at all.
+      const place = (ctx.i as unknown as { spaceRequests(write?: boolean): Promise<boolean> }).spaceRequests(true);
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(place).resolves.toBe(false);
+      expect(delay).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Homeconnect findings of the 2026-09-24 audit", () => {
+  it("says on error where the start-up chain broke when the state subscription fails", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    ctx.i.subscribeStatesAsync.mockRejectedValueOnce(new Error("objects db down"));
+    await expect(ctx.auths[0].port.onSignedIn()).resolves.toBeUndefined();
+    expect(ctx.i.log.error).toHaveBeenCalledWith("Start-up failed at the state subscription: objects db down");
+  });
+
   it("F2: starts the subscription and the event stream even when the appliance sync fails", async () => {
     const ctx = setup();
     await ctx.i.onReady();

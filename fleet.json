@@ -27,6 +27,8 @@
     }
   },
   "forumThread": null,
+  "_deviceIds": "Device object ids follow the fleet scheme model + the last four characters of the unit id (decision 36), set once and never derived again; a taken id gets the whole unit id, then a counter.",
+  "deviceIds": "unit",
   "serverTest": {
     "_why": "Sign-in, event stream and the appliances come up on the real account, and a switched setting is confirmed only by the appliance's NOTIFY on the stream (decision 8).",
     "observeSeconds": 120,
@@ -54,5 +56,68 @@
         "timeoutSeconds": 60
       }
     ]
-  }
+  },
+  "suites": {
+    "connectionTest": {
+      "command": "checkConnection",
+      "message": {}
+    },
+    "groupSwitches": {
+      "none": "The instance settings have no switch that turns a group of datapoints on or off."
+    },
+    "rename": true,
+    "rejectLogin": true,
+    "dropDevice": true
+  },
+  "fixtureLimits": [
+    {
+      "state": "hcfixairconditioner-0001.options.setpointTemperature",
+      "file": "test/fixtures/inventory/AirConditioner.json",
+      "min": "/programOptions/2/constraints/min",
+      "max": "/programOptions/2/constraints/max",
+      "step": "/programOptions/2/constraints/stepsize"
+    },
+    {
+      "state": "hcfixairconditioner-0001.options.fanSpeedPercentage",
+      "file": "test/fixtures/inventory/AirConditioner.json",
+      "min": "/programOptions/1/constraints/min",
+      "max": "/programOptions/1/constraints/max",
+      "step": "/programOptions/1/constraints/stepsize"
+    },
+    {
+      "state": "hcfixfridgefreezer-0001.settings.setpointTemperatureFreezer",
+      "file": "test/fixtures/inventory/FridgeFreezer.json",
+      "min": "/settings/32/constraints/min",
+      "max": "/settings/32/constraints/max",
+      "step": "/settings/32/constraints/stepsize"
+    },
+    {
+      "state": "hcfixfridgefreezer-0001.settings.setpointTemperatureRefrigerator",
+      "file": "test/fixtures/inventory/FridgeFreezer.json",
+      "min": "/settings/33/constraints/min",
+      "max": "/settings/33/constraints/max",
+      "step": "/settings/33/constraints/stepsize"
+    },
+    {
+      "state": "hcfixhood-0001.settings.colorTemperaturePercent",
+      "file": "test/fixtures/inventory/Hood.json",
+      "min": "/settings/11/constraints/min",
+      "max": "/settings/11/constraints/max",
+      "step": "/settings/11/constraints/stepsize"
+    },
+    {
+      "state": "hcfixoven-0001.options.setpointTemperature",
+      "file": "test/fixtures/inventory/Oven.json",
+      "min": "/programOptions/13/constraints/min",
+      "max": "/programOptions/13/constraints/max",
+      "step": "/programOptions/13/constraints/stepsize"
+    },
+    {
+      "state": "hcfixwasher-0001.settings.iDos1BaseLevel",
+      "file": "test/fixtures/inventory/Washer.json",
+      "min": "/settings/8/constraints/min",
+      "max": "/settings/8/constraints/max",
+      "step": "/settings/8/constraints/stepsize"
+    }
+  ]
 }

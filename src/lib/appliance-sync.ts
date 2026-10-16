@@ -30,7 +30,8 @@ import {
   type WriteContext,
   type WriteRequest,
 } from "./command-dispatch";
-import { isRecord, errMessage, cleanLabel, humanizeId, coerceForType, slugOf } from "./pure-helpers";
+import { errText } from "./err-text";
+import { isRecord, cleanLabel, humanizeId, coerceForType, slugOf } from "./pure-helpers";
 import { ID_SCHEME, deviceIdFor, legacyRootOf } from "./device-id";
 import {
   copyDeviceTree,
@@ -983,7 +984,7 @@ export class ApplianceSync {
         }
       }
     } catch (e) {
-      this.port.log.debug(`priming devices from objects failed: ${errMessage(e)}`);
+      this.port.log.debug(`priming devices from objects failed: ${errText(e)}`);
     }
     /** Every text datapoint of a BSH key: its stored `common` and what is known about it, for the list repair. */
     const storedLists = new Map<string, { common: Partial<ioBroker.StateCommon>; known: KnownState }>();
@@ -1044,7 +1045,7 @@ export class ApplianceSync {
         }
       }
     } catch (e) {
-      this.port.log.debug(`priming known states from objects failed: ${errMessage(e)}`);
+      this.port.log.debug(`priming known states from objects failed: ${errText(e)}`);
     }
     await this.refreshLegacyLabels();
     await this.bringOldFormsUpToDate(oldForms);
@@ -1081,7 +1082,7 @@ export class ApplianceSync {
           await this.port.extendObject(`${channel}.${counter}`, { common: { name: joinNames(label, tName(name)) } });
         }
       } catch (e) {
-        this.port.log.debug(`naming the statistics of ${channel} failed: ${errMessage(e)}`);
+        this.port.log.debug(`naming the statistics of ${channel} failed: ${errText(e)}`);
       }
     }
   }
@@ -1130,7 +1131,7 @@ export class ApplianceSync {
           await this.emptyRunValues(deviceId);
         }
       } catch (e) {
-        this.port.log.debug(`reading the stored operation state of ${rel} failed: ${errMessage(e)}`);
+        this.port.log.debug(`reading the stored operation state of ${rel} failed: ${errText(e)}`);
       }
     }
   }
@@ -1155,7 +1156,7 @@ export class ApplianceSync {
       try {
         await this.port.extendObject(rel, { common: { role: shownRole(common, common.unit) } });
       } catch (e) {
-        this.port.log.debug(`giving ${rel} its role failed: ${errMessage(e)}`);
+        this.port.log.debug(`giving ${rel} its role failed: ${errText(e)}`);
       }
     }
   }
@@ -1207,7 +1208,7 @@ export class ApplianceSync {
         known.type = now.type;
         known.metaSig = metaSignature(now, { bshKey: known.bshKey, bshValues: known.bshValues });
       } catch (e) {
-        this.port.log.debug(`bringing ${rel} to its current form failed: ${errMessage(e)}`);
+        this.port.log.debug(`bringing ${rel} to its current form failed: ${errText(e)}`);
       }
     }
   }
@@ -1288,7 +1289,7 @@ export class ApplianceSync {
         // The stored object carries the new labels now: the next sync must not take them for a change.
         known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
       } catch (e) {
-        this.port.log.debug(`relabelling the values of ${rel} failed: ${errMessage(e)}`);
+        this.port.log.debug(`relabelling the values of ${rel} failed: ${errText(e)}`);
       }
     }
   }
@@ -1325,7 +1326,7 @@ export class ApplianceSync {
       known.hasStates = true;
       known.metaSig = metaSignature({ ...common, states }, { bshKey: known.bshKey, bshValues: known.bshValues });
     } catch (e) {
-      this.port.log.debug(`giving ${rel} its list of values failed: ${errMessage(e)}`);
+      this.port.log.debug(`giving ${rel} its list of values failed: ${errText(e)}`);
     }
   }
 
@@ -1439,7 +1440,7 @@ export class ApplianceSync {
         await this.port.extendObject(rel, { type: "channel", common: { name: fresh }, native: {} });
       }
     } catch (e) {
-      this.port.log.debug(`refreshing the channel names failed: ${errMessage(e)}`);
+      this.port.log.debug(`refreshing the channel names failed: ${errText(e)}`);
     }
   }
 
@@ -1480,7 +1481,7 @@ export class ApplianceSync {
           this.forgetWritten(root);
           removed++;
         } catch (e) {
-          this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`);
+          this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errText(e)}`);
         }
       }
       if (removed > 0) {
@@ -1495,7 +1496,7 @@ export class ApplianceSync {
         );
       }
     } catch (e) {
-      this.port.log.warn(`sorting out the previous adapter generation's trees failed: ${errMessage(e)}`);
+      this.port.log.warn(`sorting out the previous adapter generation's trees failed: ${errText(e)}`);
     }
   }
 
@@ -1627,7 +1628,7 @@ export class ApplianceSync {
     } catch (e) {
       // The root waits again: the next full read tries once more.
       this.pendingLegacyRoots.add(root);
-      this.port.log.warn(`${this.label(deviceId)}: taking over the old object tree ${root} failed: ${errMessage(e)}`);
+      this.port.log.warn(`${this.label(deviceId)}: taking over the old object tree ${root} failed: ${errText(e)}`);
     }
   }
 
@@ -1651,7 +1652,7 @@ export class ApplianceSync {
           `Removed the object tree ${root} of the previous adapter generation — its appliance is not on the Home Connect account.`,
         );
       } catch (e) {
-        this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errMessage(e)}`);
+        this.port.log.debug(`legacy cleanup: could not delete ${root}: ${errText(e)}`);
       }
     }
   }
@@ -1754,7 +1755,7 @@ export class ApplianceSync {
         await this.moveDeviceTree(move.from, move.to, move.name, move.fillOnly);
       }
     } catch (e) {
-      this.port.log.warn(`migrating device ids failed: ${errMessage(e)} — the appliances run under their current ids`);
+      this.port.log.warn(`migrating device ids failed: ${errText(e)} — the appliances run under their current ids`);
     }
   }
 
@@ -1797,7 +1798,7 @@ export class ApplianceSync {
       );
     } catch (e) {
       this.port.log.warn(
-        `Appliance "${name}": could not move ${from} to ${to} (${errMessage(e)}) — tried again on the next start`,
+        `Appliance "${name}": could not move ${from} to ${to} (${errText(e)}) — tried again on the next start`,
       );
     }
   }
@@ -1869,7 +1870,7 @@ export class ApplianceSync {
         this.port.log.info(`Moved ${moved} history datapoint(s) to named runs.`);
       }
     } catch (e) {
-      this.port.log.warn(`moving the history datapoints failed: ${errMessage(e)} — tried again on the next start`);
+      this.port.log.warn(`moving the history datapoints failed: ${errText(e)} — tried again on the next start`);
     }
   }
 
@@ -2067,7 +2068,7 @@ export class ApplianceSync {
         );
       }
     } catch (e) {
-      this.port.log.warn(`migrating renamed datapoints failed: ${errMessage(e)}`);
+      this.port.log.warn(`migrating renamed datapoints failed: ${errText(e)}`);
     }
   }
 
@@ -2108,7 +2109,7 @@ export class ApplianceSync {
       await this.port.setForeignObject(full, { type: "channel", common: { name }, native: {} });
       await this.port.delState(rel);
     } catch (e) {
-      this.port.log.debug(`turning ${rel} into a channel failed: ${errMessage(e)}`);
+      this.port.log.debug(`turning ${rel} into a channel failed: ${errText(e)}`);
     }
     remaining.set(channelPath, (remaining.get(channelPath) ?? 1) - 1);
     drained.add(channelPath);
@@ -2136,7 +2137,7 @@ export class ApplianceSync {
       await this.port.deleteTreeCarryingEnums(rel, new Map([[`${this.port.namespace}.${rel}`, [...targets]]]));
       this.forgetWritten(rel);
     } catch (e) {
-      this.port.log.debug(`removing ${rel} failed: ${errMessage(e)}`);
+      this.port.log.debug(`removing ${rel} failed: ${errText(e)}`);
     }
     remaining.set(channelPath, (remaining.get(channelPath) ?? 1) - 1);
     drained.add(channelPath);
@@ -2228,7 +2229,7 @@ export class ApplianceSync {
         }
       }
     } catch (e) {
-      this.port.log.warn(`handling stream event failed: ${errMessage(e)}`);
+      this.port.log.warn(`handling stream event failed: ${errText(e)}`);
     }
   }
 
@@ -2241,7 +2242,7 @@ export class ApplianceSync {
     try {
       await fn();
     } catch (e) {
-      this.port.log.warn(`appliance sync task failed: ${errMessage(e)}`);
+      this.port.log.warn(`appliance sync task failed: ${errText(e)}`);
     }
   }
 
@@ -2285,7 +2286,7 @@ export class ApplianceSync {
               break;
             }
             const who = typeof raw.haId === "string" ? raw.haId : "an appliance";
-            this.port.log.warn(`Could not set up ${who}: ${errMessage(e)} — the other appliances go on.`);
+            this.port.log.warn(`Could not set up ${who}: ${errText(e)} — the other appliances go on.`);
           }
         }
       }
@@ -2615,7 +2616,7 @@ export class ApplianceSync {
         known.name = previousName;
         known.desc = previousDesc;
         known.nameSource = previousSource;
-        this.port.log.debug(`updating the label of ${fullId} failed: ${errMessage(e)}`);
+        this.port.log.debug(`updating the label of ${fullId} failed: ${errText(e)}`);
       }
     }
   }
@@ -2727,7 +2728,7 @@ export class ApplianceSync {
       await this.port.delObjectRecursive(deviceId);
       this.forgetWritten(deviceId);
     } catch (e) {
-      this.port.log.debug(`removing the object tree of ${deviceId} failed: ${errMessage(e)}`);
+      this.port.log.debug(`removing the object tree of ${deviceId} failed: ${errText(e)}`);
     }
     this.deviceIdByHaId.delete(haId);
     this.haIdByDeviceId.delete(deviceId);
@@ -3034,7 +3035,7 @@ export class ApplianceSync {
       // Keeping it uncached costs one fetch per setting on the next start — far
       // better than remembering a definition the database never accepted.
       this.settingDefsDirty.add(deviceId);
-      this.port.log.debug(`persisting the setting definition cache of ${deviceId} failed: ${errMessage(e)}`);
+      this.port.log.debug(`persisting the setting definition cache of ${deviceId} failed: ${errText(e)}`);
     }
   }
 
@@ -3783,7 +3784,7 @@ export class ApplianceSync {
     try {
       await this.port.extendObject(deviceId, { native: { programUids: learned } });
     } catch (e) {
-      this.port.log.debug(`storing the program numbers of ${deviceId} failed: ${errMessage(e)}`);
+      this.port.log.debug(`storing the program numbers of ${deviceId} failed: ${errText(e)}`);
     }
     this.port.log.debug(`${deviceId}: program number ${uid} is ${running.key}`);
     await this.moveStatistics(deviceId, s.programUid, before);
@@ -3822,7 +3823,7 @@ export class ApplianceSync {
         // Drawing below writes the copies once more, by MERGE: the recording
         // configuration the copy carries stays, the names become the program's.
       } catch (e) {
-        this.port.log.warn(`moving ${from} to ${to} failed: ${errMessage(e)} — tried again on the next start`);
+        this.port.log.warn(`moving ${from} to ${to} failed: ${errText(e)} — tried again on the next start`);
       }
     }
     if (details) {
@@ -3905,7 +3906,7 @@ export class ApplianceSync {
       known.hasStates = true;
       this.port.log.debug(`${fullId}: added "${t.value}" to its list of values`);
     } catch (e) {
-      this.port.log.debug(`adding "${t.value}" to the list of ${fullId} failed: ${errMessage(e)}`);
+      this.port.log.debug(`adding "${t.value}" to the list of ${fullId} failed: ${errText(e)}`);
     }
   }
 
@@ -4071,7 +4072,7 @@ export class ApplianceSync {
       this.port.log.debug(`refreshed object metadata of ${fullId}`);
       return true;
     } catch (e) {
-      this.port.log.warn(`refreshing object metadata of ${fullId} failed: ${errMessage(e)}`);
+      this.port.log.warn(`refreshing object metadata of ${fullId} failed: ${errText(e)}`);
       // What the object carries after a FAILED refresh: everything it had, minus
       // what the clearing pass actually removed. Only a clearing that SUCCEEDED
       // removed a field — then the retry must not clear it twice; if the
@@ -4298,7 +4299,7 @@ export class ApplianceSync {
         // Internal attribute on the device object (not a datapoint): survives restarts.
         await this.port.extendObject(deviceId, { native: { programOptions: cached } });
       } catch (e) {
-        this.port.log.debug(`persisting the program definition cache of ${deviceId} failed: ${errMessage(e)}`);
+        this.port.log.debug(`persisting the program definition cache of ${deviceId} failed: ${errText(e)}`);
       }
     }
   }
@@ -4452,7 +4453,7 @@ export class ApplianceSync {
     try {
       exCommon = ((await this.port.getObject(fullId))?.common ?? {}) as Partial<ioBroker.StateCommon>;
     } catch (e) {
-      this.port.log.debug(`reading ${fullId} for the definition merge failed: ${errMessage(e)}`);
+      this.port.log.debug(`reading ${fullId} for the definition merge failed: ${errText(e)}`);
     }
     if (rebuild) {
       // Labels a stored value may lend stay usable; its bounds and list do not.
@@ -4631,11 +4632,12 @@ export class ApplianceSync {
         ctx.selectedOptions = await this.collectSelectedOptions(deviceId);
       }
       const req = resolveWrite(ctx);
-      // Whether Home Connect took the request — a button press nobody answered stays pressed and unconfirmed.
-      let accepted = false;
+      // Whether Home Connect answered the request at all (taken or refused) — a button press nobody answered stays
+      // pressed and unconfirmed.
+      let answered = false;
       if (req) {
         const res = await this.port.apiWrite(req);
-        accepted = res?.ok === true;
+        answered = res !== undefined && res.status !== 0;
         await this.postWrite(channel, stateId, deviceId, haId, req, res);
         // An accepted write is not confirmed here: Home Connect accepting the request
         // is not the appliance taking the value. The appliance confirms it with a
@@ -4676,13 +4678,13 @@ export class ApplianceSync {
           this.port.log.debug(`Write to ${rel} ignored (no matching Home Connect command).`);
         }
       }
-      // A momentary button goes back to false once Home Connect took the press; without an answer nothing is
-      // acknowledged (the fleet rule "a command is confirmed only by its counterpart").
-      if (this.isMomentaryButton(channel, stateId) && accepted) {
+      // A momentary button goes back to false once Home Connect answered the press, taken or refused (fleet suite D9);
+      // without an answer nothing is acknowledged (the fleet rule "a command is confirmed only by its counterpart").
+      if (this.isMomentaryButton(channel, stateId) && answered) {
         await this.port.setStateChanged(rel, { val: false, ack: true });
       }
     } catch (e) {
-      this.port.log.warn(`handling write to ${id} failed: ${errMessage(e)}`);
+      this.port.log.warn(`handling write to ${id} failed: ${errText(e)}`);
     }
   }
 

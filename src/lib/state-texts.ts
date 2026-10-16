@@ -539,7 +539,7 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   // The cloud's names for these are missing while the appliance is off and come
   // in whatever language the cloud picks; the adapter's own name wins (see
   // StateText.name).
-  // Keys taken verbatim from the type source (Ressourcen/homeconnect/upstream-refs).
+  // Keys taken verbatim from the type source (thoukydides/homebridge-homeconnect src/api-value-types.ts).
   "BSH.Common.Command.OpenDoor": { name: "cmdOpenDoor", desc: "cmdOpenDoorDesc" },
   "BSH.Common.Command.PartlyOpenDoor": { name: "cmdPartlyOpenDoor", desc: "cmdPartlyOpenDoorDesc" },
   "BSH.Common.Command.PauseProgram": { name: "cmdPauseProgram", desc: "cmdPauseProgramDesc" },

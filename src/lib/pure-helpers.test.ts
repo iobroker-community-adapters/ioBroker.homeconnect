@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { slugOf, errMessage, cleanLabel, humanizeId, coerceForType } from "./pure-helpers";
+import { errText } from "./err-text";
+import { slugOf, cleanLabel, humanizeId, coerceForType } from "./pure-helpers";
 
 describe("slugOf", () => {
   it("transliterates umlauts and lower-cases", () => {
@@ -27,22 +28,22 @@ describe("slugOf", () => {
   });
 });
 
-describe("errMessage", () => {
+describe("errText as the adapter calls it", () => {
   it("returns the message for an Error", () => {
-    expect(errMessage(new Error("boom"))).toBe("boom");
+    expect(errText(new Error("boom"))).toBe("boom");
   });
   it("stringifies non-Error values", () => {
-    expect(errMessage("nope")).toBe("nope");
-    expect(errMessage(42)).toBe("42");
-    expect(errMessage(null)).toBe("null");
-    expect(errMessage(undefined)).toBe("undefined");
-    expect(errMessage(Symbol("late"))).toBe("Symbol(late)");
+    expect(errText("nope")).toBe("nope");
+    expect(errText(42)).toBe("42");
+    expect(errText(null)).toBe("null");
+    expect(errText(undefined)).toBe("undefined");
+    expect(errText(Symbol("late"))).toBe("Symbol(late)");
   });
   it("renders a thrown plain object instead of [object Object]", () => {
     // An HTTP client's or a proxy layer's rejection can be a plain object; the
     // old helper logged "[object Object]" for them — no cause, no place.
-    expect(errMessage({ code: "ECONNRESET", syscall: "read" })).toBe('{"code":"ECONNRESET","syscall":"read"}');
-    expect(errMessage([1, 2])).toBe("[1,2]");
+    expect(errText({ code: "ECONNRESET", syscall: "read" })).toBe('{"code":"ECONNRESET","syscall":"read"}');
+    expect(errText([1, 2])).toBe("[1,2]");
   });
   it("falls back to the type tag where JSON.stringify cannot answer", () => {
     // A circular structure makes JSON.stringify THROW and a BigInt field too —
@@ -50,8 +51,8 @@ describe("errMessage", () => {
     // crash. (A thrown function renders as its type tag, never as its source text.)
     const circular: Record<string, unknown> = { a: 1 };
     circular.self = circular;
-    expect(errMessage(circular)).toBe("[object Object]");
-    expect(errMessage({ big: 1n })).toBe("[object Object]");
+    expect(errText(circular)).toBe("[object Object]");
+    expect(errText({ big: 1n })).toBe("[object Object]");
   });
 });
 

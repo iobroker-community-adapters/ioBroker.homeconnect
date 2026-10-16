@@ -6,57 +6,7 @@
 // round 61): read the own tree ONCE at start, compare every write against it (`coveredBy`), write only on a
 // difference, and afterwards hold what the write left behind.
 
-/**
- * True when every field of `patch` already sits in `stored` — extendObject would change nothing. Objects are
- * compared field by field (extendObject merges them), arrays and values as a whole. The fleet form, unchanged.
- *
- * @param patch what the adapter would write
- * @param stored the object as it is in the database
- * @returns whether the write can be left out
- */
-export function coveredBy(patch: unknown, stored: unknown): boolean {
-  if (patch && typeof patch === "object" && !Array.isArray(patch)) {
-    return (
-      !!stored &&
-      typeof stored === "object" &&
-      !Array.isArray(stored) &&
-      Object.entries(patch).every(([k, v]) => coveredBy(v, (stored as Record<string, unknown>)[k]))
-    );
-  }
-  return JSON.stringify(patch) === JSON.stringify(stored);
-}
-
-/**
- * What `extendObject(patch)` leaves of `stored`, as the objects database merges (`node.extend(true, …)`,
- * js-controller 7.2.2): plain objects key by key, arrays index by index into a stored array — a shorter array keeps
- * the stored tail —, a value or `null` takes the place, `undefined` changes nothing.
- *
- * @param stored the object before the write (not changed)
- * @param patch what was written
- * @returns the object after the write
- */
-export function mergedWith(stored: unknown, patch: unknown): unknown {
-  if (Array.isArray(patch)) {
-    const base: unknown[] = Array.isArray(stored) ? [...(stored as unknown[])] : [];
-    patch.forEach((value, i) => {
-      if (value !== undefined) {
-        base[i] = mergedWith(base[i], value);
-      }
-    });
-    return base;
-  }
-  if (!patch || typeof patch !== "object") {
-    return patch;
-  }
-  const base: Record<string, unknown> =
-    stored && typeof stored === "object" && !Array.isArray(stored) ? { ...(stored as Record<string, unknown>) } : {};
-  for (const [key, value] of Object.entries(patch)) {
-    if (value !== undefined) {
-      base[key] = mergedWith(base[key], value);
-    }
-  }
-  return base;
-}
+import { coveredBy, mergedWith } from "./known-objects";
 
 /**
  * The own objects by full id. Everything the adapter writes goes through {@link ObjectMirror.covers} first and

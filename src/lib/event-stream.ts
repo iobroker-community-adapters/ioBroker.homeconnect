@@ -4,7 +4,8 @@
 // injected so the adapter owns them (managed, cleared on unload).
 
 import { SseParser, type SseEvent } from "./sse-parser";
-import { errMessage, isRecord } from "./pure-helpers";
+import { errText } from "./err-text";
+import { isRecord } from "./pure-helpers";
 import { errorDescription, errorKey, rateLimitText, readBodyCapped, retryAfterMs } from "./http";
 
 /** SSE endpoint for all appliances (the "all" stream also carries PAIRED/DEPAIRED). */
@@ -320,9 +321,9 @@ export class EventStream {
       if (!this.stopped) {
         if (connectedAt === undefined) {
           // The watchdog's abort surfaces as "This operation was aborted" — say what happened.
-          this.noteConnectFailure(timedOut ? `no answer within ${CONNECT_TIMEOUT_MS / 1000} s` : errMessage(e), true);
+          this.noteConnectFailure(timedOut ? `no answer within ${CONNECT_TIMEOUT_MS / 1000} s` : errText(e), true);
         } else {
-          this.deps.log("debug", `event stream ended: ${errMessage(e)}`);
+          this.deps.log("debug", `event stream ended: ${errText(e)}`);
         }
       }
     } finally {

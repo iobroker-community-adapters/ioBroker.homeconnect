@@ -1,6 +1,6 @@
 // Home Connect OAuth 2 — headless Device Flow + token refresh.
-// Wire details (endpoints, params, timings) are pinned in
-// `Ressourcen/homeconnect/bsh-api-research-2026-08-05.md` / reference_bsh_home_connect_api.
+// Wire details (endpoints, params, timings) follow the official API documentation
+// (api-docs.home-connect.com, Authorization and Rate Limiting).
 //
 // This module is pure orchestration: HTTP is injected as a `FormPoster`, so the
 // flows are unit-testable without a network or an adapter instance. Token

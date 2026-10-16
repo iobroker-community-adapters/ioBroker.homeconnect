@@ -7,6 +7,7 @@ vi.mock("@iobroker/adapter-core", () => ({
 }));
 
 import { EVENT_CATALOG, eventKeysForType, LOCKABLE_DOOR_TYPES, PROGRAMLESS_TYPES } from "./device-catalog";
+import deviceTypes from "./device-types.json";
 import { stateIdForKey } from "./value-transformer";
 
 describe("device catalog integrity", () => {
@@ -33,6 +34,11 @@ describe("device catalog integrity", () => {
         "WineCooler",
       ].sort(),
     );
+  });
+
+  it("lists the same types in device-types.json, the catalogue the release checks the sources against", () => {
+    // device-sources.json points the release gate A15 at this list: a type a source knows and the list does not is red.
+    expect(deviceTypes).toEqual(Object.keys(EVENT_CATALOG).sort());
   });
 
   it("every catalog entry is an Event key that routes into the events channel", () => {

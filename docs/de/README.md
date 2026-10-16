@@ -7,7 +7,7 @@ Jeder Wert kommt in einer Form an, mit der sich direkt arbeiten lässt: Ein/Aus 
 ## Voraussetzungen
 
 - Node.js >= 22
-- js-controller >= 7.2.2
+- js-controller >= 7.2.5
 - Admin >= 8.0.14
 - Ein kostenloses Home-Connect-Entwicklerkonto für Client ID und Client Secret
 

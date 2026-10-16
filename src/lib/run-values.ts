@@ -8,7 +8,7 @@
 // the programs the API offers — a washer-dryer measured 2026-09-30 gave 3 definitions for ~15 programs it
 // runs, so Prewash or SpeedPerfect, settable options, stand in none of them.
 //
-// Sources, key by key: `Ressourcen/homeconnect/schluessel-recherche-2026-09-30/runtime-options.md` —
+// Sources, key by key (research 2026-09-30) —
 // official "Program Progress Changes", refusals of the real API (Home Assistant core #167619, #168733),
 // real appliance data; the keys without evidence of behaviour were decided by krobi on 2026-09-30.
 

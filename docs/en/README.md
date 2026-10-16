@@ -7,7 +7,7 @@ Every value arrives in a form you can use directly: on/off as a boolean, a fixed
 ## Requirements
 
 - Node.js >= 22
-- js-controller >= 7.2.2
+- js-controller >= 7.2.5
 - Admin >= 8.0.14
 - A free Home Connect developer account, for a Client ID and a Client Secret
 

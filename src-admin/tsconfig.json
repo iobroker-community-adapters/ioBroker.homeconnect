@@ -15,7 +15,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["@iobroker/types"]
+    "types": ["@iobroker/types", "vitest/globals"]
   },
   "include": ["src"],
   "references": [

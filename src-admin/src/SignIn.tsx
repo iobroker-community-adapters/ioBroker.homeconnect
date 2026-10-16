@@ -15,7 +15,7 @@ import { I18n } from "@iobroker/gui-components";
 
 // The adapter's own helpers — the panel imports them rather than keeping a second copy
 // (fleet rule: the helper exists once per repo, `error-text-helper`).
-import { errMessage } from "../../src/lib/pure-helpers";
+import { errText } from "../../src/lib/err-text";
 import { parseRefusal, signInProblem } from "../../src/lib/sign-in-help";
 
 interface SignInState extends ConfigGenericState {
@@ -90,6 +90,9 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
   /** Set when the panel closes — async work that finishes afterwards subscribes and renders nothing. */
   private unmounted = false;
 
+  /**
+   * @param props the jsonConfig props of the custom component
+   */
   constructor(props: ConfigGenericProps) {
     super(props);
     this.state = {
@@ -122,6 +125,7 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
     this.setState({ lastError: typeof state?.val === "string" ? state.val : "" });
   };
 
+  /** Reads the sign-in states once, then follows them live. */
   async componentDidMount(): Promise<void> {
     void super.componentDidMount?.();
     const ctx = this.props.oContext;
@@ -167,6 +171,7 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
     }
   }
 
+  /** Stops following the sign-in states. */
   componentWillUnmount(): void {
     this.unmounted = true;
     const socket = this.props.oContext?.socket;
@@ -210,7 +215,7 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
       }
       return { ok: false, text: I18n.t("hc_noAnswer") };
     } catch (e) {
-      return { ok: false, text: errMessage(e) };
+      return { ok: false, text: errText(e) };
     } finally {
       clearTimeout(timer);
     }
@@ -418,6 +423,9 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
     );
   }
 
+  /**
+   * @returns the sign-in panel
+   */
   renderItem(): React.JSX.Element {
     // The wrapper always mounts (whatever the sign-in state) — the render-check keys on it.
     return (
