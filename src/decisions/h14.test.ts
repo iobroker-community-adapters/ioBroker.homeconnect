@@ -1,6 +1,6 @@
 // Core decision H-14 (accepted 2026-10-15): when a Home Connect quota blocks, the log says which limit and for how long,
-// in one line, without overdoing it. krobi 2026-09-30 17:25/17:26: "Das muss das log den user aber klar kommunizieren"
-// · "Aber übertreibe es nicht".
+// in one line, without overdoing it. krobi 2026-09-30 17:25/17:26: "The log must communicate that clearly to the user"
+// · "But don't overdo it".
 import { describe, expect, it } from "vitest";
 import { rateLimitText } from "../lib/http";
 

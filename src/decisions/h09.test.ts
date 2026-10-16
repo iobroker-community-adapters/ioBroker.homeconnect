@@ -1,6 +1,6 @@
 // Core decision H-09 (accepted 2026-10-15): whoever moves from the community adapter 1.6.x keeps rooms, functions and
-// aliases — they move to the successor datapoint. krobi 2026-09-26 20:34, his choice "Ja, mitnehmen (Empfohlen)" on
-// "Wer heute von der Community-Version 1.6.1 umsteigt, verliert … Räume und Aliase … Sollen die mitgenommen werden?"
+// aliases — they move to the successor datapoint. krobi 2026-09-26 20:34, his choice "Yes, take them along
+// (recommended)" on "Whoever moves from the community version 1.6.1 today loses … rooms and aliases … Take them along?"
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

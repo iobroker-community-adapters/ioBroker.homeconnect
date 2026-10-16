@@ -1,7 +1,7 @@
 // Core decision H-10 (accepted 2026-10-15): an unconfirmed sign-in link is renewed for at most an hour — then the adapter
 // asks Home Connect for no new code until a new link is requested in the panel or the instance restarts. krobi
-// 2026-09-26 20:34, his choice "Nach 1 Stunde anhalten (Empfohlen)" on "erneuert der Adapter ihn heute endlos alle 5
-// Minuten (rund 290 Codes am Tag an BSH)".
+// 2026-09-26 20:34, his choice "Stop after 1 hour (recommended)" on "today the adapter renews it endlessly every 5
+// minutes (around 290 codes a day to BSH)".
 import { describe, expect, it } from "vitest";
 import { AuthController, SIGN_IN_WINDOW_MS, type AuthPort } from "../lib/auth-controller";
 import { HomeConnectAuth, type FormPostResult, type StoredToken } from "../lib/oauth";

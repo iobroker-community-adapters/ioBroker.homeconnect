@@ -1,6 +1,6 @@
 // Core decision H-12 (accepted 2026-10-15): the sign-in part of the settings stays a React panel — it switches live with
-// the sign-in state and answers at the button; the other settings are jsonConfig. krobi 2026-09-27 19:47: "kurz der
-// anmelde teil ist react weil besser wegen feedback und dieser teil ist dynamsich je nach status der anmeldung".
+// the sign-in state and answers at the button; the other settings are jsonConfig. krobi 2026-09-27 19:47: "in short,
+// the sign-in part is React because it is better for feedback, and this part is dynamic depending on the sign-in state".
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

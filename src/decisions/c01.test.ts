@@ -1,6 +1,6 @@
 // Core decision C-01 (accepted 2026-10-15): outside a run (operation state not DelayedStart, Run, Pause or Finished) the
 // remaining time and the progress show no value, like Home Assistant — 0 would claim "almost done". krobi 2026-10-15
-// 20:05: "null sagst eigentlich was anders als 0. gut dann ok".
+// 20:05: "null actually says something different from 0. fine, then ok".
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

@@ -1,6 +1,6 @@
 // Core decision H-02 (accepted 2026-10-15): BSH reports on/off as On with Standby, Off or MainsOff — the adapter makes it a
 // switch (true/false) like Home Assistant home_connect; switching off sends Off where the appliance offers it, else
-// Standby. krobi 2026-09-29 19:30: "warum ist powerstate ein text string? … und keine boolean??!?!?!?!"
+// Standby. krobi 2026-09-29 19:30: "why is powerstate a text string? … and not a boolean??!?!?!?!"
 import { describe, expect, it, vi } from "vitest";
 import { transformItem } from "../lib/value-transformer";
 import { resolveWrite } from "../lib/command-dispatch";

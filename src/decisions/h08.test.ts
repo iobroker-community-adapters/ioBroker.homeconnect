@@ -1,8 +1,8 @@
 // Core decision H-08 (accepted 2026-10-15): the cloud cannot say which events an appliance knows — the adapter creates every
 // known event of the appliance type from the first start on, so a script can be built before the event first comes.
-// krobi 2026-09-30 23:47: "ich möchte im vorhinein wissen welche ereignisse sein könnten, vl möchte ich auf leeres salz
-// triggern aber muss jetzt erstmal monate warten bis es mal passiert". Since 2026-10-15 (his choice "Eigener Kanal je
-// Tür/Ereignis") each event is a channel of its own: events.<event>.active.
+// krobi 2026-09-30 23:47: "I want to know beforehand which events there could be, maybe I want to trigger on empty
+// salt but now have to wait months until it happens". Since 2026-10-15 (his choice "Own channel per door/event") each
+// event is a channel of its own: events.<event>.active.
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

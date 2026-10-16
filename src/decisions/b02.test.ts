@@ -1,6 +1,6 @@
 // Core decision B-02 (accepted 2026-10-15): an appliance Home Connect reports as removed from the account (DEPAIRED) is no
 // longer reachable over the cloud — its tree is deleted; an appliance that is merely switched off keeps its tree.
-// Noted 2026-08-27 (dev-history): "was nicht am server da ist ist auch nicht mehr da".
+// krobi 2026-10-15 19:58, on "b02 is the fleet standard, isn't it?": "b01 and b02 ok, b03 gone - the fleet standard is fully enough".
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

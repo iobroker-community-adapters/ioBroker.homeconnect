@@ -1,6 +1,6 @@
 // Core decision H-07 (accepted 2026-10-15): run values (remaining time, progress, program phase …) the appliance reports
-// during a run are no options to set — they stand read-only under status. krobi 2026-09-30 21:20: "unter optionen sind
-// der programmstatus und restlauf usw aber gehört dsa nicht eher unter status rein? das ist doch keine option."
+// during a run are no options to set — they stand read-only under status. krobi 2026-09-30 21:20: "under options are
+// the program status and remaining run etc., but doesn't that rather belong under status? that is no option after all."
 import { describe, expect, it, vi } from "vitest";
 import { transformItem } from "../lib/value-transformer";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";

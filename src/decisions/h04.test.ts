@@ -1,8 +1,8 @@
 // Core decision H-04 (accepted with a change 2026-10-15): the appliance's connection internals never become a datapoint
 // (BackendConnected, AllowBackendConnection, DeactivateWiFi, SoftwareUpdateTransactionID); the firmware is shown under
-// info as the version number of DomainFw, every other version part stays out. krobi 2026-09-29 22:06: "ohne verbindung
-// zum server wäre das gerät ja nicht online … was soll de rbringen" · 2026-10-15 19:53 "h04 auch ok - aber sowas wie
-// firmware version wäre schon interessant unter info reinzugeben" · 20:13 his choice "DomainFw, nur die Version".
+// info as the version number of DomainFw, every other version part stays out. krobi 2026-09-29 22:06: "without a
+// connection to the server the appliance would not be online … what would that bring" · 2026-10-15 19:53 "h04 ok too
+// - but something like the firmware version would be interesting under info" · 20:13 his choice "DomainFw, version only".
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

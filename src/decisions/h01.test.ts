@@ -1,6 +1,6 @@
 // Core decision H-01 (accepted 2026-10-15): encoded appliance data is decoded into readable datapoints, never left out
-// — and new encoded values are decoded too. krobi 2026-09-27 23:49: "dann schreib dir das auf das du die rohdaten, falls
-// wieder welche kommen, dekodieren Musst!" (that you must decode the raw data, should more of it come).
+// — and new encoded values are decoded too. krobi 2026-09-27 23:49: "then write it down for yourself that you must
+// decode the raw data, should more of it come!"
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";

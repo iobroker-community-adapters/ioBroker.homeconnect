@@ -1,6 +1,6 @@
 // Core decision H-05 (accepted 2026-10-15): the program history carries speaking names, counted back from the newest run
-// — latest, previous, thirdLatest … — never counting numbers. krobi 2026-09-29 22:05: "könnte man vl die ids hier auch
-// irgendwie sinnvoll bennenn? … einfach durchzählen ist auch extra faul".
+// — latest, previous, thirdLatest … — never counting numbers. krobi 2026-09-29 22:05: "could the ids here maybe be
+// named somehow sensibly? … just counting through is extra lazy too".
 import { describe, expect, it, vi } from "vitest";
 import { runSegment } from "../lib/run-ordinal";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";

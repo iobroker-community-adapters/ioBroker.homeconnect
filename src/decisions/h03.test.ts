@@ -1,8 +1,8 @@
 // Core decision H-03 (accepted 2026-10-15): krobi's unit table — lifetime running time in hours (1 decimal), energy in
 // kWh (2), water in litres and load in kg (1), durations in whole minutes, detergent and softener of the last run in ml
-// like the machine's dosing; a write goes back in the appliance's unit. krobi 2026-09-29 19:44: "mach stunden ist hier
-// sinnvoller" · "und auch beim strom kwh ist die sinnvollere einheit" · 19:46 "ja deine vorschläge sind doch absolut
-// super" · 2026-09-30 11:27 "waschmittel wird von der maschine (dosierung) in ML angegeben".
+// like the machine's dosing; a write goes back in the appliance's unit. krobi 2026-09-29 19:44: "make it hours, that
+// makes more sense here" · "and for electricity too kWh is the more sensible unit" · 19:46 "yes, your suggestions
+// are absolutely great" · 2026-09-30 11:27 "detergent is given by the machine (dosing) in ML".
 import { describe, expect, it, vi } from "vitest";
 import { transformItem } from "../lib/value-transformer";
 import { resolveWrite } from "../lib/command-dispatch";

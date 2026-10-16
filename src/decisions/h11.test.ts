@@ -1,6 +1,6 @@
 // Core decision H-11 (accepted 2026-10-15): there is no shared Client ID — every user creates his own in the Home Connect
-// developer portal. krobi 2026-09-26 22:19 on asking BSH for a shared one (the contract needs a business): "hab kein
-// gewerbe und werde dafür kein gewerbe anmelden also streichen".
+// developer portal. krobi 2026-09-26 22:19 on asking BSH for a shared one (the contract needs a business): "I have no
+// business and will not register one for this, so strike it".
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
