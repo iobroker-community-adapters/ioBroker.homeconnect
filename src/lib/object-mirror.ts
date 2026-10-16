@@ -193,6 +193,8 @@ interface HeldState {
  */
 export class StateMirror {
   private readonly states = new Map<string, HeldState>();
+  /** Whether the start-up read came through — then a state it did not hold does not exist. */
+  private loaded = false;
 
   /**
    * Take the start-up read of the own states.
@@ -201,6 +203,7 @@ export class StateMirror {
    */
   load(states: Record<string, ioBroker.State | null | undefined>): void {
     this.states.clear();
+    this.loaded = true;
     for (const [id, state] of Object.entries(states)) {
       if (state) {
         this.remember(id, state);
@@ -227,11 +230,16 @@ export class StateMirror {
    * one by one from the database (the adapter is its only writer).
    *
    * @param id the full id
-   * @returns the held value, ack and quality, or undefined when the state is not held
+   * @returns the held value, ack and quality; null when the start-up read came through without it (it does not exist);
+   *   undefined when there was no start-up read
    */
-  held(id: string): { val: ioBroker.StateValue; ack: boolean; q: number } | undefined {
+  held(id: string): { val: ioBroker.StateValue; ack: boolean; q: number } | null | undefined {
     const held = this.states.get(id);
-    return held ? { val: held.val as ioBroker.StateValue, ack: held.ack, q: held.q } : undefined;
+    if (held) {
+      return { val: held.val as ioBroker.StateValue, ack: held.ack, q: held.q };
+    }
+    // Not in a start-up read that came through, and not written since: the state does not exist.
+    return this.loaded ? null : undefined;
   }
 
   /**

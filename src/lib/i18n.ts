@@ -16,3 +16,14 @@ export type I18nKey = keyof typeof translations;
 export function tName(key: I18nKey, ...args: (string | number)[]): ioBroker.StringOrTranslated {
   return I18n.getTranslatedObject(key, ...args);
 }
+
+/**
+ * Resolve a key to a text in the system language — for an answer the user reads at once (the connection test), not
+ * for an object name.
+ *
+ * @param key Translation key from admin/i18n/en.json
+ * @param args Values for `%s` placeholders
+ */
+export function tText(key: I18nKey, ...args: (string | number)[]): string {
+  return I18n.translate(key, ...args);
+}

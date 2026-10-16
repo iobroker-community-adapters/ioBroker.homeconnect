@@ -58,7 +58,14 @@ export async function postForm(
   if (parsed.tooLarge) {
     return { status: 0, ok: false, body: { error: "response_too_large" } };
   }
-  return { status: res.status, ok: res.ok, body: parsed.json };
+  // A 429 says how long Home Connect blocks — the whole account, the token endpoint included.
+  const retryAfter = res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
+  return {
+    status: res.status,
+    ok: res.ok,
+    body: parsed.json,
+    ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+  };
 }
 
 /** Result of a bearer-token JSON request (GET/PUT/DELETE): status, ok, the unwrapped `data`, and an error key on failure. */

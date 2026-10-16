@@ -1,3 +1,4 @@
+import type * as NodeFs from "node:fs";
 import { join } from "node:path";
 import { vi } from "vitest";
 
@@ -12,7 +13,15 @@ const dataFolder = vi.hoisted(() => ({ path: "" }));
  * The HTTP layer is mocked; the three collaborators are replaced through the
  * factory seams in main.ts. Nothing here touches the network.
  */
-vi.mock("@iobroker/adapter-core", () => {
+vi.mock("@iobroker/adapter-core", async () => {
+  // The answers a user reads (the connection test) come in the system language — here the shipped English texts.
+  const { readFileSync } = await vi.importActual<typeof NodeFs>("node:fs");
+  const en = JSON.parse(readFileSync(join(__dirname, "..", "admin", "i18n", "en.json"), "utf8")) as Record<
+    string,
+    string
+  >;
+  const fill = (text: string, args: unknown[]): string =>
+    args.reduce<string>((s, a) => s.replace("%s", String(a)), text);
   class Adapter {
     public log = { silly: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     public namespace = "homeconnect.0";
@@ -156,7 +165,7 @@ vi.mock("@iobroker/adapter-core", () => {
   const I18n = {
     init: vi.fn(() => Promise.resolve()),
     getTranslatedObject: vi.fn((key: string) => ({ en: key })),
-    translate: vi.fn((key: string) => key),
+    translate: vi.fn((key: string, ...args: unknown[]) => fill(en[key] ?? key, args)),
   };
   // A folder the host keeps across a restart; without one set, the adapter gets an error like a missing folder.
   const getAbsoluteInstanceDataDir = (): string => {
@@ -532,6 +541,21 @@ describe("Homeconnect stored login", () => {
       ack: true,
     });
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("SECRET");
+  });
+
+  it("knows a session the start-up read did not find is absent, without asking the database", async () => {
+    const ctx = setup();
+    // A fresh installation: the read-only object exists, its state does not yet.
+    ctx.i.objects.set("auth.session", {
+      type: "state",
+      common: { type: "string", read: true, write: false },
+      native: {},
+    });
+    await ctx.i.onReady();
+    ctx.i.getStateAsync.mockClear();
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
+    const reads = ctx.i.getStateAsync.mock.calls as unknown[][];
+    expect(reads.filter(([id]) => String(id).endsWith("auth.session"))).toEqual([]);
   });
 
   it("reads its read-only session from the start-up read, never one by one from the database", async () => {
@@ -911,6 +935,32 @@ describe("Homeconnect rate limiting", () => {
       rmSync(dataFolder.path, { recursive: true, force: true });
       dataFolder.path = "";
     }
+  });
+
+  it("holds a sign-in request until a rate pause is over, and a 429 of the token endpoint pauses everything", async () => {
+    const ctx = setup();
+    let poster: ((p: string, f: Record<string, string>) => Promise<unknown>) | undefined;
+    const realMake = ctx.i.makeAuthController as (a: unknown, p: unknown) => unknown;
+    ctx.i.makeAuthController = (auth: { post?: unknown }, p: unknown) => {
+      poster = (auth as unknown as { post: (p: string, f: Record<string, string>) => Promise<unknown> }).post;
+      return realMake(auth, p);
+    };
+    await ctx.i.onReady();
+    httpMock.postForm.mockClear();
+    httpMock.postForm.mockResolvedValueOnce({ status: 429, ok: false, body: {}, retryAfterMs: 60_000 });
+    httpMock.postForm.mockResolvedValue({ status: 200, ok: true, body: {} });
+    const refused = poster?.("/security/oauth/token", { grant_type: "refresh_token" });
+    await vi.advanceTimersByTimeAsync(200);
+    await refused;
+    expect(httpMock.postForm).toHaveBeenCalledTimes(1);
+    // The token endpoint's own renewal comes back after 30 s — Home Connect blocks the whole minute.
+    await vi.advanceTimersByTimeAsync(30_000);
+    const retry = poster?.("/security/oauth/token", { grant_type: "refresh_token" });
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(httpMock.postForm).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_200);
+    expect(httpMock.postForm).toHaveBeenCalledTimes(2);
+    await retry;
   });
 
   it("lets the fixture environment widen the budget, never narrow it", async () => {
@@ -1784,6 +1834,16 @@ describe("Homeconnect connection test (settings panel button)", () => {
     await expect(ctx.i.checkConnection()).resolves.toEqual({
       error: "Home Connect rejected the login (HTTP 401) — a new sign-in is required.",
     });
+  });
+
+  it("answers in the system language (fleet suite D14)", async () => {
+    const ctx = await signedIn();
+    const { I18n } = await import("@iobroker/adapter-core");
+    const translate = I18n.translate as unknown as ReturnType<typeof vi.fn>;
+    translate.mockClear();
+    httpMock.getJson.mockResolvedValue({ status: 0, ok: false, data: undefined, error: "network_error: ECONNREFUSED" });
+    await ctx.i.checkConnection();
+    expect(translate).toHaveBeenCalledWith("ctUnreachable", "network_error: ECONNREFUSED");
   });
 
   it("names a network failure and an unexpected answer instead of calling them fine", async () => {

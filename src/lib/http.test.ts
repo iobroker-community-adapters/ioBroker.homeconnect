@@ -133,6 +133,15 @@ describe("postForm", () => {
     expect(res).toEqual({ status: 400, ok: false, body: { error: "invalid_grant" } });
   });
 
+  it("passes on how long a 429 of the token endpoint blocks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 429, headers: { "retry-after": "60" } })),
+    );
+    const res = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
+    expect(res).toMatchObject({ status: 429, ok: false, retryAfterMs: 60_000 });
+  });
+
   it("returns a null body for an empty or non-JSON response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 200 })));
     expect((await postForm("https://api.home-connect.com", "/x", {})).body).toBeNull();

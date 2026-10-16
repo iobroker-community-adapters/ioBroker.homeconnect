@@ -196,7 +196,8 @@ function route(url, init) {
     return bshError("SDK.Error.NoProgramActive", 404);
   }
   if (method === "PUT" || method === "DELETE") {
-    return new Response("", { status: 204 });
+    // A 204 carries no body — `new Response("", …)` throws "Invalid response status code 204".
+    return new Response(null, { status: 204 });
   }
   return undefined;
 }

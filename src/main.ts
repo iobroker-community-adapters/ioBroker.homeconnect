@@ -16,7 +16,7 @@ import { LogDedup, categorize } from "./lib/log-dedup";
 import { declaredLimit } from "./lib/api-limits";
 import { readSentTimes, writeSentTimes } from "./lib/request-budget";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
-import type { I18nKey } from "./lib/i18n";
+import { tText, type I18nKey } from "./lib/i18n";
 
 /** Production API host (global EU/US region; China would be api.home-connect.cn). */
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
@@ -461,14 +461,28 @@ export class Homeconnect extends utils.Adapter {
    * @returns the answer, or a transport failure when the adapter shut down while it waited
    */
   private async sendForm(path: string, form: Record<string, string>): Promise<FormPostResult> {
-    if (!(await this.spaceRequests(true))) {
+    // A rate pause holds the whole host — a token renewal waits for it like any request (fleet suite D21: after a 429
+    // with retry-after 60, no call before the minute is up).
+    const paused = this.restBlockedUntil - Date.now();
+    if (paused > 0 && !this.terminating) {
+      try {
+        await this.delay(paused);
+      } catch {
+        // the adapter's timer refuses during shutdown — nothing may go out then
+      }
+    }
+    if (this.terminating || !(await this.spaceRequests(true))) {
       return {
         status: 0,
         ok: false,
         body: { error: "network_error", error_description: "the adapter is shutting down" },
       };
     }
-    return postForm(DEFAULT_BASE_URL, path, form);
+    const res = await postForm(DEFAULT_BASE_URL, path, form);
+    if (res.status === 429) {
+      this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
+    }
+    return res;
   }
 
   /**
@@ -504,8 +518,8 @@ export class Homeconnect extends utils.Adapter {
   private async readState(id: string): Promise<ioBroker.State | null | undefined> {
     if (this.objectMirror.readOnly(id)) {
       const held = this.stateMirror.held(this.objectMirror.fullId(id));
-      if (held) {
-        return held as ioBroker.State;
+      if (held !== undefined) {
+        return held as ioBroker.State | null;
       }
     }
     return this.getStateAsync(id);
@@ -994,25 +1008,22 @@ export class Homeconnect extends utils.Adapter {
    */
   private async checkConnection(): Promise<{ result: string } | { error: string }> {
     if (typeof this.config.clientID !== "string" || this.config.clientID.trim().length === 0) {
-      return { error: "No Client ID configured — enter it above and save first." };
+      return { error: tText("ctNoClientId") };
     }
     if (!this.authCtl?.accessToken) {
       const url = (await this.getStateAsync("auth.verificationUrl"))?.val;
       return {
-        error:
-          typeof url === "string" && url.length > 0
-            ? "Not signed in yet — open the sign-in link and confirm the code, then test again."
-            : "Not signed in — no Home Connect login is stored; the adapter requests a sign-in link at start.",
+        error: typeof url === "string" && url.length > 0 ? tText("ctNotSignedInLink") : tText("ctNotSignedIn"),
       };
     }
     if (Date.now() < this.restBlockedUntil) {
       const seconds = Math.ceil((this.restBlockedUntil - Date.now()) / 1000);
-      return { error: `Home Connect REST is paused after a rate limit for another ${seconds} s — try again later.` };
+      return { error: tText("ctRatePaused", seconds) };
     }
     const sent = this.authCtl.accessToken;
     // The test request takes a slot like every other request and a 429 pauses REST like on every other path.
     if (!(await this.spaceRequests(true))) {
-      return { error: "The adapter is shutting down." };
+      return { error: tText("ctShuttingDown") };
     }
     let res = await getJson(DEFAULT_BASE_URL, "/api/homeappliances", sent, this.acceptLanguage());
     if (res.status === 401) {
@@ -1024,32 +1035,32 @@ export class Homeconnect extends utils.Adapter {
     this.countAnswer(res);
     if (res.status === 429) {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
-      return { error: `${rateLimitText(res.description, res.retryAfterMs)} — try again later.` };
+      return { error: tText("ctRateLimited", rateLimitText(res.description, res.retryAfterMs)) };
     }
     if (res.status === 401 || res.status === 403) {
-      return { error: `Home Connect rejected the login (HTTP ${res.status}) — a new sign-in is required.` };
+      return { error: tText("ctLoginRejected", res.status) };
     }
     if (res.status === 0) {
-      return { error: `Home Connect is not reachable: ${res.error ?? "network error"}` };
+      return { error: tText("ctUnreachable", res.error ?? "network error") };
     }
     if (!res.ok) {
       return {
-        error: `Home Connect answered HTTP ${res.status}: ${res.error ?? "unknown error"}${res.description ? ` (${res.description})` : ""}`,
+        error: tText(
+          "ctHttpError",
+          res.status,
+          `${res.error ?? "unknown error"}${res.description ? ` (${res.description})` : ""}`,
+        ),
       };
     }
     const list = isRecord(res.data) && Array.isArray(res.data.homeappliances) ? res.data.homeappliances : undefined;
     if (!list) {
-      return {
-        error: "Home Connect answered, but not with an appliance list — the API shape is not what the adapter expects.",
-      };
+      return { error: tText("ctNoList") };
     }
     const online = list.filter(a => isRecord(a) && a.connected === true).length;
     const stream = this.streamUp
-      ? "Live updates: connected."
-      : `Live updates: NOT connected${this.eventStream?.lastError ? ` (${this.eventStream.lastError})` : ""} — the adapter keeps retrying.`;
-    return {
-      result: `Signed in — Home Connect listed ${list.length} appliance(s), ${online} of them connected right now. ${stream}`,
-    };
+      ? tText("ctStreamUp")
+      : tText("ctStreamDown", this.eventStream?.lastError ? ` (${this.eventStream.lastError})` : "");
+    return { result: tText("ctResult", list.length, online, stream) };
   }
 
   /**

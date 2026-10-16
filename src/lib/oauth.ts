@@ -64,6 +64,8 @@ export interface FormPostResult {
   ok: boolean;
   /** The parsed JSON response body. */
   body: unknown;
+  /** On a 429, the `Retry-After` window in ms (from the header), else undefined. */
+  retryAfterMs?: number;
 }
 export type FormPoster = (path: string, form: Record<string, string>) => Promise<FormPostResult>;
 
