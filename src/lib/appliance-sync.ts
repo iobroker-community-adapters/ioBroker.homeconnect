@@ -2038,11 +2038,10 @@ export class ApplianceSync {
           });
           // The target lives in a channel too — one that received a migrated state
           // must not be deleted as drained (a move within one channel emptied it
-          // of the old id and took the new one's parent with it). Counted at the
-          // first level, where the old channel sits: an event or door that was a channel of its own (test build of
-          // 2026-10-15) becomes a datapoint of `events`/`doors` again — the channel object at its id is replaced by
-          // the state written above, the old `.active`/`.open` child is deleted.
-          const targetChannel = `${deviceId}.${t.channel.split(".")[0]}`;
+          // of the old id and took the new one's parent with it). An event or door that was a channel of its own
+          // (test build of 2026-10-15) becomes a datapoint of `events`/`doors` again — the channel object at its id
+          // is replaced by the state written above, the old `.active`/`.open` child is deleted.
+          const targetChannel = `${deviceId}.${t.channel}`;
           remaining.set(targetChannel, (remaining.get(targetChannel) ?? 0) + 1);
           const newValue =
             oneToOne && t.common.type === oldCommon.type ? oldValue : shape === value ? t.value : undefined;
