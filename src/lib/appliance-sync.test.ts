@@ -99,6 +99,7 @@ class FakePort implements AdapterPort {
   primeDevices: Record<string, ioBroker.Object> = {};
   primeStates: Record<string, ioBroker.Object> = {};
   primeChannels: Record<string, ioBroker.Object> = {};
+  primeFolders: Record<string, ioBroker.Object> = {};
 
   extendObject(id: string, obj: ioBroker.PartialObject): Promise<unknown> {
     this.extendCalls.push(id);
@@ -285,12 +286,17 @@ class FakePort implements AdapterPort {
     }
     return Promise.resolve();
   }
-  getForeignObjects(_pattern: string, type: "state" | "device" | "channel"): Promise<Record<string, ioBroker.Object>> {
-    return Promise.resolve(
-      structuredClone(
-        type === "device" ? this.primeDevices : type === "channel" ? this.primeChannels : this.primeStates,
-      ),
-    );
+  getForeignObjects(
+    _pattern: string,
+    type: "state" | "device" | "channel" | "folder",
+  ): Promise<Record<string, ioBroker.Object>> {
+    const byType = {
+      device: this.primeDevices,
+      channel: this.primeChannels,
+      folder: this.primeFolders,
+      state: this.primeStates,
+    };
+    return Promise.resolve(structuredClone(byType[type]));
   }
   /** The sync under test — the transport reports classified appliance answers back to it, like main does. */
   sync: ApplianceSync | undefined;
@@ -497,12 +503,12 @@ describe("ApplianceSync.syncAppliances", () => {
       status: [{ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Closed" }],
     });
     await sync.syncAppliances();
-    const first = port.stateWrites.filter(w => w.id.endsWith("status.doorOpen")).length;
+    const first = port.stateWrites.filter(w => w.id.endsWith("doors.door")).length;
     expect(first).toBe(1);
 
     port.stateWrites.length = 0;
     await sync.syncAppliances();
-    expect(port.stateWrites.filter(w => w.id.endsWith("status.doorOpen"))).toEqual([]);
+    expect(port.stateWrites.filter(w => w.id.endsWith("doors.door"))).toEqual([]);
   });
 
   it("builds a speaking device tree with idiomatic values", async () => {
@@ -515,10 +521,10 @@ describe("ApplianceSync.syncAppliances", () => {
     expect(port.objects.has("geschirrspueler-1")).toBe(true);
     expect(port.objects.get("geschirrspueler-1")?.type).toBe("device");
     // The door is a proper boolean, not enum text (design principle: idiomatic types).
-    expect(port.states.get("geschirrspueler-1.status.doorOpen")).toBe(true);
-    expect(port.objects.get("geschirrspueler-1.status.doorOpen")?.common).toMatchObject({ type: "boolean" });
+    expect(port.states.get("geschirrspueler-1.doors.door")).toBe(true);
+    expect(port.objects.get("geschirrspueler-1.doors.door")?.common).toMatchObject({ type: "boolean" });
     // A dishwasher's door does not lock — no doorLocked state for this type.
-    expect(port.objects.has("geschirrspueler-1.status.doorLocked")).toBe(false);
+    expect(port.objects.has("geschirrspueler-1.doors.doorLocked")).toBe(false);
     expect(port.objects.get("geschirrspueler-1.settings.childLock")?.common).toMatchObject({ write: true });
   });
 
@@ -526,9 +532,9 @@ describe("ApplianceSync.syncAppliances", () => {
     appliance(port, "HA-1", "Geschirrspüler", { connected: false });
     await sync.syncAppliances();
     // Dishwasher catalog: the event exists with false BEFORE it ever fires.
-    expect(port.states.get("geschirrspueler-1.events.saltNearlyEmpty.active")).toBe(false);
-    expect(port.states.get("geschirrspueler-1.events.programAborted.active")).toBe(false);
-    expect(port.objects.get("geschirrspueler-1.events.programFinished.active")?.common).toMatchObject({
+    expect(port.states.get("geschirrspueler-1.events.saltNearlyEmpty")).toBe(false);
+    expect(port.states.get("geschirrspueler-1.events.programAborted")).toBe(false);
+    expect(port.objects.get("geschirrspueler-1.events.programFinished")?.common).toMatchObject({
       type: "boolean",
     });
   });
@@ -549,8 +555,8 @@ describe("ApplianceSync.syncAppliances", () => {
       status: [{ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Locked" }],
     });
     await sync.syncAppliances();
-    expect(port.states.get("waschtrockner-1.status.doorOpen")).toBe(false);
-    expect(port.states.get("waschtrockner-1.status.doorLocked")).toBe(true);
+    expect(port.states.get("waschtrockner-1.doors.door")).toBe(false);
+    expect(port.states.get("waschtrockner-1.doors.doorLocked")).toBe(true);
   });
 
   it("routes nested BSH keys into their real channel instead of misc", async () => {
@@ -561,7 +567,7 @@ describe("ApplianceSync.syncAppliances", () => {
     });
     await sync.syncAppliances();
     // Per-compartment door → a speaking boolean under status, not "misc.freezer".
-    expect(port.states.get("kuehlschrank-1.doors.freezer.open")).toBe(true);
+    expect(port.states.get("kuehlschrank-1.doors.freezer")).toBe(true);
     // A nested setting lands under settings and is writable.
     expect(port.states.get("kuehlschrank-1.settings.lightInternalBrightness")).toBe(70);
     expect(port.objects.get("kuehlschrank-1.settings.lightInternalBrightness")?.common).toMatchObject({ write: true });
@@ -642,8 +648,8 @@ describe("ApplianceSync datapoint persistence", () => {
     // Make the status GET fail (undefined).
     port.getResponses.delete("/api/homeappliances/HA-1/status");
     await sync.syncAppliances();
-    expect(port.deleted).not.toContain("oven-1.status.doorOpen");
-    expect(port.objects.has("oven-1.status.doorOpen")).toBe(true);
+    expect(port.deleted).not.toContain("oven-1.doors.door");
+    expect(port.objects.has("oven-1.doors.door")).toBe(true);
   });
 });
 
@@ -836,7 +842,7 @@ describe("ApplianceSync.handleStreamEvent", () => {
       }),
     });
     await flush();
-    expect(port.states.get("oven-1.status.doorOpen")).toBe(false);
+    expect(port.states.get("oven-1.doors.door")).toBe(false);
   });
 
   it("keeps a number setting a number when a value-less REST item arrives after a newer stream value", async () => {
@@ -891,8 +897,8 @@ describe("ApplianceSync.handleStreamEvent", () => {
       }),
     });
     await flush();
-    expect(port.states.get("washer-sher.status.doorOpen")).toBe(true);
-    expect(port.states.has("oven-oven.status.doorOpen")).toBe(false);
+    expect(port.states.get("washer-sher.doors.door")).toBe(true);
+    expect(port.states.has("oven-oven.doors.door")).toBe(false);
   });
 });
 
@@ -1200,8 +1206,8 @@ describe("ApplianceSync.primeFromObjects robustness", () => {
     await flush();
     // The haId must resolve to the device ROOT. Mapping it to a nested path puts
     // the appliance's whole live tree one level too deep, next to the real one.
-    expect(port.states.has("oven.status.doorOpen")).toBe(true);
-    expect(port.states.has("oven.info.status.doorOpen")).toBe(false);
+    expect(port.states.has("oven.doors.door")).toBe(true);
+    expect(port.states.has("oven.info.doors.door")).toBe(false);
   });
 
   it("ignores a state whose stored BSH key is not a string", async () => {
@@ -1257,8 +1263,8 @@ describe("ApplianceSync malformed API responses", () => {
     // rate-limit / error envelope shape.
     port.getResponses.set("/api/homeappliances/HA-1/status", { error: { key: "SDK.Error.TooManyRequests" } });
     await sync.syncAppliances();
-    expect(port.deleted).not.toContain("oven-1.status.doorOpen");
-    expect(port.objects.has("oven-1.status.doorOpen")).toBe(true);
+    expect(port.deleted).not.toContain("oven-1.doors.door");
+    expect(port.objects.has("oven-1.doors.door")).toBe(true);
   });
 
   it("falls back to the haId when the appliance has an empty name", async () => {
@@ -2333,13 +2339,13 @@ describe("ApplianceSync.migrateRenamedStates", () => {
     const sync = new ApplianceSync(port);
     await sync.migrateRenamedStates();
 
-    expect(port.states.get("washer.status.doorOpen")).toBe(false);
-    expect(port.states.get("washer.status.doorLocked")).toBe(true);
+    expect(port.states.get("washer.doors.door")).toBe(false);
+    expect(port.states.get("washer.doors.doorLocked")).toBe(true);
     expect(port.objects.has("washer.status.doorState")).toBe(false);
     // The freezer door had no stored value: the datapoint moves, but no value
     // is invented for it — "false" would claim a closed door nobody reported.
-    expect(port.objects.has("fridge.doors.freezer.open")).toBe(true);
-    expect(port.states.has("fridge.doors.freezer.open")).toBe(false);
+    expect(port.objects.has("fridge.doors.freezer")).toBe(true);
+    expect(port.states.has("fridge.doors.freezer")).toBe(false);
   });
 
   it("removes the programs channel of a program-less appliance type", async () => {
@@ -3101,7 +3107,7 @@ describe("ApplianceSync display names", () => {
     const sync = new ApplianceSync(port);
     appliance(port, "HA-1", "Geschirrspüler", { status: [] });
     await sync.syncAppliances();
-    const id = "geschirrspueler-1.events.saltNearlyEmpty.active";
+    const id = "geschirrspueler-1.events.saltNearlyEmpty";
     expect(port.objects.get(id)?.common?.name).toMatchObject({ de: "Salz fast leer" });
     port.extendCalls.length = 0;
 
@@ -3240,8 +3246,8 @@ describe("ApplianceSync.migrateRenamedStates names", () => {
       tName("setLightInternalBrightness"),
     );
     // The old id as a name is replaced as well.
-    expect(port.objects.get("fridge.doors.freezer.open")?.common?.name).toMatchObject({ en: "Freezer door open" });
-    expect(port.objects.get("fridge.doors.freezer.open")?.common?.desc).toMatchObject({
+    expect(port.objects.get("fridge.doors.freezer")?.common?.name).toMatchObject({ en: "Freezer door open" });
+    expect(port.objects.get("fridge.doors.freezer")?.common?.desc).toMatchObject({
       de: "Eigene Tür je Fach, zum Beispiel Kühlteil und Gefrierteil.",
     });
   });
@@ -3348,7 +3354,7 @@ describe("ApplianceSync metadata refresh without deleting (shelly model)", () =>
       status: [{ key, value: phase("Drying"), constraints: { allowedvalues: [phase("Drying"), phase("Cleaning")] } }],
     });
     await sync.syncAppliances();
-    const id = "dishwasher-1.status.programPhase";
+    const id = "dishwasher-1.run.programPhase";
     expect((port.objects.get(id)?.common as ioBroker.StateCommon).states).toEqual({
       drying: "Drying",
       cleaning: "Cleaning",
@@ -3500,7 +3506,7 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     port.objects.set("washer", device);
     const states: Record<string, ioBroker.Object> = {
       // A catalog event: created upfront, never part of a REST answer.
-      [`${NS}.washer.events.programFinished.active`]: {
+      [`${NS}.washer.events.programFinished`]: {
         _id: "",
         type: "state",
         common: { name: "programFinished", type: "boolean", role: "indicator.alarm", read: true, write: false, custom },
@@ -3576,7 +3582,7 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     await sync.primeFromObjects();
 
     expect(port.getCalls).toEqual([]);
-    expect(port.objects.get("washer.events.programFinished.active")?.common).toMatchObject({
+    expect(port.objects.get("washer.events.programFinished")?.common).toMatchObject({
       name: { de: "Programm beendet", en: "Program finished" },
       desc: { de: "Das laufende Programm ist fertig." },
     });
@@ -3589,7 +3595,7 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     expect(port.objects.get("washer.options.spinSpeed")?.common?.desc).toMatchObject({
       en: "How fast the drum spins at the end — faster leaves the laundry drier.",
     });
-    expect(port.objects.get("washer.events.programFinished.active")?.native).toMatchObject({ nameSource: "i18n" });
+    expect(port.objects.get("washer.events.programFinished")?.native).toMatchObject({ nameSource: "i18n" });
   });
 
   it("replaces a legacy cloud label with our own, and keeps the explanation", async () => {
@@ -3648,8 +3654,8 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
       } as unknown as ioBroker.Object,
     };
     port.primeStates = {
-      [`${NS}.dishwasher.status.programAllCountStarted`]: {
-        _id: `${NS}.dishwasher.status.programAllCountStarted`,
+      [`${NS}.dishwasher.counters.programAllCountStarted`]: {
+        _id: `${NS}.dishwasher.counters.programAllCountStarted`,
         type: "state",
         common: {
           name: "Program all count started",
@@ -3667,7 +3673,7 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     }
     await new ApplianceSync(port).primeFromObjects();
 
-    const obj = port.objects.get("dishwasher.status.programAllCountStarted");
+    const obj = port.objects.get("dishwasher.counters.programAllCountStarted");
     // The catalog entry wins over the derived string — in all eleven languages,
     // with the explanation next to it and the recording configuration untouched.
     expect(obj?.common?.name).toEqual(tName("stProgramAllCountStarted"));
@@ -3685,7 +3691,7 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
 
-    expect(port.objects.get("washer.events.programFinished.active")?.common).toMatchObject({
+    expect(port.objects.get("washer.events.programFinished")?.common).toMatchObject({
       custom: { "influxdb.0": { enabled: true } },
     });
     expect(port.objects.get("washer.options.spinSpeed")?.common).toMatchObject({
@@ -3724,14 +3730,14 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
       common: { name: "programAborted", type: "boolean", role: "indicator.alarm", read: true, write: false },
       native: {},
     } as unknown as ioBroker.Object;
-    port.primeStates[`${NS}.washer.events.programAborted.active`] = stale;
-    port.objects.set("washer.events.programAborted.active", stale);
+    port.primeStates[`${NS}.washer.events.programAborted`] = stale;
+    port.objects.set("washer.events.programAborted", stale);
     appliance(port, "HA-W", "Waschtrockner", { type: "WasherDryer", connected: true });
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
     await sync.syncAppliances();
 
-    expect(port.objects.get("washer.events.programAborted.active")?.common).toMatchObject({
+    expect(port.objects.get("washer.events.programAborted")?.common).toMatchObject({
       name: { de: "Programm abgebrochen" },
       desc: { de: "Das Programm wurde vorzeitig beendet." },
     });
@@ -3831,13 +3837,13 @@ describe("ApplianceSync upgrade of a tree an older version left behind", () => {
       common: { name: "Programm beendet!", type: "boolean", role: "indicator.alarm", read: true, write: false },
       native: { bshKey: "BSH.Common.Event.ProgramFinished" },
     } as unknown as ioBroker.Object;
-    port.primeStates[`${NS}.washer.events.programFinished.active`] = stale;
-    port.objects.set("washer.events.programFinished.active", stale);
+    port.primeStates[`${NS}.washer.events.programFinished`] = stale;
+    port.objects.set("washer.events.programFinished", stale);
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
 
     // Ours covers eleven languages, the old cloud text only one.
-    expect(port.objects.get("washer.events.programFinished.active")?.common?.name).toMatchObject({
+    expect(port.objects.get("washer.events.programFinished")?.common?.name).toMatchObject({
       de: "Programm beendet",
       en: "Program finished",
     });
@@ -3912,12 +3918,12 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     // Damaged = what the label repair wrote before this fix: the name of the
     // SOURCE item on every expanded datapoint, and no explanation left.
     const states: Record<string, ioBroker.Object> = {
-      [`${NS}.washer.status.doorOpen`]: state(
+      [`${NS}.washer.doors.door`]: state(
         "doorOpen",
         opts.damaged ? { name: "Door state" } : { name: tName("doorOpen"), desc: tName("doorOpenDesc") },
         "BSH.Common.Status.DoorState",
       ),
-      [`${NS}.washer.status.doorLocked`]: state(
+      [`${NS}.washer.doors.doorLocked`]: state(
         "doorLocked",
         opts.damaged ? { name: "Door state" } : { name: tName("doorLocked"), desc: tName("doorLockedDesc") },
         "BSH.Common.Status.DoorState",
@@ -3961,10 +3967,10 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     // Going through the 1:1 transform gave all three the source item's label:
     // doorOpen AND doorLocked both became "Door state", programRunning became
     // "Operation state" — and their explanations were removed as unexplainable.
-    expect(en(port.objects.get("washer.status.doorOpen")?.common?.name)).toBe("Door open");
-    expect(en(port.objects.get("washer.status.doorLocked")?.common?.name)).toBe("Door locked");
+    expect(en(port.objects.get("washer.doors.door")?.common?.name)).toBe("Door open");
+    expect(en(port.objects.get("washer.doors.doorLocked")?.common?.name)).toBe("Door locked");
     expect(en(port.objects.get("washer.status.programRunning")?.common?.name)).toBe("Program running");
-    expect(en(port.objects.get("washer.status.doorOpen")?.common?.desc)).toBe("True while the door stands open.");
+    expect(en(port.objects.get("washer.doors.door")?.common?.desc)).toBe("True while the door stands open.");
     // operationState carried the cloud's single-language "Betriebszustand"; our
     // own text replaces it ONCE — every key we have a name for reaches all eleven
     // languages, and the cloud answers the same key differently per appliance.
@@ -3996,13 +4002,13 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
 
-    expect(en(port.objects.get("washer.status.doorOpen")?.common?.name)).toBe("Door open");
-    expect(en(port.objects.get("washer.status.doorLocked")?.common?.name)).toBe("Door locked");
+    expect(en(port.objects.get("washer.doors.door")?.common?.name)).toBe("Door open");
+    expect(en(port.objects.get("washer.doors.doorLocked")?.common?.name)).toBe("Door locked");
     expect(en(port.objects.get("washer.status.programRunning")?.common?.name)).toBe("Program running");
     expect(en(port.objects.get("washer.status.programRunning")?.common?.desc)).toBe(
       "Derived from the operation state, for scripts and visualisation.",
     );
-    expect(port.objects.get("washer.status.doorOpen")?.native).toMatchObject({ nameSource: "i18n" });
+    expect(port.objects.get("washer.doors.door")?.native).toMatchObject({ nameSource: "i18n" });
     const repairs = port.extendCalls.length;
     expect(repairs).toBeGreaterThan(0);
 
@@ -4027,10 +4033,10 @@ describe("ApplianceSync findings of the 2026-09-04 audit", () => {
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
 
-    expect(port.objects.get("washer.status.doorLocked")?.common?.name).toBe("Door state");
-    expect(port.extendCalls).not.toContain("washer.status.doorLocked");
+    expect(port.objects.get("washer.doors.doorLocked")?.common?.name).toBe("Door state");
+    expect(port.extendCalls).not.toContain("washer.doors.doorLocked");
     // The door itself and programRunning need no type — they are repaired.
-    expect(en(port.objects.get("washer.status.doorOpen")?.common?.name)).toBe("Door open");
+    expect(en(port.objects.get("washer.doors.door")?.common?.name)).toBe("Door open");
     expect(en(port.objects.get("washer.status.programRunning")?.common?.name)).toBe("Program running");
   });
 
@@ -4277,7 +4283,7 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
       homeappliances: [{ haId, name: "Geschirrspüler", connected: false, type: "Dishwasher", enumber: "SX87/60" }],
     });
     const deviceId = "sx87-60";
-    const eventId = `${deviceId}.events.programFinished.active`;
+    const eventId = `${deviceId}.events.programFinished`;
     port.getResponses.set(`${base}/programs/available`, { programs: [] });
 
     // A tree an older version left behind: the datapoint carries the bare id.
@@ -4523,7 +4529,7 @@ describe("ApplianceSync value-less items", () => {
     appliance(port, "HA-1", "Geschirrspueler", { status: [{ key: KEY, value: "Drying" }] });
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
-    const id = "geschirrspueler-1.status.programPhase";
+    const id = "geschirrspueler-1.run.programPhase";
     expect(port.states.get(id)).toBe("Drying");
 
     // The cloud sends key-only items: a response carries only the subset the
@@ -4543,7 +4549,7 @@ describe("ApplianceSync value-less items", () => {
     appliance(port, "HA-1", "Geschirrspueler", { status: [{ key: KEY, value: "Drying" }] });
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
-    const id = "geschirrspueler-1.status.programPhase";
+    const id = "geschirrspueler-1.run.programPhase";
 
     // An explicit null is "no reading", not the four-letter word: JSON.stringify
     // turned it into the TEXT "null", which then sat in the tree as a value.
@@ -4946,9 +4952,9 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
       { key: "LaundryCare.Washer.Event.IDos1FillLevelPoor", value: "BSH.Common.EnumType.EventPresentState.Present" },
     ]);
     await flush();
-    expect(port.states.get("waescher-1.status.doorOpen")).toBe(true);
+    expect(port.states.get("waescher-1.doors.door")).toBe(true);
     expect(port.states.get("waescher-1.status.programRunning")).toBe(true);
-    expect(port.states.get("waescher-1.events.iDos1FillLevelPoor.active")).toBe(true);
+    expect(port.states.get("waescher-1.events.iDos1FillLevelPoor")).toBe(true);
 
     // The same keys without a value: measured before the fix, doorOpen and
     // programRunning went false and the alarm was cleared by an empty frame.
@@ -4960,9 +4966,9 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     ]);
     await flush();
     expect(port.stateWrites).toEqual([]);
-    expect(port.states.get("waescher-1.status.doorOpen")).toBe(true);
+    expect(port.states.get("waescher-1.doors.door")).toBe(true);
     expect(port.states.get("waescher-1.status.programRunning")).toBe(true);
-    expect(port.states.get("waescher-1.events.iDos1FillLevelPoor.active")).toBe(true);
+    expect(port.states.get("waescher-1.events.iDos1FillLevelPoor")).toBe(true);
   });
 
   it("reads no state value for datapoints that already sit in their place", async () => {
@@ -5396,18 +5402,18 @@ describe("findings of the 2026-09-24 audit — sync edges", () => {
       } as unknown as ioBroker.Object,
     };
     port.primeStates = {
-      [`${NS}.fridge.status.doorState`]: {
+      [`${NS}.fridge.status.state`]: {
         _id: "",
         type: "state",
-        common: { name: "Door", type: "string", role: "text", read: true, write: false },
-        native: { bshKey: "BSH.Common.Status.DoorState" },
+        common: { name: "State", type: "string", role: "text", read: true, write: false },
+        native: { bshKey: "BSH.Common.Status.OperationState" },
       } as unknown as ioBroker.Object,
     };
     port.objects.set("fridge.status", { type: "channel", common: { name: "status" }, native: {} });
-    port.states.set("fridge.status.doorState", "closed");
+    port.states.set("fridge.status.state", "run");
     const sync = new ApplianceSync(port);
     await sync.migrateRenamedStates();
-    expect(port.objects.has("fridge.status.doorOpen")).toBe(true);
+    expect(port.objects.has("fridge.status.operationState")).toBe(true);
     // Before: the old id was the channel's only state, so the channel was deleted
     // — with the new datapoint inside it.
     expect(port.objects.has("fridge.status")).toBe(true);
@@ -5594,7 +5600,7 @@ describe("findings of the 2026-09-24 audit — stream and catalog (D6, D7)", () 
     port.states.set("spueler.misc.eventPresentState", "present");
     const sync = new ApplianceSync(port);
     await sync.migrateRenamedStates();
-    expect(port.objects.get("spueler.events.unnamedEvent.active")?.common).toMatchObject({ type: "boolean" });
+    expect(port.objects.get("spueler.events.unnamedEvent")?.common).toMatchObject({ type: "boolean" });
     expect(port.objects.has("spueler.misc.eventPresentState")).toBe(false);
     expect(port.objects.has("spueler.misc")).toBe(false);
   });
@@ -5812,14 +5818,14 @@ describe("findings of the 2026-09-24 audit — rules the needle run showed untes
     });
     const real = port.extendObject.bind(port);
     port.extendObject = (id: string, obj: ioBroker.PartialObject): Promise<unknown> => {
-      if (id === "ofen-1.status.doorOpen") {
+      if (id === "ofen-1.doors.door") {
         sync.stop();
       }
       return real(id, obj);
     };
     await sync.syncAppliances();
-    expect(port.objects.has("ofen-1.status.doorOpen")).toBe(true);
-    expect(port.objects.has("ofen-1.status.doorLocked")).toBe(false);
+    expect(port.objects.has("ofen-1.doors.door")).toBe(true);
+    expect(port.objects.has("ofen-1.doors.doorLocked")).toBe(false);
   });
 
   it("B11: a stop while a setting definition is read does not persist the definition cache", async () => {
@@ -6070,7 +6076,7 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     }
     // The room follows the door to its successor; the alias on the old online flag to the marker.
     expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
-      `${NEW}.status.doorOpen`,
+      `${NEW}.doors.door`,
       "hm-rpc.0.X",
     ]);
     expect((port.foreign.get("alias.0.kitchen.online")?.common as { alias: unknown }).alias).toEqual({
@@ -6282,8 +6288,8 @@ describe("ApplianceSync.migrateRenamedStates carries what is attached", () => {
     await sync.migrateRenamedStates();
     // An oven door locks: the text became two yes/no datapoints, both in the kitchen.
     expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
-      `${NS}.oven-1.status.doorOpen`,
-      `${NS}.oven-1.status.doorLocked`,
+      `${NS}.oven-1.doors.door`,
+      `${NS}.oven-1.doors.doorLocked`,
     ]);
   });
 });
@@ -6816,8 +6822,8 @@ describe("readable values (2026-09-28)", () => {
         bshValues: ["Dishcare.Dishwasher.EnumType.SensitivityTurbidity.Standard"],
       }),
       // No value to lend a prefix: waits for its next value.
-      "wd-1.status.programPhase": text(
-        "wd-1.status.programPhase",
+      "wd-1.run.programPhase": text(
+        "wd-1.run.programPhase",
         { bshKey: "Dishcare.Dishwasher.Status.ProgramPhase" },
         false,
       ),
@@ -6844,7 +6850,7 @@ describe("readable values (2026-09-28)", () => {
       sensitive: "Sensitiv",
       verysensitive: "Sehr empfindlich",
     });
-    expect(states("wd-1.status.programPhase")).toBeUndefined();
+    expect(states("wd-1.run.programPhase")).toBeUndefined();
     expect(states("wd-1.status.someText")).toBeUndefined();
     // The next start finds the lists in place.
     const again = new FakePort();
@@ -6890,8 +6896,8 @@ describe("readable values (2026-09-28)", () => {
         },
         native: { bshKey: "BSH.Common.Setting.PowerState", bshValues: [`${P}.Off`, `${P}.On`], nameSource: "i18n" },
       } as unknown as ioBroker.Object,
-      "wd-1.status.programAllTimeEffective": {
-        _id: `${NS}.wd-1.status.programAllTimeEffective`,
+      "wd-1.counters.programAllTimeEffective": {
+        _id: `${NS}.wd-1.counters.programAllTimeEffective`,
         type: "state",
         common: { name: "Runtime", type: "number", role: "value", read: true, write: false, unit: "seconds" },
         native: { bshKey: "BSH.Common.Status.Program.All.Time.Effective", nameSource: "i18n" },
@@ -6927,7 +6933,7 @@ describe("readable values (2026-09-28)", () => {
     port.objects.set("wd-1.lastRun.energy", structuredClone(objects["wd-1.lastRun.energy"]));
     port.states.set("wd-1.lastRun.energy", 412);
     port.states.set("wd-1.settings.powerState", "on");
-    port.states.set("wd-1.status.programAllTimeEffective", 2011440);
+    port.states.set("wd-1.counters.programAllTimeEffective", 2011440);
     port.states.set("wd-1.options.finishInRelative", 14160);
     await new ApplianceSync(port).primeFromObjects();
     expect(port.getCalls).toEqual([]);
@@ -6937,8 +6943,8 @@ describe("readable values (2026-09-28)", () => {
     // What hangs on the datapoint is the user's — it stays with it.
     expect(power.custom).toEqual({ "influxdb.0": { enabled: true } });
     expect(port.states.get("wd-1.settings.powerState")).toBe(true);
-    expect(port.objects.get("wd-1.status.programAllTimeEffective")?.common).toMatchObject({ unit: "h" });
-    expect(port.states.get("wd-1.status.programAllTimeEffective")).toBe(558.7);
+    expect(port.objects.get("wd-1.counters.programAllTimeEffective")?.common).toMatchObject({ unit: "h" });
+    expect(port.states.get("wd-1.counters.programAllTimeEffective")).toBe(558.7);
     expect(port.objects.get("wd-1.options.finishInRelative")?.common).toMatchObject({
       unit: "min",
       min: 0,
@@ -8040,14 +8046,14 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
     } as unknown as ioBroker.Object);
     port.foreign.set("alias.0.door", {
       type: "state",
-      common: { name: "Door", alias: { id: `${NS}.wt-1.status.doorOpen` } },
+      common: { name: "Door", alias: { id: `${NS}.wt-1.doors.door` } },
       native: {},
     } as unknown as ioBroker.Object);
     const sync = new ApplianceSync(port);
     await sync.migrateHistoryRuns();
     // An alias on anything else is left alone.
     expect((port.foreign.get("alias.0.door")?.common as { alias: { id: string } }).alias.id).toBe(
-      `${NS}.wt-1.status.doorOpen`,
+      `${NS}.wt-1.doors.door`,
     );
 
     expect(port.objects.get("wt-1.history")).toMatchObject({
@@ -8100,29 +8106,29 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       { key: "BSH.Common.Option.ProgramProgress", value: 99, unit: "%" },
     ]);
     await flush();
-    expect(port.states.get("wt-1.status.remainingProgramTime")).toBe(1);
-    expect(port.states.get("wt-1.status.programProgress")).toBe(99);
+    expect(port.states.get("wt-1.run.remainingProgramTime")).toBe(1);
+    expect(port.states.get("wt-1.run.programProgress")).toBe(99);
 
     // Finished still counts as a run: its figures stay.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Finished" }]);
     await flush();
-    expect(port.states.get("wt-1.status.programProgress")).toBe(99);
+    expect(port.states.get("wt-1.run.programProgress")).toBe(99);
 
     // At rest: both are emptied, and a late leftover value is not shown again.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Inactive" }]);
     await flush();
-    expect(port.states.get("wt-1.status.remainingProgramTime")).toBeNull();
-    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.run.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.run.programProgress")).toBeNull();
     send([{ key: "BSH.Common.Option.ProgramProgress", value: 100, unit: "%" }]);
     await flush();
-    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.run.programProgress")).toBeNull();
 
     // A new run shows its figures again — another text value (the door) says nothing about rest.
     send([{ key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.Run" }]);
     send([{ key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Closed" }]);
     send([{ key: "BSH.Common.Option.ProgramProgress", value: 5, unit: "%" }]);
     await flush();
-    expect(port.states.get("wt-1.status.programProgress")).toBe(5);
+    expect(port.states.get("wt-1.run.programProgress")).toBe(5);
   });
 
   it("empties them at the start for an appliance that was left at rest", async () => {
@@ -8144,19 +8150,19 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       }) as unknown as ioBroker.Object;
     port.primeStates = {
       [`${NS}.wt-1.status.operationState`]: state("BSH.Common.Status.OperationState", "string"),
-      [`${NS}.wt-1.status.remainingProgramTime`]: state("BSH.Common.Option.RemainingProgramTime", "number", "min"),
-      [`${NS}.wt-1.status.programProgress`]: state("BSH.Common.Option.ProgramProgress", "number", "%"),
+      [`${NS}.wt-1.run.remainingProgramTime`]: state("BSH.Common.Option.RemainingProgramTime", "number", "min"),
+      [`${NS}.wt-1.run.programProgress`]: state("BSH.Common.Option.ProgramProgress", "number", "%"),
     };
     for (const [fullId, obj] of Object.entries(port.primeStates)) {
       port.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     port.states.set("wt-1.status.operationState", "inactive");
-    port.states.set("wt-1.status.remainingProgramTime", 1);
-    port.states.set("wt-1.status.programProgress", 100);
+    port.states.set("wt-1.run.remainingProgramTime", 1);
+    port.states.set("wt-1.run.programProgress", 100);
     const sync = new ApplianceSync(port);
     await sync.primeFromObjects();
-    expect(port.states.get("wt-1.status.remainingProgramTime")).toBeNull();
-    expect(port.states.get("wt-1.status.programProgress")).toBeNull();
+    expect(port.states.get("wt-1.run.remainingProgramTime")).toBeNull();
+    expect(port.states.get("wt-1.run.programProgress")).toBeNull();
 
     // A running appliance keeps its figures.
     const running = new FakePort();
@@ -8166,9 +8172,9 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       running.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     running.states.set("wt-1.status.operationState", "run");
-    running.states.set("wt-1.status.programProgress", 40);
+    running.states.set("wt-1.run.programProgress", 40);
     await new ApplianceSync(running).primeFromObjects();
-    expect(running.states.get("wt-1.status.programProgress")).toBe(40);
+    expect(running.states.get("wt-1.run.programProgress")).toBe(40);
 
     // An operation state nobody reported yet ("") says nothing: the figures stay.
     const unknown = new FakePort();
@@ -8178,9 +8184,9 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       unknown.objects.set(fullId.slice(`${NS}.`.length), obj);
     }
     unknown.states.set("wt-1.status.operationState", "");
-    unknown.states.set("wt-1.status.programProgress", 40);
+    unknown.states.set("wt-1.run.programProgress", 40);
     await new ApplianceSync(unknown).primeFromObjects();
-    expect(unknown.states.get("wt-1.status.programProgress")).toBe(40);
+    expect(unknown.states.get("wt-1.run.programProgress")).toBe(40);
   });
 
   it("writes no run value of an appliance that has none", async () => {
@@ -8261,8 +8267,8 @@ describe("run values the cloud delivers as options (decision 49)", () => {
     const dev = deviceOf(port);
     expect(port.objects.has(`${dev}.options.spinSpeed`)).toBe(true);
     expect(port.objects.has(`${dev}.options.remainingProgramTime`)).toBe(false);
-    expect(port.objects.get(`${dev}.status.remainingProgramTime`)?.common).toMatchObject({ write: false, unit: "min" });
-    expect(port.states.get(`${dev}.status.remainingProgramTime`)).toBe(90);
+    expect(port.objects.get(`${dev}.run.remainingProgramTime`)?.common).toMatchObject({ write: false, unit: "min" });
+    expect(port.states.get(`${dev}.run.remainingProgramTime`)).toBe(90);
     const stored = (port.objects.get(dev)?.native as { programOptions: Record<string, { ids: string[] }> })
       .programOptions;
     expect(stored[COTTON].ids).toEqual(["spinSpeed"]);
@@ -8339,25 +8345,25 @@ describe("run values the cloud delivers as options (decision 49)", () => {
     const sync = new ApplianceSync(port);
     await sync.migrateRenamedStates();
 
-    const moved = port.objects.get("washer.status.remainingProgramTime")?.common as ioBroker.StateCommon;
+    const moved = port.objects.get("washer.run.remainingProgramTime")?.common as ioBroker.StateCommon;
     expect(moved).toMatchObject({ write: false, role: "value", unit: "min" });
     expect(moved.custom).toMatchObject({
       "influxdb.0": { enabled: true, aliasId: `${NS}.washer.options.remainingProgramTime` },
     });
-    expect(port.states.get("washer.status.remainingProgramTime")).toBe(42);
+    expect(port.states.get("washer.run.remainingProgramTime")).toBe(42);
     expect(port.objects.has("washer.options.remainingProgramTime")).toBe(false);
     expect(port.objects.has("washer.programs.baseProgram")).toBe(true);
     expect(port.objects.has("washer.options.baseProgram")).toBe(false);
     expect(port.objects.has("washer.options.spinSpeed")).toBe(true);
-    expect(port.objects.get("washer.status.programProgress")?.common).toMatchObject({
+    expect(port.objects.get("washer.run.programProgress")?.common).toMatchObject({
       type: "number",
       role: "value",
       unit: "%",
       write: false,
     });
-    expect((port.objects.get("washer.status.programProgress")?.common as ioBroker.StateCommon).max).toBeUndefined();
-    expect(port.states.has("washer.status.programProgress")).toBe(false);
-    const phase = port.objects.get("washer.status.processPhase")?.common as ioBroker.StateCommon;
+    expect((port.objects.get("washer.run.programProgress")?.common as ioBroker.StateCommon).max).toBeUndefined();
+    expect(port.states.has("washer.run.programProgress")).toBe(false);
+    const phase = port.objects.get("washer.run.processPhase")?.common as ioBroker.StateCommon;
     expect(phase.states).not.toHaveProperty("x");
   });
 
@@ -8373,7 +8379,7 @@ describe("run values the cloud delivers as options (decision 49)", () => {
     };
     // A list with Drying of two families — the list-unique form would be "dryer.drying".
     port.primeStates = {
-      [`${NS}.washer.status.processPhase`]: {
+      [`${NS}.washer.run.processPhase`]: {
         _id: "",
         type: "state",
         common: { name: "Process phase", type: "string", role: "text", read: true, write: false },
@@ -8398,7 +8404,7 @@ describe("run values the cloud delivers as options (decision 49)", () => {
       }),
     });
     await new Promise(resolve => setTimeout(resolve, 20));
-    expect(port.states.get("washer.status.processPhase")).toBe("drying");
+    expect(port.states.get("washer.run.processPhase")).toBe("drying");
   });
 
   it("never arms a run value an older definition cache still lists", async () => {
@@ -8434,145 +8440,167 @@ describe("run values the cloud delivers as options (decision 49)", () => {
   });
 });
 
-describe("ApplianceSync: one channel per event and per compartment door (krobi 2026-10-15)", () => {
-  /**
-   * A refrigerator tree as the 2.0 test builds left it: the events and the compartment doors as states of the
-   * shared `events` and `status` channels, with a recording, a room and an alias attached.
-   *
-   * @param port the fake port to seed
-   */
-  function sharedChannels(port: FakePort): void {
+describe("ApplianceSync: every event and every door is a datapoint of one channel (krobi 2026-10-16)", () => {
+  const boolean = (name: string, role: string, bshKey: string, extra: Record<string, unknown> = {}): ioBroker.Object =>
+    ({
+      _id: "",
+      type: "state",
+      common: { name, type: "boolean", role, read: true, write: false, ...extra },
+      native: { bshKey },
+    }) as unknown as ioBroker.Object;
+  const device = (port: FakePort, haId: string): void => {
     port.primeDevices = {
       [`${NS}.fridge`]: {
         _id: "",
         type: "device",
         common: {},
-        native: { haId: "HA-F", type: "FridgeFreezer" },
+        native: { haId, type: "FridgeFreezer" },
       } as unknown as ioBroker.Object,
     };
+  };
+  const seed = (port: FakePort): void => {
+    for (const [fullId, obj] of Object.entries({
+      ...port.primeDevices,
+      ...port.primeStates,
+      ...port.primeChannels,
+      ...port.primeFolders,
+    })) {
+      port.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+  };
+
+  it("moves the doors of a 1.x tree out of status into the doors channel, with value, recording and room", async () => {
+    const port = new FakePort();
+    device(port, "HA-F");
     port.primeStates = {
-      [`${NS}.fridge.status.doorFreezerOpen`]: {
-        _id: "",
-        type: "state",
-        common: {
-          name: "Freezer door open",
-          type: "boolean",
-          role: "sensor.door",
-          read: true,
-          write: false,
-          custom: { "influxdb.0": { enabled: true } },
-        },
-        native: { bshKey: "Refrigeration.Common.Status.Door.Freezer" },
-      } as unknown as ioBroker.Object,
-      [`${NS}.fridge.events.doorAlarmFreezer`]: {
-        _id: "",
-        type: "state",
-        common: { name: "Door alarm", type: "boolean", role: "indicator.alarm", read: true, write: false },
-        native: { bshKey: "Refrigeration.FridgeFreezer.Event.DoorAlarmFreezer" },
-      } as unknown as ioBroker.Object,
-      [`${NS}.fridge.status.doorOpen`]: {
-        _id: "",
-        type: "state",
-        common: { name: "Door open", type: "boolean", role: "sensor.door", read: true, write: false },
-        native: { bshKey: "BSH.Common.Status.DoorState" },
-      } as unknown as ioBroker.Object,
+      [`${NS}.fridge.status.doorFreezerOpen`]: boolean(
+        "Freezer door open",
+        "sensor.door",
+        "Refrigeration.Common.Status.Door.Freezer",
+        { custom: { "influxdb.0": { enabled: true } } },
+      ),
+      [`${NS}.fridge.status.doorOpen`]: boolean("Door open", "sensor.door", "BSH.Common.Status.DoorState"),
+      [`${NS}.fridge.events.doorAlarmFreezer`]: boolean(
+        "Door alarm",
+        "indicator.alarm",
+        "Refrigeration.FridgeFreezer.Event.DoorAlarmFreezer",
+      ),
     };
     port.primeChannels = {
       [`${NS}.fridge.events`]: { _id: "", type: "channel", common: { name: "Events" }, native: {} },
       [`${NS}.fridge.status`]: { _id: "", type: "channel", common: { name: "Status" }, native: {} },
     };
-    for (const [fullId, obj] of Object.entries({ ...port.primeDevices, ...port.primeStates, ...port.primeChannels })) {
-      port.objects.set(fullId.slice(`${NS}.`.length), obj);
-    }
+    seed(port);
     port.states.set("fridge.status.doorFreezerOpen", true);
-    port.states.set("fridge.events.doorAlarmFreezer", false);
+    port.states.set("fridge.status.doorOpen", false);
     port.foreign.set("enum.rooms.kitchen", {
       type: "enum",
+      common: { name: "Kitchen", members: [`${NS}.fridge.status.doorFreezerOpen`] },
+      native: {},
+    } as unknown as ioBroker.Object);
+    await new ApplianceSync(port).migrateRenamedStates();
+
+    expect(port.objects.has("fridge.status.doorFreezerOpen")).toBe(false);
+    expect(port.objects.has("fridge.status.doorOpen")).toBe(false);
+    expect(port.objects.get("fridge.doors")?.type).toBe("channel");
+    expect(port.objects.get("fridge.doors.freezer")).toMatchObject({
+      type: "state",
       common: {
-        name: "Kitchen",
-        members: [`${NS}.fridge.status.doorFreezerOpen`, `${NS}.fridge.events.doorAlarmFreezer`],
+        type: "boolean",
+        role: "sensor.door",
+        custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.fridge.status.doorFreezerOpen` } },
       },
+    });
+    expect(port.states.get("fridge.doors.freezer")).toBe(true);
+    expect(port.states.get("fridge.doors.door")).toBe(false);
+    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
+      `${NS}.fridge.doors.freezer`,
+    ]);
+    // An event of a 1.x tree is already where it belongs.
+    expect(port.objects.get("fridge.events.doorAlarmFreezer")?.type).toBe("state");
+  });
+
+  it("turns the event and door channels of the 2026-10-15 test build back into datapoints, alias and room with them", async () => {
+    const port = new FakePort();
+    device(port, "HA-F");
+    port.primeStates = {
+      [`${NS}.fridge.events.doorAlarmFreezer.active`]: boolean(
+        "Door alarm",
+        "indicator.alarm",
+        "Refrigeration.FridgeFreezer.Event.DoorAlarmFreezer",
+      ),
+      [`${NS}.fridge.doors.freezer.open`]: boolean(
+        "Freezer door open",
+        "sensor.door",
+        "Refrigeration.Common.Status.Door.Freezer",
+      ),
+    };
+    port.primeChannels = {
+      [`${NS}.fridge.events.doorAlarmFreezer`]: { _id: "", type: "channel", common: { name: "Alarm" }, native: {} },
+      [`${NS}.fridge.doors.freezer`]: { _id: "", type: "channel", common: { name: "Freezer" }, native: {} },
+    };
+    port.primeFolders = {
+      [`${NS}.fridge.events`]: { _id: "", type: "folder", common: { name: "Events" }, native: {} },
+      [`${NS}.fridge.doors`]: { _id: "", type: "folder", common: { name: "Doors" }, native: {} },
+    };
+    seed(port);
+    port.states.set("fridge.events.doorAlarmFreezer.active", true);
+    port.states.set("fridge.doors.freezer.open", true);
+    port.foreign.set("enum.rooms.kitchen", {
+      type: "enum",
+      common: { name: "Kitchen", members: [`${NS}.fridge.events.doorAlarmFreezer.active`] },
       native: {},
     } as unknown as ioBroker.Object);
     port.foreign.set("alias.0.kitchen.freezerAlarm", {
       type: "state",
-      common: { name: "Alarm", alias: { id: `${NS}.fridge.events.doorAlarmFreezer` } },
+      common: { name: "Alarm", alias: { id: `${NS}.fridge.events.doorAlarmFreezer.active` } },
       native: {},
     } as unknown as ioBroker.Object);
-  }
-
-  it("moves a compartment door into its own channel below the doors folder, with value, recording and room", async () => {
-    const port = new FakePort();
-    sharedChannels(port);
-    await new ApplianceSync(port).migrateRenamedStates();
-
-    expect(port.objects.has("fridge.status.doorFreezerOpen")).toBe(false);
-    expect(port.objects.get("fridge.doors")?.type).toBe("folder");
-    expect(port.objects.get("fridge.doors.freezer")?.type).toBe("channel");
-    expect(port.objects.get("fridge.doors.freezer.open")?.common).toMatchObject({
-      type: "boolean",
-      role: "sensor.door",
-      custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.fridge.status.doorFreezerOpen` } },
-    });
-    expect(port.states.get("fridge.doors.freezer.open")).toBe(true);
-    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
-      `${NS}.fridge.doors.freezer.open`,
-      `${NS}.fridge.events.doorAlarmFreezer.active`,
-    ]);
-    // The appliance's own door stays where it is, and with it the status channel.
-    expect(port.objects.has("fridge.status.doorOpen")).toBe(true);
-    expect(port.objects.has("fridge.status")).toBe(true);
-  });
-
-  it("moves an event into its own channel, its alias with it, and turns the events channel into their folder", async () => {
-    const port = new FakePort();
-    sharedChannels(port);
     const sync = new ApplianceSync(port);
     await sync.migrateRenamedStates();
 
-    // The old datapoint's id is the event's channel now.
-    expect(port.objects.get("fridge.events.doorAlarmFreezer")?.type).toBe("channel");
-    expect(port.objects.get("fridge.events.doorAlarmFreezer.active")?.common).toMatchObject({
+    expect(port.objects.get("fridge.events.doorAlarmFreezer")?.type).toBe("state");
+    expect(port.objects.get("fridge.events.doorAlarmFreezer")?.common).toMatchObject({
       type: "boolean",
       role: "indicator.alarm",
     });
-    expect(port.states.get("fridge.events.doorAlarmFreezer.active")).toBe(false);
+    expect(port.states.get("fridge.events.doorAlarmFreezer")).toBe(true);
+    expect(port.objects.has("fridge.events.doorAlarmFreezer.active")).toBe(false);
+    expect(port.objects.get("fridge.doors.freezer")?.type).toBe("state");
+    expect(port.states.get("fridge.doors.freezer")).toBe(true);
+    expect(port.objects.has("fridge.doors.freezer.open")).toBe(false);
     expect((port.foreign.get("alias.0.kitchen.freezerAlarm")?.common as { alias: unknown }).alias).toEqual({
-      id: `${NS}.fridge.events.doorAlarmFreezer.active`,
+      id: `${NS}.fridge.events.doorAlarmFreezer`,
     });
-    // The old id is turned into the channel, never deleted — the release keeps it (upgrade suite "deletes no object
-    // the release keeps"); only its value goes.
-    expect(port.deleted.filter(id => id.startsWith("fridge.events"))).toEqual([]);
-    expect(port.deletedValues).toEqual(["fridge.events.doorAlarmFreezer"]);
-    // A channel, whole: nothing of the datapoint's common stays on it.
-    expect(port.objects.get("fridge.events.doorAlarmFreezer")?.common).not.toHaveProperty("role");
-    // Emptied of its states, the events object is not deleted: it is the folder of the event channels now.
-    expect(port.objects.has("fridge.events")).toBe(true);
+    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
+      `${NS}.fridge.events.doorAlarmFreezer`,
+    ]);
+    // The folders above them are channels again.
     await sync.primeFromObjects();
-    expect(port.objects.get("fridge.events")?.type).toBe("folder");
+    expect(port.objects.get("fridge.events")?.type).toBe("channel");
+    expect(port.objects.get("fridge.doors")?.type).toBe("channel");
   });
 
-  it("builds a fresh appliance the same way: events and doors folders with one channel each", async () => {
+  it("builds a fresh appliance with an events and a doors channel holding plain datapoints", async () => {
     const port = new FakePort();
     appliance(port, "HA-K", "Kühlschrank", {
       type: "FridgeFreezer",
       connected: true,
-      status: [{ key: "Refrigeration.Common.Status.Door.Freezer", value: "BSH.Common.EnumType.DoorState.Open" }],
+      status: [
+        { key: "Refrigeration.Common.Status.Door.Freezer", value: "BSH.Common.EnumType.DoorState.Open" },
+        { key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Closed" },
+      ],
     });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
+    await new ApplianceSync(port).syncAppliances();
 
-    const device = [...port.objects.keys()].find(k => !k.includes(".") && port.objects.get(k)?.type === "device");
-    expect(port.objects.get(`${device}.doors`)?.type).toBe("folder");
-    expect(port.objects.get(`${device}.doors.freezer`)?.type).toBe("channel");
-    expect(port.states.get(`${device}.doors.freezer.open`)).toBe(true);
-    expect(port.objects.get(`${device}.events`)?.type).toBe("folder");
-    expect(port.objects.get(`${device}.events.doorAlarmFreezer`)?.type).toBe("channel");
-    expect(port.states.get(`${device}.events.doorAlarmFreezer.active`)).toBe(false);
-    // The channel of an event or a door carries the name of its one datapoint.
-    expect(port.objects.get(`${device}.doors.freezer`)?.common?.name).toEqual(
-      port.objects.get(`${device}.doors.freezer.open`)?.common?.name,
-    );
+    const id = [...port.objects.keys()].find(k => !k.includes(".") && port.objects.get(k)?.type === "device");
+    expect(port.objects.get(`${id}.doors`)?.type).toBe("channel");
+    expect(port.objects.get(`${id}.doors.freezer`)?.type).toBe("state");
+    expect(port.states.get(`${id}.doors.freezer`)).toBe(true);
+    expect(port.states.get(`${id}.doors.door`)).toBe(false);
+    expect(port.objects.get(`${id}.events`)?.type).toBe("channel");
+    expect(port.objects.get(`${id}.events.doorAlarmFreezer`)?.type).toBe("state");
+    expect(port.states.get(`${id}.events.doorAlarmFreezer`)).toBe(false);
   });
 });
 
@@ -8596,10 +8624,10 @@ describe("ApplianceSync: a duration or temperature takes its detailed role on an
       }) as unknown as ioBroker.Object;
     port.primeStates = {
       [`${NS}.wt.options.duration`]: number("level", "min", true, "BSH.Common.Option.Duration"),
-      [`${NS}.wt.status.remainingProgramTime`]: number("value", "min", false, "BSH.Common.Option.RemainingProgramTime"),
+      [`${NS}.wt.run.remainingProgramTime`]: number("value", "min", false, "BSH.Common.Option.RemainingProgramTime"),
       // Still in the appliance's unit (an older version): the unit changes, and the role with it.
-      [`${NS}.wt.status.elapsedProgramTime`]: number("value", "seconds", false, "BSH.Common.Option.ElapsedProgramTime"),
-      [`${NS}.wt.status.programProgress`]: number("value", "%", false, "BSH.Common.Option.ProgramProgress"),
+      [`${NS}.wt.run.elapsedProgramTime`]: number("value", "seconds", false, "BSH.Common.Option.ElapsedProgramTime"),
+      [`${NS}.wt.run.programProgress`]: number("value", "%", false, "BSH.Common.Option.ProgramProgress"),
     };
     for (const [fullId, obj] of Object.entries({ ...port.primeDevices, ...port.primeStates })) {
       port.objects.set(fullId.slice(`${NS}.`.length), obj);
@@ -8607,10 +8635,10 @@ describe("ApplianceSync: a duration or temperature takes its detailed role on an
     await new ApplianceSync(port).primeFromObjects();
     expect(port.getCalls).toEqual([]);
     expect(port.objects.get("wt.options.duration")?.common?.role).toBe("level.timer");
-    expect(port.objects.get("wt.status.remainingProgramTime")?.common?.role).toBe("time.span");
-    expect(port.objects.get("wt.status.elapsedProgramTime")?.common).toMatchObject({ unit: "min", role: "time.span" });
+    expect(port.objects.get("wt.run.remainingProgramTime")?.common?.role).toBe("time.span");
+    expect(port.objects.get("wt.run.elapsedProgramTime")?.common).toMatchObject({ unit: "min", role: "time.span" });
     // A number without a detailed role for its unit keeps the plain one.
-    expect(port.objects.get("wt.status.programProgress")?.common?.role).toBe("value");
+    expect(port.objects.get("wt.run.programProgress")?.common?.role).toBe("value");
   });
 
   it("rewrites the role of a stored remaining time and setpoint, keeping id, value and recording", async () => {

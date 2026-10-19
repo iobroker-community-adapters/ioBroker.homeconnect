@@ -19,6 +19,8 @@
   "firmware": "Micrologiciel",
   "firmwareDesc": "Version du micrologiciel de l'appareil, telle que Home Connect la signale.",
   "channelDoors": "Portes",
+  "channelRun": "Programme en cours",
+  "channelCounters": "Totaux",
   "ctNoClientId": "Aucun Client ID configuré — saisissez-le ci-dessus et enregistrez d'abord.",
   "ctNotSignedInLink": "Pas encore connecté — ouvrez le lien de connexion, confirmez le code, puis testez à nouveau.",
   "ctNotSignedIn": "Non connecté — aucune connexion Home Connect n'est enregistrée ; l'adaptateur demande un lien de connexion au démarrage.",

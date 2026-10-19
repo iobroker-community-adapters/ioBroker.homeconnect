@@ -15,6 +15,7 @@ import { FIRMWARE_KEY, isDeviceInternalKey } from "./device-internal";
 import { boundShown, presentationFor, shownUnit, toShown } from "./value-units";
 import { isSwitchKey, switchRole, switchState } from "./switch-values";
 import { isRunValueKey, runValueChannel } from "./run-values";
+import { layoutChannel } from "./tree-layout";
 
 /**
  * Where a state's display name came from — decides whether a later label may
@@ -202,7 +203,7 @@ function lowerFirst(s: string): string {
  * Derive the speaking channel + id from a BSH key. The kind segment is searched
  * anywhere in the key (not just second-to-last), because BSH nests freely:
  * "BSH.Common.Status.OperationState" → { channel: "status", id: "operationState" };
- * "Refrigeration.Common.Status.Door.Freezer" → { channel: "status", id: "doorFreezer" };
+ * "BSH.Common.Option.RemainingProgramTime" → { channel: "run", id: "remainingProgramTime" } (tree-layout.ts);
  * "Refrigeration.Common.Setting.Light.Internal.Brightness" → { channel: "settings", id: "lightInternalBrightness" };
  * "BSH.Common.Event.Favorite.001.ExternalTrigger" → { channel: "events", id: "favorite001ExternalTrigger" }.
  * The old second-to-last rule sent every nested key into a wrong "misc" channel
@@ -219,27 +220,25 @@ export function stateIdForKey(key: string): { channel: string; id: string } {
   for (let i = 0; i < parts.length - 1; i++) {
     const channel = KIND_TO_CHANNEL[parts[i] ?? ""];
     if (channel) {
-      // A run value the cloud delivers as an option is no option (decision 49, run-values.ts).
-      return { channel: runValueChannel(key) ?? channel, id: camelJoin(parts.slice(i + 1)) };
+      // A run value the cloud delivers as an option is no option (decision 49, run-values.ts): it belongs to the
+      // program under way. The tree layout puts the appliance's other datapoints in their group (tree-layout.ts).
+      const id = camelJoin(parts.slice(i + 1));
+      const kind = runValueChannel(key);
+      return { channel: layoutChannel(kind ?? channel, id), id };
     }
   }
   return { channel: "misc", id: lowerFirst(parts[parts.length - 1] ?? key) };
 }
 
-/** The state every event channel carries: whether the event is present right now. */
-export const EVENT_STATE_ID = "active";
-
 /**
- * Where a key's datapoint lives: {@link stateIdForKey}, except that every event is a channel of its own below the
- * `events` folder — `events.<event>.active`. The role catalogue allows a detailed role once per channel, and an
- * appliance reports up to twenty events (krobi 2026-10-15: "Eigener Kanal je Tür/Ereignis").
+ * Where a key's datapoint lives — every event a plain boolean datapoint `events.<event>` (krobi 2026-10-16 13:26:
+ * "x events channels instead of simply true/false datapoints").
  *
  * @param key the fully-qualified BSH key
- * @returns the channel path and the within-channel id
+ * @returns the channel and the within-channel id
  */
 export function statePathForKey(key: string): { channel: string; id: string } {
-  const { channel, id } = stateIdForKey(key);
-  return channel === "events" ? { channel: `events.${id}`, id: EVENT_STATE_ID } : { channel, id };
+  return stateIdForKey(key);
 }
 
 /**
@@ -397,8 +396,8 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
     if (item.key === DOOR_STATE_KEY) {
       const states: TransformedState[] = [
         {
-          channel: "status",
-          id: "doorOpen",
+          channel: "doors",
+          id: "door",
           common: { ...booleanCommon(tName("doorOpen"), "sensor.door", false), desc: tName("doorOpenDesc") },
           nameSource: "i18n",
           value: short === undefined ? undefined : short === "open",
@@ -406,7 +405,7 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
       ];
       if (lockableDoor) {
         states.push({
-          channel: "status",
+          channel: "doors",
           id: "doorLocked",
           common: { ...booleanCommon(tName("doorLocked"), "indicator", false), desc: tName("doorLockedDesc") },
           nameSource: "i18n",
@@ -415,15 +414,14 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
       }
       return states;
     }
-    // The compartment is the key's last segment ("Freezer", "Refrigerator", …). Each compartment door is a channel
-    // of its own below the `doors` folder: a refrigerator reports up to eleven doors, and the role catalogue allows
-    // `sensor.door` once per channel (krobi 2026-10-15: "Eigener Kanal je Tür/Ereignis").
+    // The compartment is the key's last segment ("Freezer", "Refrigerator", …). Every door of an appliance is a
+    // datapoint in the one `doors` channel (krobi 2026-10-16 13:27: "one doors channel, and all the doors are in it").
     const compartment = item.key.split(".").at(-1) ?? "";
     const named = DOOR_COMPARTMENT_NAMES[compartment];
     return [
       {
-        channel: `doors.${lowerFirst(compartment)}`,
-        id: "open",
+        channel: "doors",
+        id: lowerFirst(compartment),
         common: {
           ...booleanCommon(named ? tName(named) : tName("doorCompartmentOpen", compartment), "sensor.door", false),
           desc: tName("doorCompartmentOpenDesc"),

@@ -19,6 +19,8 @@
   "firmware": "Oprogramowanie sprzętowe",
   "firmwareDesc": "Wersja oprogramowania urządzenia zgłaszana przez Home Connect.",
   "channelDoors": "Drzwi",
+  "channelRun": "Bieżący program",
+  "channelCounters": "Liczniki łączne",
   "ctNoClientId": "Nie skonfigurowano Client ID — wpisz go powyżej i najpierw zapisz.",
   "ctNotSignedInLink": "Jeszcze nie zalogowano — otwórz link logowania, potwierdź kod i przetestuj ponownie.",
   "ctNotSignedIn": "Nie zalogowano — nie zapisano logowania Home Connect; adapter prosi o link logowania przy starcie.",

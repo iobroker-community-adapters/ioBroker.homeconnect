@@ -1725,10 +1725,7 @@ describe("Homeconnect tree delete that carries rooms and functions", () => {
       new Map([
         ["homeconnect.0.old", ["homeconnect.0.new"]],
         // One old datapoint can have two successors (a door text became open + locked).
-        [
-          "homeconnect.0.old.status.doorState",
-          ["homeconnect.0.new.status.doorOpen", "homeconnect.0.new.status.doorLocked"],
-        ],
+        ["homeconnect.0.old.status.doorState", ["homeconnect.0.new.doors.door", "homeconnect.0.new.doors.doorLocked"]],
       ]),
     );
 
@@ -1745,12 +1742,12 @@ describe("Homeconnect tree delete that carries rooms and functions", () => {
     expect([...(ctx.i.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members].sort()).toEqual([
       "hm-rpc.0.X",
       "homeconnect.0.new",
-      "homeconnect.0.new.status.doorLocked",
-      "homeconnect.0.new.status.doorOpen",
+      "homeconnect.0.new.doors.door",
+      "homeconnect.0.new.doors.doorLocked",
     ]);
     expect((ctx.i.foreign.get("enum.functions.doors")?.common as { members: string[] }).members.sort()).toEqual([
-      "homeconnect.0.new.status.doorLocked",
-      "homeconnect.0.new.status.doorOpen",
+      "homeconnect.0.new.doors.door",
+      "homeconnect.0.new.doors.doorLocked",
     ]);
     expect(carried).toBe(5);
   });

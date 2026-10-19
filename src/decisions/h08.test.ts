@@ -1,8 +1,8 @@
 // Core decision H-08 (accepted 2026-10-15): the cloud cannot say which events an appliance knows — the adapter creates every
 // known event of the appliance type from the first start on, so a script can be built before the event first comes.
 // krobi 2026-09-30 23:47: "I want to know beforehand which events there could be, maybe I want to trigger on empty
-// salt but now have to wait months until it happens". Since 2026-10-15 (his choice "Own channel per door/event") each
-// event is a channel of its own: events.<event>.active.
+// salt but now have to wait months until it happens". Each event is a plain boolean datapoint events.<event> in the
+// channel events (krobi 2026-10-16 13:26 "x events channels instead of simply true/false datapoints", 13:36 "go").
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";
@@ -217,22 +217,22 @@ class MemoryPort implements AdapterPort {
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
 
 describe("H-08 the events of an appliance type exist from the first start", () => {
-  it("creates the catalog events of a switched-off dishwasher, each as its own channel, with no value claimed", async () => {
+  it("creates the catalog events of a switched-off dishwasher as boolean datapoints, with no value claimed", async () => {
     const port = new MemoryPort();
     const sync = new ApplianceSync(port);
     port.sync = sync;
     port.appliance("HA-1", "Spueler", "Dishwasher", false);
     await sync.syncAppliances();
     await settle();
-    expect(port.objects.get("spueler-1.events")?.type).toBe("folder");
-    expect(port.objects.get("spueler-1.events.saltNearlyEmpty")?.type).toBe("channel");
-    expect(port.objects.get("spueler-1.events.saltNearlyEmpty.active")?.common).toMatchObject({
+    expect(port.objects.get("spueler-1.events")?.type).toBe("channel");
+    expect(port.objects.get("spueler-1.events.saltNearlyEmpty")?.type).toBe("state");
+    expect(port.objects.get("spueler-1.events.saltNearlyEmpty")?.common).toMatchObject({
       type: "boolean",
       role: "indicator.alarm",
       write: false,
     });
-    expect(port.states.get("spueler-1.events.saltNearlyEmpty.active")?.val).toBe(false);
-    expect(port.objects.has("spueler-1.events.rinseAidNearlyEmpty.active")).toBe(true);
-    expect(port.objects.has("spueler-1.events.programFinished.active")).toBe(true);
+    expect(port.states.get("spueler-1.events.saltNearlyEmpty")?.val).toBe(false);
+    expect(port.objects.get("spueler-1.events.rinseAidNearlyEmpty")?.type).toBe("state");
+    expect(port.objects.get("spueler-1.events.programFinished")?.type).toBe("state");
   });
 });

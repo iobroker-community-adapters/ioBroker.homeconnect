@@ -19,6 +19,8 @@
   "firmware": "Firmware",
   "firmwareDesc": "Versie van de firmware van het apparaat, zoals Home Connect die meldt.",
   "channelDoors": "Deuren",
+  "channelRun": "Lopend programma",
+  "channelCounters": "Totalen",
   "ctNoClientId": "Geen Client ID ingesteld — vul die hierboven in en sla eerst op.",
   "ctNotSignedInLink": "Nog niet aangemeld — open de aanmeldlink, bevestig de code en test opnieuw.",
   "ctNotSignedIn": "Niet aangemeld — er is geen Home Connect-aanmelding opgeslagen; de adapter vraagt bij het starten een aanmeldlink aan.",

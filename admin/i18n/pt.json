@@ -19,6 +19,8 @@
   "firmware": "Firmware",
   "firmwareDesc": "Versão do firmware do aparelho, conforme informada pela Home Connect.",
   "channelDoors": "Portas",
+  "channelRun": "Programa em curso",
+  "channelCounters": "Totais",
   "ctNoClientId": "Nenhum Client ID configurado — introduza-o acima e guarde primeiro.",
   "ctNotSignedInLink": "Ainda sem sessão iniciada — abra a ligação de início de sessão, confirme o código e teste novamente.",
   "ctNotSignedIn": "Sem sessão iniciada — não há nenhum início de sessão Home Connect guardado; o adaptador pede uma ligação de início de sessão ao arrancar.",

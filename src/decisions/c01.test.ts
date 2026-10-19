@@ -234,15 +234,15 @@ describe("C-01 remaining time and progress are empty while no program runs", () 
       { key: "BSH.Common.Option.ProgramProgress", value: 40, unit: "%" },
     ]);
     await settle();
-    expect(port.states.get("wt-1.status.remainingProgramTime")?.val).toBe(10);
-    expect(port.states.get("wt-1.status.programProgress")?.val).toBe(40);
+    expect(port.states.get("wt-1.run.remainingProgramTime")?.val).toBe(10);
+    expect(port.states.get("wt-1.run.programProgress")?.val).toBe(40);
     send([state("Ready")]);
     await settle();
-    expect(port.states.get("wt-1.status.remainingProgramTime")?.val ?? null).toBeNull();
-    expect(port.states.get("wt-1.status.programProgress")?.val ?? null).toBeNull();
+    expect(port.states.get("wt-1.run.remainingProgramTime")?.val ?? null).toBeNull();
+    expect(port.states.get("wt-1.run.programProgress")?.val ?? null).toBeNull();
     // A value the appliance sends at rest stays empty too.
     send([{ key: "BSH.Common.Option.RemainingProgramTime", value: 60, unit: "seconds" }]);
     await settle();
-    expect(port.states.get("wt-1.status.remainingProgramTime")?.val ?? null).toBeNull();
+    expect(port.states.get("wt-1.run.remainingProgramTime")?.val ?? null).toBeNull();
   });
 });

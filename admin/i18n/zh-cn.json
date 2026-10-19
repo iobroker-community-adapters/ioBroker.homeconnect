@@ -19,6 +19,8 @@
   "firmware": "固件",
   "firmwareDesc": "Home Connect 报告的电器固件版本。",
   "channelDoors": "门",
+  "channelRun": "运行中的程序",
+  "channelCounters": "累计计数",
   "ctNoClientId": "未配置 Client ID — 请先在上方填写并保存。",
   "ctNotSignedInLink": "尚未登录 — 请打开登录链接并确认代码，然后再次测试。",
   "ctNotSignedIn": "未登录 — 未保存 Home Connect 登录；适配器在启动时会请求登录链接。",

@@ -19,6 +19,8 @@
   "firmware": "Firmware",
   "firmwareDesc": "Versione del firmware dell'elettrodomestico, come la riporta Home Connect.",
   "channelDoors": "Porte",
+  "channelRun": "Programma in corso",
+  "channelCounters": "Totali",
   "ctNoClientId": "Nessun Client ID configurato — inseriscilo sopra e salva prima.",
   "ctNotSignedInLink": "Accesso non ancora eseguito — apri il link di accesso, conferma il codice e riprova il test.",
   "ctNotSignedIn": "Accesso non eseguito — nessun accesso Home Connect memorizzato; l'adattatore richiede un link di accesso all'avvio.",

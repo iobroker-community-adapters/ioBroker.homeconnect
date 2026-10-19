@@ -1,5 +1,6 @@
 // Core decision H-07 (accepted 2026-10-15): run values (remaining time, progress, program phase …) the appliance reports
-// during a run are no options to set — they stand read-only under status. krobi 2026-09-30 21:20: "under options are
+// during a run are no options to set — they stand read-only under run (tree layout, krobi 2026-10-16 13:36 "go"). krobi
+// 2026-09-30 21:20: "under options are
 // the program status and remaining run etc., but doesn't that rather belong under status? that is no option after all."
 import { describe, expect, it, vi } from "vitest";
 import { transformItem } from "../lib/value-transformer";
@@ -215,8 +216,8 @@ class MemoryPort implements AdapterPort {
 /** Let the fire-and-forget chains of the sync land. */
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
 
-describe("H-07 run values stand under status", () => {
-  it("puts a run value the cloud delivers as an option under status, read-only", () => {
+describe("H-07 run values stand under run", () => {
+  it("puts a run value the cloud delivers as an option under run, read-only", () => {
     for (const key of [
       "BSH.Common.Option.RemainingProgramTime",
       "BSH.Common.Option.ProgramProgress",
@@ -224,7 +225,7 @@ describe("H-07 run values stand under status", () => {
       "BSH.Common.Option.EstimatedTotalProgramTime",
     ]) {
       const t = transformItem({ key, value: 10, unit: "seconds" });
-      expect(t.channel, key).toBe("status");
+      expect(t.channel, key).toBe("run");
       expect(t.common.write, key).toBe(false);
     }
   });

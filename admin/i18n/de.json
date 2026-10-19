@@ -19,6 +19,8 @@
   "firmware": "Firmware",
   "firmwareDesc": "Version der Gerätefirmware, wie Home Connect sie meldet.",
   "channelDoors": "Türen",
+  "channelRun": "Laufendes Programm",
+  "channelCounters": "Gesamtzähler",
   "ctNoClientId": "Keine Client ID eingetragen — oben eintragen und zuerst speichern.",
   "ctNotSignedInLink": "Noch nicht angemeldet — Anmelde-Link öffnen und den Code bestätigen, dann erneut testen.",
   "ctNotSignedIn": "Nicht angemeldet — es ist keine Home-Connect-Anmeldung gespeichert; der Adapter fordert beim Start einen Anmelde-Link an.",

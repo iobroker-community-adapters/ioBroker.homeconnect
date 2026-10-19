@@ -104,7 +104,10 @@ export interface AdapterPort {
   /** Delete an object and everything below it (a whole appliance tree). */
   delObjectRecursive(id: string): Promise<void>;
   /** Enumerate this instance's objects of a type (for start-up priming and tree moves). */
-  getForeignObjects(pattern: string, type: "state" | "device" | "channel"): Promise<Record<string, ioBroker.Object>>;
+  getForeignObjects(
+    pattern: string,
+    type: "state" | "device" | "channel" | "folder",
+  ): Promise<Record<string, ioBroker.Object>>;
   /** Every object of this instance, of every type, keyed by full id — a tree move copies them all. */
   getAdapterObjects(): Promise<Record<string, ioBroker.Object | null | undefined>>;
   /** Every state matching a full-id pattern — a tree move carries them with `ack`, `ts`, `lc` and `q`. */
@@ -354,10 +357,10 @@ const STATISTICS_NAMES: ReadonlyArray<[string, I18nKey]> = [
   ["started", "statStarted"],
   ["runtime", "statRuntime"],
 ];
-/** The run values that only mean something while a program is under way (under `status` since decision 49). */
+/** The run values that only mean something while a program is under way (under `run`, tree-layout.ts). */
 const RUN_VALUE_KEYS: ReadonlyMap<string, string> = new Map([
-  ["BSH.Common.Option.RemainingProgramTime", "status.remainingProgramTime"],
-  ["BSH.Common.Option.ProgramProgress", "status.programProgress"],
+  ["BSH.Common.Option.RemainingProgramTime", "run.remainingProgramTime"],
+  ["BSH.Common.Option.ProgramProgress", "run.programProgress"],
 ]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
 
@@ -365,6 +368,8 @@ const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
 const CHANNEL_KEYS: Record<string, I18nKey> = {
   info: "channelInfo",
   status: "channelStatus",
+  run: "channelRun",
+  counters: "channelCounters",
   settings: "channelSettings",
   events: "channelEvents",
   doors: "channelDoors",
@@ -385,24 +390,6 @@ const CHANNEL_KEYS: Record<string, I18nKey> = {
 function channelName(channel: string): ioBroker.StringOrTranslated {
   const key = CHANNEL_KEYS[channel];
   return key ? tName(key) : humanizeId(channel);
-}
-
-/**
- * The folders whose every member is a channel of its own: one event or one compartment door each (the role catalogue
- * allows a detailed role once per channel — krobi 2026-10-15: "Eigener Kanal je Tür/Ereignis").
- */
-const MEMBER_FOLDERS: ReadonlySet<string> = new Set(["events", "doors"]);
-
-/**
- * The name of a datapoint's channel: a member of the events or doors folder is named like its one datapoint, every
- * other channel by {@link channelName}.
- *
- * @param channel the channel path below the device
- * @param stateName the name of the datapoint created in it
- * @returns the name to store
- */
-function channelNameFor(channel: string, stateName: ioBroker.StringOrTranslated): ioBroker.StringOrTranslated {
-  return MEMBER_FOLDERS.has(channel.split(".")[0] ?? "") && channel.includes(".") ? stateName : channelName(channel);
 }
 
 /**
@@ -1429,11 +1416,6 @@ export class ApplianceSync {
           continue;
         }
         const fresh = channelName(parts[1]);
-        // The events channel of an older tree becomes the folder of one channel per event (doors likewise).
-        if (MEMBER_FOLDERS.has(parts[1])) {
-          await this.port.extendObject(rel, { type: "folder", common: { name: fresh }, native: {} });
-          continue;
-        }
         if (sameName(obj.common?.name, fresh)) {
           continue;
         }
@@ -1965,19 +1947,6 @@ export class ApplianceSync {
         const expanded = expandBshItem({ key: native.bshKey, value: shape }, lockable);
         const oneToOne = expanded.length === 1;
         const targets = expanded.map(t => `${this.port.namespace}.${deviceId}.${t.channel}.${t.id}`);
-        // An event that becomes a channel of its own takes the old datapoint's id as its channel: the old object
-        // goes first (value and object were read above), or its recursive delete would take the new channel along.
-        const inPlace = expanded.some(t => `${deviceId}.${t.channel}` === rel);
-        if (inPlace) {
-          await this.turnIntoChannel(
-            rel,
-            targets,
-            expanded[0]?.common.name ?? rel,
-            channelPath,
-            remaining,
-            drainedCandidates,
-          );
-        }
         for (const t of expanded) {
           const newRel = `${deviceId}.${t.channel}.${t.id}`;
           const common: ioBroker.StateCommon = { ...t.common };
@@ -2016,10 +1985,9 @@ export class ApplianceSync {
           // datapoints; a user's own datapoints live under 0_userdata).
           common.name = t.common.name;
           common.desc = t.common.desc;
-          await this.ensureMemberFolder(deviceId, t.channel);
           await this.port.extendObject(`${deviceId}.${t.channel}`, {
             type: "channel",
-            common: { name: channelNameFor(t.channel, t.common.name) },
+            common: { name: channelName(t.channel) },
             native: {},
           });
           await this.port.extendObject(newRel, {
@@ -2030,8 +1998,9 @@ export class ApplianceSync {
           // The target lives in a channel too — one that received a migrated state
           // must not be deleted as drained (a move within one channel emptied it
           // of the old id and took the new one's parent with it). Counted at the
-          // first level, where the old channel sits: an event moving into its own
-          // channel keeps `events` (it becomes the folder above it).
+          // first level, where the old channel sits: an event or door that was a channel of its own (test build of
+          // 2026-10-15) becomes a datapoint of `events`/`doors` again — the channel object at its id is replaced by
+          // the state written above, the old `.active`/`.open` child is deleted.
           const targetChannel = `${deviceId}.${t.channel.split(".")[0]}`;
           remaining.set(targetChannel, (remaining.get(targetChannel) ?? 0) + 1);
           const newValue =
@@ -2042,9 +2011,7 @@ export class ApplianceSync {
           this.port.log.debug(`migrated ${rel} → ${newRel}`);
         }
         moved.set(fullId, targets);
-        if (!inPlace) {
-          await this.deleteMigratedState(rel, targets, channelPath, remaining, drainedCandidates);
-        }
+        await this.deleteMigratedState(rel, targets, channelPath, remaining, drainedCandidates);
         migrated++;
       }
       const aliases =
@@ -2070,49 +2037,6 @@ export class ApplianceSync {
     } catch (e) {
       this.port.log.warn(`migrating renamed datapoints failed: ${errText(e)}`);
     }
-  }
-
-  /**
-   * Turn a datapoint into the channel that takes its id — an event becoming a channel of its own. The object is
-   * replaced in one write and its value dropped; it is never deleted, the release keeps the id. The rooms and
-   * functions that listed the datapoint list the ones that take its place.
-   *
-   * @param rel the namespace-relative id of the datapoint
-   * @param targets the full ids that take its place
-   * @param name the channel's name (that of its one datapoint)
-   * @param channelPath the device-qualified channel the datapoint lived under
-   * @param remaining the per-channel remaining-state counter
-   * @param drained the set of channels that may end up empty
-   */
-  private async turnIntoChannel(
-    rel: string,
-    targets: readonly string[],
-    name: ioBroker.StringOrTranslated,
-    channelPath: string,
-    remaining: Map<string, number>,
-    drained: Set<string>,
-  ): Promise<void> {
-    const full = `${this.port.namespace}.${rel}`;
-    try {
-      for (const [enumId, obj] of Object.entries(await this.port.getEnums())) {
-        const enumObj = obj as ioBroker.Object | null;
-        const members = (enumObj?.common as { members?: unknown } | undefined)?.members;
-        if (!enumObj || !Array.isArray(members) || !members.includes(full)) {
-          continue;
-        }
-        const next = members.flatMap(m => (m === full ? [...targets] : [m]));
-        await this.port.setForeignObject(enumId, {
-          ...enumObj,
-          common: { ...enumObj.common, members: next },
-        } as ioBroker.SettableObject);
-      }
-      await this.port.setForeignObject(full, { type: "channel", common: { name }, native: {} });
-      await this.port.delState(rel);
-    } catch (e) {
-      this.port.log.debug(`turning ${rel} into a channel failed: ${errText(e)}`);
-    }
-    remaining.set(channelPath, (remaining.get(channelPath) ?? 1) - 1);
-    drained.add(channelPath);
   }
 
   /**
@@ -2501,11 +2425,10 @@ export class ApplianceSync {
     // A channel is written once per run, not once per datapoint created in it
     // (the status channel of a fresh appliance was written dozens of times).
     // Its name is kept current at start (refreshChannelNames).
-    await this.ensureMemberFolder(deviceId, channel);
     if (!this.writtenChannels.has(`${deviceId}.${channel}`)) {
       await this.port.extendObject(`${deviceId}.${channel}`, {
         type: "channel",
-        common: { name: channelLabel ?? channelNameFor(channel, common.name) },
+        common: { name: channelLabel ?? channelName(channel) },
         native: {},
       });
       this.writtenChannels.add(`${deviceId}.${channel}`);
@@ -2528,25 +2451,6 @@ export class ApplianceSync {
       seenValues: native.seenValues,
     });
     return fullId;
-  }
-
-  /**
-   * The `events` or `doors` folder above a member channel, written once per run (marked like a channel).
-   *
-   * @param deviceId the id-safe device path segment
-   * @param channel the channel path below the device
-   */
-  private async ensureMemberFolder(deviceId: string, channel: string): Promise<void> {
-    const folder = channel.split(".")[0] ?? "";
-    if (!channel.includes(".") || !MEMBER_FOLDERS.has(folder) || this.writtenChannels.has(`${deviceId}.${folder}`)) {
-      return;
-    }
-    await this.port.extendObject(`${deviceId}.${folder}`, {
-      type: "folder",
-      common: { name: channelName(folder) },
-      native: {},
-    });
-    this.writtenChannels.add(`${deviceId}.${folder}`);
   }
 
   /**
