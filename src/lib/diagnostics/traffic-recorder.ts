@@ -109,9 +109,7 @@ export function haIdOfPath(path: string): string | undefined {
  * @returns the data
  */
 function parsedData(data: string): unknown {
-  if (data.length === 0) {
-    return "";
-  }
+  // an empty text is no JSON and stays the empty text
   try {
     return JSON.parse(data) as unknown;
   } catch {
@@ -126,7 +124,8 @@ function parsedData(data: string): unknown {
  * @returns the keys, comma-joined
  */
 function itemKeys(data: unknown): string {
-  const items = typeof data === "object" && data !== null ? (data as { items?: unknown }).items : undefined;
+  // a text or a number has no `items` either
+  const items = (data as { items?: unknown } | null | undefined)?.items;
   if (!Array.isArray(items)) {
     return "";
   }

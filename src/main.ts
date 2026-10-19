@@ -1297,8 +1297,8 @@ export class Homeconnect extends utils.Adapter {
         answer !== undefined &&
         (NO_PROGRAM_ANSWERS.has(answer) || BUSY_ANSWERS.has(answer) || UNSUPPORTED_ANSWERS.has(answer))
       ) {
-        this.log.debug(`${source}: ${answer} (a normal appliance answer, not an error)`);
-        this.restLog.recovered(restLogKey(source), `${source} succeeded.`);
+        // one line: the answer proves the endpoint kind healthy (info after a reported failure, debug otherwise)
+        this.restLog.recovered(restLogKey(source), `${source} succeeded: ${answer} (a normal appliance answer).`);
         if (UNSUPPORTED_ANSWERS.has(answer)) {
           this.sync?.noteUnsupportedProgram(path);
         }

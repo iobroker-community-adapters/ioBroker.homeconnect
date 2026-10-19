@@ -1154,7 +1154,9 @@ describe("Homeconnect rate limiting", () => {
       await get(ctx, "/api/homeappliances/A/programs/active");
       httpMock.getJson.mockResolvedValue(failResult(error.endsWith("State") ? 409 : 404, { error }));
       await get(ctx, "/api/homeappliances/A/programs/active");
-      expect(ctx.i.log.info).toHaveBeenCalledWith("GET /api/homeappliances/A/programs/active succeeded.");
+      expect(ctx.i.log.info).toHaveBeenCalledWith(
+        `GET /api/homeappliances/A/programs/active succeeded: ${error} (a normal appliance answer).`,
+      );
 
       // Cleared for real: the next failure of the kind is news again.
       ctx.i.log.warn.mockClear();
@@ -1179,7 +1181,7 @@ describe("Homeconnect rate limiting", () => {
       await get(ctx, "/api/homeappliances/B/programs/active");
     }
     expect(ctx.i.log.warn.mock.calls.filter(c => String(c[0]).includes("programs/active failed"))).toHaveLength(2);
-    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes("succeeded."))).toHaveLength(2);
+    expect(ctx.i.log.info.mock.calls.filter(c => String(c[0]).includes(" succeeded"))).toHaveLength(2);
   });
 
   it("reads a refused program list (ProgramNotAvailable) as a busy appliance, not a failure", async () => {
@@ -1207,9 +1209,10 @@ describe("Homeconnect rate limiting", () => {
     httpMock.getJson.mockResolvedValue(failResult(400, { error: "SDK.Error.UnsupportedProgram" }));
     await expect(get(ctx, path)).resolves.toBeUndefined();
     expect(ctx.i.log.warn).not.toHaveBeenCalled();
-    expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("SDK.Error.UnsupportedProgram"));
-    // The answer proves the endpoint kind healthy.
-    expect(ctx.i.log.info).toHaveBeenCalledWith(`GET ${path} succeeded.`);
+    // The answer proves the endpoint kind healthy — one line, with the answer in it.
+    expect(ctx.i.log.info).toHaveBeenCalledWith(
+      `GET ${path} succeeded: SDK.Error.UnsupportedProgram (a normal appliance answer).`,
+    );
     expect(ctx.syncs[0].noteUnsupportedProgram).toHaveBeenCalledWith(path);
   });
 
@@ -3200,6 +3203,26 @@ describe("Homeconnect diagnostics report", () => {
     ctx.i.restBlockedUntil = 0;
     ctx.auths[0].accessToken = undefined;
     expect(host().liveReadBlocked()).toBe("not signed in to Home Connect");
+    (ctx.i as unknown as { terminating: boolean }).terminating = true;
+    expect(host().liveReadBlocked()).toBe("the adapter is shutting down");
+  });
+
+  it("answers a diagnostics message only when it asks for an answer", async () => {
+    const ctx = await ready();
+    await ctx.i.onMessage({ command: "diagnostics", message: { action: "list" }, from: "admin" });
+    expect(ctx.i.sendTo).not.toHaveBeenCalled();
+  });
+
+  it("the live read takes a fresh token after a 401, like any other read", async () => {
+    const ctx = await ready();
+    httpMock.getJson.mockReset();
+    httpMock.getJson.mockResolvedValueOnce(failResult(401)).mockResolvedValueOnce(okResult({ status: [] }));
+    ctx.auths[0].refreshNow.mockImplementation(() => {
+      ctx.auths[0].accessToken = "FRESH";
+      return Promise.resolve(true);
+    });
+    await expect(diag(ctx).readRaw(`/api/homeappliances/${HA}/status`)).resolves.toMatchObject({ status: 200 });
+    expect(httpMock.getJson.mock.calls[1][2]).toBe("FRESH");
   });
 
   it("hands the report every secret it must blank — token, client id and secret", async () => {

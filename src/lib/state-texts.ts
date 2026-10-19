@@ -72,6 +72,11 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
   // Listed by the type source among the EVENT keys; it names only the value type.
   "BSH.Common.EnumType.EventPresentState": { name: "evUnnamed", desc: "evUnnamedDesc" },
   "BSH.Common.Event.ProgramAborted": { name: "evProgramAborted", desc: "evProgramAbortedDesc" },
+  // Sent by a dishwasher after an update (measured 2026-10-20); until then it showed an English name and no explanation.
+  "BSH.Common.Event.SoftwareUpdateSuccessful": {
+    name: "evSoftwareUpdateSuccessful",
+    desc: "evSoftwareUpdateSuccessfulDesc",
+  },
   "BSH.Common.Event.AlarmClockElapsed": { name: "evAlarmClockElapsed", desc: "evAlarmClockElapsedDesc" },
   "BSH.Common.Event.Favorite.001.ExternalTrigger": { name: "evFavorite1", desc: "evFavorite1Desc" },
   "BSH.Common.Event.Favorite.002.ExternalTrigger": { name: "evFavorite2", desc: "evFavorite1Desc" },

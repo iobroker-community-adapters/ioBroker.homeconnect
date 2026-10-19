@@ -109,6 +109,32 @@ describe("HomeConnectReportSource", () => {
     expect(answers.map(a => a.path)).toEqual(LIVE_PATHS.map(p => p || "/"));
   });
 
+  it("refuses a device it does not know", async () => {
+    await expect(new HomeConnectReportSource(makeHost()).readLive("nope")).rejects.toThrow(/unknown device 'nope'/);
+  });
+
+  it("blanks a secret in texts, keys, lists and nested objects, and keeps lists lists", () => {
+    const out = blankSecrets({ [TOKEN]: [TOKEN, { deep: `Bearer ${TOKEN}` }, 3], n: null }, [TOKEN, " "]);
+    expect(out).toEqual({ [SECRET_MARK]: [SECRET_MARK, { deep: `Bearer ${SECRET_MARK}` }, 3], n: null });
+  });
+
+  it("records a stream event with an empty or a non-object body under its type alone", () => {
+    const recorder = new TrafficRecorder(() => 0);
+    recorder.stream({ event: "KEEP", data: "", id: WASHER.haId });
+    recorder.stream({ event: "NOTIFY", data: "null", id: WASHER.haId });
+    expect(recorder.snapshot(WASHER.haId).stream.map(e => e.content)).toEqual([
+      { event: "KEEP", data: "" },
+      { event: "NOTIFY", data: null },
+    ]);
+  });
+
+  it("asks an appliance without programs no program path (each would be an error answer)", async () => {
+    const host = makeHost({ applianceState: () => ({ type: "FridgeFreezer", unsupportedPrograms: [] }) });
+    const answers = await new HomeConnectReportSource(host).readLive(WASHER.id);
+    expect(answers.map(a => a.path)).toEqual(["/", "/status", "/settings"]);
+    expect(host.reads.filter(path => path.includes("/programs"))).toEqual([]);
+  });
+
   it("stops at the first request nobody answered, and fails when nothing answered (DB-02)", async () => {
     const host = makeHost({
       readRaw: path => Promise.resolve({ path, status: 0, error: "This operation was aborted" }),
@@ -148,9 +174,10 @@ describe("HomeConnectReportSource", () => {
 
   it("says why there is no live read", async () => {
     const body = await new HomeConnectReportSource(makeHost()).build(FRIDGE.id, undefined, undefined);
-    expect(body.content.live).toEqual({ note: "not connected — not read live" });
+    // not connected: the frame says so, the body adds no fixed sentence (DB-14)
+    expect(body.content.live).toBeUndefined();
     const failed = await new HomeConnectReportSource(makeHost()).build(WASHER.id, undefined, "quota");
-    expect(failed.content.live).toEqual({ note: "quota" });
+    expect(failed.content.live).toEqual({ error: "quota" });
   });
 
   it("shows no serial, name, token or client id of the user in plain text (DB-04, DB-05)", async () => {
@@ -210,7 +237,7 @@ describe("HomeConnectReportSource", () => {
 
   it("keeps the appliance's datapoints with type, role and value", async () => {
     const body = await new HomeConnectReportSource(makeHost()).build(WASHER.id, undefined, undefined);
-    expect(body.content.tree).toContainEqual(
+    expect(body.content.objectTree).toContainEqual(
       expect.objectContaining({ id: "status.operationState", type: "string", role: "text", val: "ready" }),
     );
   });

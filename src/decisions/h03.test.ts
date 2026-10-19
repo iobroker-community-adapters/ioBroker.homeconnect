@@ -266,11 +266,11 @@ describe("H-03 the unit table", () => {
     ]);
     await sync.syncAppliances();
     await settle();
-    expect(port.states.get("wt-1.lastRun.energy")?.val).toBe(0.04);
-    expect(port.objects.get("wt-1.lastRun.energy")?.common).toMatchObject({ unit: "kWh" });
-    expect(port.states.get("wt-1.lastRun.water")?.val).toBe(35.9);
-    expect(port.objects.get("wt-1.lastRun.water")?.common).toMatchObject({ unit: "l" });
-    expect(port.states.get("wt-1.lastRun.detergent")?.val).toBe(21);
-    expect(port.objects.get("wt-1.lastRun.detergent")?.common).toMatchObject({ unit: "ml" });
+    expect(port.states.get("wt-1.history.latest.energy")?.val).toBe(0.04);
+    expect(port.objects.get("wt-1.history.latest.energy")?.common).toMatchObject({ unit: "kWh" });
+    expect(port.states.get("wt-1.history.latest.water")?.val).toBe(35.9);
+    expect(port.objects.get("wt-1.history.latest.water")?.common).toMatchObject({ unit: "l" });
+    expect(port.states.get("wt-1.history.latest.detergent")?.val).toBe(21);
+    expect(port.objects.get("wt-1.history.latest.detergent")?.common).toMatchObject({ unit: "ml" });
   });
 });

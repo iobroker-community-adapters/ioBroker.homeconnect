@@ -6943,15 +6943,15 @@ describe("readable values (2026-09-28)", () => {
     for (const [id, o] of Object.entries(objects)) {
       port.objects.set(id, structuredClone(o));
     }
-    objects["wd-1.lastRun.energy"] = {
-      _id: `${NS}.wd-1.lastRun.energy`,
+    objects["wd-1.history.latest.energy"] = {
+      _id: `${NS}.wd-1.history.latest.energy`,
       type: "state",
       common: { name: "Energy", type: "number", role: "value.energy.consumed", read: true, write: false, unit: "Wh" },
       native: {},
     } as unknown as ioBroker.Object;
-    port.primeStates[objects["wd-1.lastRun.energy"]._id] = objects["wd-1.lastRun.energy"];
-    port.objects.set("wd-1.lastRun.energy", structuredClone(objects["wd-1.lastRun.energy"]));
-    port.states.set("wd-1.lastRun.energy", 412);
+    port.primeStates[objects["wd-1.history.latest.energy"]._id] = objects["wd-1.history.latest.energy"];
+    port.objects.set("wd-1.history.latest.energy", structuredClone(objects["wd-1.history.latest.energy"]));
+    port.states.set("wd-1.history.latest.energy", 412);
     port.states.set("wd-1.settings.powerState", "on");
     port.states.set("wd-1.counters.programAllTimeEffective", 2011440);
     port.states.set("wd-1.options.finishInRelative", 14160);
@@ -6973,8 +6973,10 @@ describe("readable values (2026-09-28)", () => {
     });
     expect(port.states.get("wd-1.options.finishInRelative")).toBe(236);
     // The run summary's energy carries no key — its id says what it is.
-    expect((port.objects.get("wd-1.lastRun.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe("kWh");
-    expect(port.states.get("wd-1.lastRun.energy")).toBe(0.41);
+    expect((port.objects.get("wd-1.history.latest.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe(
+      "kWh",
+    );
+    expect(port.states.get("wd-1.history.latest.energy")).toBe(0.41);
     // The next start finds everything in its current form.
     const again = new FakePort();
     again.primeDevices = port.primeDevices;
@@ -7429,7 +7431,8 @@ describe("decoded program records (decision 40)", () => {
     await sync.syncAppliances();
     // Drawn once, after the program list of the pass is complete — not once before it and again after.
     expect(port.extendCalls.filter(id => id === "wt-1.history.latest.program")).toHaveLength(1);
-    expect(port.extendCalls.filter(id => id === "wt-1.lastRun.program")).toHaveLength(1);
+    // The last run is part of the history (krobi 2026-10-20): no channel of its own.
+    expect([...port.objects.keys()].filter(id => id.includes("lastRun"))).toEqual([]);
     // Numbers the appliances' own descriptions name are programs right away: 31670 is
     // spin, 31495 cotton — and cotton takes the cloud's key the program list carries.
     expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
@@ -7463,17 +7466,19 @@ describe("decoded program records (decision 40)", () => {
     expect(port.states.get("wt-1.statistics.program31699.completed")).toBe(1);
     expect(port.objects.get("wt-1.statistics.program31699")?.common?.name).toEqual(tName("unknownProgram", 31699));
     expect(port.objects.get("wt-1.statistics")?.type).toBe("folder");
-    expect(port.states.get("wt-1.lastRun.start")).toBe(Date.parse("2026-09-27T14:35:55.271Z"));
-    expect(port.states.get("wt-1.lastRun.duration")).toBe(12);
-    expect(port.objects.get("wt-1.lastRun.duration")?.common).toMatchObject({ role: "time.span", unit: "min" });
+    expect(port.states.get("wt-1.history.latest.start")).toBe(Date.parse("2026-09-27T14:35:55.271Z"));
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    expect(port.objects.get("wt-1.history.latest.duration")?.common).toMatchObject({ role: "time.span", unit: "min" });
     // The run's own figures — water in litres, not the millilitres the appliance counts.
-    expect(port.states.get("wt-1.lastRun.water")).toBe(35.9);
-    expect(port.states.get("wt-1.lastRun.energy")).toBe(0.04);
-    expect((port.objects.get("wt-1.lastRun.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe("kWh");
-    expect(port.states.get("wt-1.lastRun.detergent")).toBe(21);
-    expect(port.objects.has("wt-1.lastRun.softener")).toBe(false);
-    expect(port.states.get("wt-1.lastRun.endTrigger")).toBe("programabortedbyuser");
-    const trigger = port.objects.get("wt-1.lastRun.endTrigger")?.common as ioBroker.StateCommon;
+    expect(port.states.get("wt-1.history.latest.water")).toBe(35.9);
+    expect(port.states.get("wt-1.history.latest.energy")).toBe(0.04);
+    expect((port.objects.get("wt-1.history.latest.energy")?.common as ioBroker.StateCommon | undefined)?.unit).toBe(
+      "kWh",
+    );
+    expect(port.states.get("wt-1.history.latest.detergent")).toBe(21);
+    expect(port.objects.has("wt-1.history.latest.softener")).toBe(false);
+    expect(port.states.get("wt-1.history.latest.endTrigger")).toBe("programabortedbyuser");
+    const trigger = port.objects.get("wt-1.history.latest.endTrigger")?.common as ioBroker.StateCommon;
     expect(trigger.states).toMatchObject({ programfinished: "Programm beendet" });
     expect(port.states.get("wt-1.status.errorCodes")).toBe("");
     // The adapter's own name in every language, never an English label derived from the id.
@@ -7668,7 +7673,7 @@ describe("decoded program records (decision 40)", () => {
       expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toEqual({
         31699: wd("SportShoes.SportShoes.SportShoes"),
       });
-      expect(port.states.get("wt-1.lastRun.program")).toBe("sportshoes");
+      expect(port.states.get("wt-1.history.latest.program")).toBe("sportshoes");
       expect(port.objects.has("wt-1.statistics.program31699.completed")).toBe(false);
       const moved = port.objects.get("wt-1.statistics.sportshoes.completed")?.common as ioBroker.StateCommon;
       expect(moved.custom).toMatchObject({ "influxdb.0": { enabled: true } });
@@ -7779,7 +7784,7 @@ describe("decoded program records (decision 40)", () => {
       await sync.syncAppliances();
       expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toBeUndefined();
       // (31670 is spin by the appliances' descriptions — named, but nothing LEARNED.)
-      expect(port.states.get("wt-1.lastRun.program")).toBe("spin");
+      expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
     } finally {
       vi.useRealTimers();
     }
@@ -7861,9 +7866,9 @@ describe("decoded program records (decision 40)", () => {
       }),
     });
     await flush();
-    expect(port.states.get("wt-1.lastRun.program")).toBe("spin");
-    expect(port.states.get("wt-1.lastRun.duration")).toBe(12);
-    expect(port.states.get("wt-1.lastRun.water")).toBe(35.9);
+    expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    expect(port.states.get("wt-1.history.latest.water")).toBe(35.9);
     expect(port.logs.filter(l => l.includes("cannot read yet"))).toEqual([]);
   });
 
@@ -7880,9 +7885,9 @@ describe("decoded program records (decision 40)", () => {
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
     await sync.syncAppliances();
-    expect([...port.objects.keys()].filter(id => /lastRun|statistics|programDetails|SessionSummary/.test(id))).toEqual(
-      [],
-    );
+    expect(
+      [...port.objects.keys()].filter(id => /history|lastRun|statistics|programDetails|SessionSummary/.test(id)),
+    ).toEqual([]);
     const lines = port.logs.filter(l => l.startsWith("info: ") && l.includes("cannot read yet"));
     expect(lines).toHaveLength(2);
   });
@@ -8111,6 +8116,145 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
     expect(port.logs.filter(l => l.includes("history"))).toEqual([]);
   });
 
+  it("moves the last run into the history, merging what the history already has (krobi 2026-10-20)", async () => {
+    const port = new FakePort();
+    const custom = { "influxdb.0": { enabled: true } };
+    for (const dev of ["wt-1", "dw-1"]) {
+      port.objects.set(dev, { type: "device", common: { name: dev }, native: { haId: dev } });
+      port.objects.set(`${dev}.lastRun`, { type: "channel", common: { name: "Last run" }, native: {} });
+      port.objects.set(`${dev}.lastRun.program`, {
+        type: "state",
+        common: { name: "Program of the last run", type: "string", role: "text", write: false },
+        native: {},
+      });
+      port.objects.set(`${dev}.lastRun.start`, {
+        type: "state",
+        common: { name: tName("lrStart"), type: "number", role: "date.start", write: false, custom },
+        native: {},
+      });
+      port.states.set(`${dev}.lastRun.program`, "wd45");
+      port.states.set(`${dev}.lastRun.start`, 1792302577899);
+    }
+    // The washer-dryer's history already names the newest run's program.
+    port.objects.set("wt-1.history", { type: "folder", common: { name: tName("channelHistory") }, native: {} });
+    port.objects.set("wt-1.history.latest", { type: "channel", common: { name: tName("histRun1") }, native: {} });
+    port.objects.set("wt-1.history.latest.program", {
+      type: "state",
+      common: { name: tName("histProgram1"), type: "string", role: "text", write: false, custom },
+      native: {},
+    });
+    port.states.set("wt-1.history.latest.program", "wd45");
+    port.foreign.set("alias.0.lastProgram", {
+      type: "state",
+      common: { name: "Last", alias: { id: `${NS}.wt-1.lastRun.program` } },
+      native: {},
+    } as unknown as ioBroker.Object);
+    port.foreign.set("alias.0.started", {
+      type: "state",
+      common: { name: "Started", alias: { id: `${NS}.dw-1.lastRun.start` } },
+      native: {},
+    } as unknown as ioBroker.Object);
+    const sync = new ApplianceSync(port);
+    await sync.migrateHistoryRuns();
+
+    // The same datapoint lives on in the history: value and recording go along.
+    expect(port.states.get("dw-1.history.latest.start")).toBe(1792302577899);
+    expect(port.objects.get("dw-1.history.latest.start")?.common).toMatchObject({
+      custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.dw-1.lastRun.start` } },
+    });
+    expect(port.states.get("dw-1.history.latest.program")).toBe("wd45");
+    expect(port.objects.get("dw-1.history")?.type).toBe("folder");
+    expect(port.objects.get("dw-1.history.latest")).toMatchObject({
+      type: "channel",
+      common: { name: tName("histRun1") },
+    });
+    // Where the history has the datapoint already, that one stays as it is and takes what hung on the old one.
+    expect(port.objects.get("wt-1.history.latest.program")?.common).toMatchObject({
+      name: tName("histProgram1"),
+      custom,
+    });
+    expect((port.foreign.get("alias.0.lastProgram")?.common as { alias: { id: string } }).alias.id).toBe(
+      `${NS}.wt-1.history.latest.program`,
+    );
+    expect((port.foreign.get("alias.0.started")?.common as { alias: { id: string } }).alias.id).toBe(
+      `${NS}.dw-1.history.latest.start`,
+    );
+    // Nothing of the old channel is left.
+    expect([...port.objects.keys()].filter(id => id.includes("lastRun"))).toEqual([]);
+    expect(port.logs).toContain("info: Moved 4 history datapoint(s) to named runs.");
+  });
+
+  it("gives program and duration of the newest run one writer, whichever record comes first", async () => {
+    const port = new FakePort();
+    // 12 min by the summary (14:35:55 – 14:47:59), 11 min by the history list
+    const summary = (program: number): string =>
+      `{"counter":3,"end":"2026-09-27T14:47:59.859Z","sequence":[{"configuration":{"options":[],"program":${program}},"details":[]}],"start":"2026-09-27T14:35:55.271Z"}`;
+    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const send = (items: unknown[]): void =>
+      sync.handleStreamEvent({ event: "STATUS", id: "HA-1", data: JSON.stringify({ items }) });
+    // The summary first, the list (spin 31670 newest, 11 min) after it.
+    send([{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: summary(31670) }]);
+    await flush();
+    const list = [
+      { key: "LaundryCare.Common.Status.Program.History.Uid", value: "e7Y" },
+      { key: "LaundryCare.Common.Status.Program.History.EffectiveTime", value: "AAs" },
+    ];
+    send(list);
+    await flush();
+    expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    // The list again (every reconnect sends it), its durations last: the summary still speaks for that run.
+    send([list[0]]);
+    await flush();
+    send([list[1]]);
+    await flush();
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    // A summary of another program than the list's newest is not that run: the list draws the newest run.
+    send([{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: summary(31495) }]);
+    await flush();
+    send(list);
+    await flush();
+    expect(port.states.get("wt-1.history.latest.program")).toBe("spin");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(11);
+    // That summary (cotton 31495) waited for its run; the list that names it newest brings it in (oldest first on the
+    // wire: spin 11 min, then cotton 14 min).
+    send([
+      { key: "LaundryCare.Common.Status.Program.History.Uid", value: "e7Z7Bw" },
+      { key: "LaundryCare.Common.Status.Program.History.EffectiveTime", value: "AAsADg" },
+    ]);
+    await flush();
+    expect(port.states.get("wt-1.history.latest.program")).toBe("cotton");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    expect(port.states.get("wt-1.history.previous.duration")).toBe(11);
+  });
+
+  it("leaves a counter stored in the unit it shows as it is at start (12,905 l stays 12,905 l)", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wd-1`]: {
+        _id: `${NS}.wd-1`,
+        type: "device",
+        common: { name: "Wd" },
+        native: { haId: "HA-1", type: "WasherDryer", enumber: "Wd", idScheme: 3 },
+      } as unknown as ioBroker.Object,
+    };
+    const water: ioBroker.Object = {
+      _id: `${NS}.wd-1.counters.programAllWaterConsumed`,
+      type: "state",
+      common: { name: "Water", type: "number", role: "value", read: true, write: false, unit: "l" },
+      native: { bshKey: "BSH.Common.Status.Program.All.Water.Consumed", nameSource: "i18n" },
+    } as unknown as ioBroker.Object;
+    port.primeStates = { [water._id]: water };
+    port.objects.set("wd-1.counters.programAllWaterConsumed", structuredClone(water));
+    port.states.set("wd-1.counters.programAllWaterConsumed", 12905);
+    await new ApplianceSync(port).primeFromObjects();
+    await new ApplianceSync(port).primeFromObjects();
+    expect(port.states.get("wd-1.counters.programAllWaterConsumed")).toBe(12905);
+    expect(port.objects.get("wd-1.counters.programAllWaterConsumed")?.common).toMatchObject({ unit: "l" });
+  });
+
   it("empties the remaining time and progress while no program is under way", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", {
@@ -8219,7 +8363,7 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
     expect([...port.states.keys()].filter(id => id.includes(".options."))).toEqual([]);
   });
 
-  it("draws no history folder for an appliance whose records carry no history", async () => {
+  it("draws only the last run for an appliance whose records carry only the run summary (a dishwasher)", async () => {
     const port = new FakePort();
     const summary =
       '{"counter":3,"end":"2026-09-27T14:47:59.859Z","sequence":[{"configuration":{"options":[],"program":31670},"details":[]}],"start":"2026-09-27T14:35:55.271Z"}';
@@ -8228,8 +8372,15 @@ describe("a tree that makes sense on every appliance type (decision 48)", () => 
       status: [{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: summary }],
     });
     await new ApplianceSync(port).syncAppliances();
-    expect(port.objects.has("wt-1.lastRun.program")).toBe(true);
-    expect(port.objects.has("wt-1.history")).toBe(false);
+    expect(port.objects.get("wt-1.history")?.type).toBe("folder");
+    expect(port.objects.get("wt-1.history.latest")?.type).toBe("channel");
+    expect(port.states.get("wt-1.history.latest.duration")).toBe(12);
+    // Without a history list the selection list still names the summary's program.
+    expect((port.objects.get("wt-1.history.latest.program")?.common as ioBroker.StateCommon).states).toHaveProperty(
+      "spin",
+    );
+    expect(port.objects.has("wt-1.history.previous")).toBe(false);
+    expect([...port.objects.keys()].filter(id => id.includes("lastRun"))).toEqual([]);
   });
 
   it("draws the history folder again for an appliance paired again in the same run", async () => {
@@ -8538,6 +8689,53 @@ describe("ApplianceSync: every event and every door is a datapoint of one channe
     ]);
     // An event of a 1.x tree is already where it belongs.
     expect(port.objects.get("fridge.events.doorAlarmFreezer")?.type).toBe("state");
+  });
+
+  it("moves each door boolean of a lockable door to its own successor, 1:1, with recording and alias", async () => {
+    // Measured 2026-10-20 on a washer-dryer: both status booleans went to both door datapoints, the lock's alias
+    // followed to `doors.door` and no recording came along.
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wd`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-W", type: "WasherDryer" },
+      } as unknown as ioBroker.Object,
+    };
+    const recording = { custom: { "influxdb.0": { enabled: true } } };
+    port.primeStates = {
+      [`${NS}.wd.status.doorOpen`]: boolean("Door open", "sensor.door", "BSH.Common.Status.DoorState", recording),
+      [`${NS}.wd.status.doorLocked`]: boolean("Door locked", "indicator", "BSH.Common.Status.DoorState", recording),
+    };
+    port.primeChannels = {
+      [`${NS}.wd.status`]: { _id: "", type: "channel", common: { name: "Status" }, native: {} },
+    };
+    seed(port);
+    port.states.set("wd.status.doorOpen", true);
+    port.states.set("wd.status.doorLocked", false);
+    port.foreign.set("alias.0.laundry.locked", {
+      type: "state",
+      common: { name: "Locked", alias: { id: `${NS}.wd.status.doorLocked` } },
+      native: {},
+    } as unknown as ioBroker.Object);
+    await new ApplianceSync(port).migrateRenamedStates();
+
+    expect(port.states.get("wd.doors.door")).toBe(true);
+    expect(port.states.get("wd.doors.doorLocked")).toBe(false);
+    expect(port.objects.get("wd.doors.door")?.common).toMatchObject({
+      custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.wd.status.doorOpen` } },
+    });
+    expect(port.objects.get("wd.doors.doorLocked")?.common).toMatchObject({
+      custom: { "influxdb.0": { enabled: true, aliasId: `${NS}.wd.status.doorLocked` } },
+    });
+    expect((port.foreign.get("alias.0.laundry.locked")?.common as { alias: { id: string } }).alias.id).toBe(
+      `${NS}.wd.doors.doorLocked`,
+    );
+    expect(port.logs.filter(l => l.startsWith("debug: migrated"))).toEqual([
+      "debug: migrated wd.status.doorOpen → wd.doors.door",
+      "debug: migrated wd.status.doorLocked → wd.doors.doorLocked",
+    ]);
   });
 
   it("turns the event and door channels of the 2026-10-15 test build back into datapoints, alias and room with them", async () => {

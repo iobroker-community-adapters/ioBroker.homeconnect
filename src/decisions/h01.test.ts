@@ -230,8 +230,8 @@ describe("H-01 encoded appliance data becomes readable datapoints", () => {
     ]);
     await sync.syncAppliances();
     await settle();
-    expect(port.states.get("wt-1.lastRun.duration")?.val).toBe(12);
-    expect(port.states.get("wt-1.lastRun.water")?.val).toBe(35.9);
+    expect(port.states.get("wt-1.history.latest.duration")?.val).toBe(12);
+    expect(port.states.get("wt-1.history.latest.water")?.val).toBe(35.9);
     expect(port.states.get("wt-1.history.latest.duration")?.val).toBe(12);
     const raw = [...port.objects.keys()].filter(id => /sessionSummary|historyUid|historyEffectiveTime/i.test(id));
     expect(raw).toEqual([]);
@@ -251,6 +251,6 @@ describe("H-01 encoded appliance data becomes readable datapoints", () => {
       }),
     });
     await settle();
-    expect(port.states.get("wt-1.lastRun.duration")?.val).toBe(12);
+    expect(port.states.get("wt-1.history.latest.duration")?.val).toBe(12);
   });
 });

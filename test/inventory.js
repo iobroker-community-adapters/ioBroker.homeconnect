@@ -411,7 +411,58 @@ async function fixtureNative(extra = {}) {
  * previous full id → current full id (adapter-specific like FIXTURE_NATIVE, may be computed). The recording is the
  * user's and goes on with the moved datapoint (krobi 2026-09-02); the upgrade suite checks that it arrived there.
  */
-const MOVES = {};
+// homeconnect: derived from the previous release's inventory with the adapter's own layout rules, so no id list is kept
+// by hand — a run value under `options` (before decision 49) goes to its channel by `runValueChannel` + `layoutChannel`
+// (`run`, `counters`; krobi 2026-10-16), a total or run value under `status` the same way, each door boolean to its own
+// datapoint in `doors` (`doorOpen` → `door`, `doorLocked` → `doorLocked`, `door<Compartment>Open` → `<compartment>`), and
+// the last run into the history (`lastRun.<x>` → `history.latest.<x>`, krobi 2026-10-20) — except where the history
+// already had that datapoint (program, duration of a laundry appliance): there the old one goes and hands nothing on.
+const MOVES = previousMoves(process.env.INVENTORY_PREVIOUS);
+
+/**
+ * homeconnect's moves from the previous release's inventory (see MOVES).
+ *
+ * @param {string | undefined} previousFile the previous release's inventory
+ * @returns {Record<string, string>} previous full id → current full id
+ */
+function previousMoves(previousFile) {
+  if (!previousFile || !fs.existsSync(previousFile)) {
+    return {};
+  }
+  const { runValueChannel } = require("../build/lib/run-values.js");
+  const { layoutChannel } = require("../build/lib/tree-layout.js");
+  const previous = JSON.parse(fs.readFileSync(previousFile, "utf8"));
+  const moves = {};
+  for (const [id, obj] of Object.entries(previous)) {
+    const parts = id.split(".");
+    if (obj.type !== "state" || parts.length !== 5) {
+      continue;
+    }
+    const [, , device, channel, leaf] = parts;
+    const at = (to, toLeaf = leaf) => `${parts[0]}.${parts[1]}.${device}.${to}.${toLeaf}`;
+    const key = obj.native && typeof obj.native.bshKey === "string" ? obj.native.bshKey : undefined;
+    let to;
+    if (channel === "lastRun") {
+      to = at("history.latest");
+      if (to in previous) {
+        continue;
+      }
+    } else if (channel === "status" && /^door(Open|Locked)$/.test(leaf)) {
+      to = at("doors", leaf === "doorOpen" ? "door" : "doorLocked");
+    } else if (channel === "status" && /^door[A-Z]\w*Open$/.test(leaf)) {
+      const compartment = leaf.slice(4, -4);
+      to = at("doors", compartment.charAt(0).toLowerCase() + compartment.slice(1));
+    } else if (channel === "options" && key && runValueChannel(key)) {
+      to = at(layoutChannel(runValueChannel(key), leaf));
+    } else if (channel === "status") {
+      to = at(layoutChannel("status", leaf));
+    }
+    if (to && to !== id) {
+      moves[id] = to;
+    }
+  }
+  return moves;
+}
 /**
  * Round 87: adapter-specific like FIXTURE_NATIVE — the states that show an outage of EVERY counterpart, each with the
  * value it takes then (ids without the namespace, e.g. `{ "info.connection": false }` plus each device's reachability).

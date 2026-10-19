@@ -98,8 +98,7 @@ homeconnect.0.
     │   └── stop             — Stop the active program (button)
     ├── options.             — Program options: temperature, spin speed … (writable)
     ├── commands.            — Pause, resume, open door … (buttons)
-    ├── lastRun.             — The last run: program, start, end, duration, consumption
-    ├── history.             — Previous runs: latest, previous, thirdLatest …
+    ├── history.             — Runs: latest (program, start, end, duration, consumption), previous, thirdLatest …
     └── statistics.          — Runs and running time per program
 ```
 

@@ -205,6 +205,8 @@ const HISTORY_DURATION_NAMES: readonly I18nKey[] = ["histDuration1", "histDurati
 const HISTORY_RUN_NAMES: readonly I18nKey[] = ["histRun1", "histRun2", "histRun3", "histRun4"];
 /** An old history datapoint that counted the runs (`history.program3`), before decision 48. */
 const NUMBERED_HISTORY = /^([^.]+)\.history\.(program|duration)(\d+)$/;
+/** A datapoint of the old `lastRun` channel: the last run lives in `history.latest` (krobi 2026-10-20). */
+const LAST_RUN_STATE = /^([^.]+)\.lastRun\.([A-Za-z]+)$/;
 
 /**
  * Two names joined per language ("Spin · Runs completed"), for a datapoint whose
@@ -377,7 +379,6 @@ const CHANNEL_KEYS: Record<string, I18nKey> = {
   options: "channelOptions",
   commands: "channelCommands",
   history: "channelHistory",
-  lastRun: "channelLastRun",
 };
 
 /**
@@ -440,7 +441,11 @@ function storedForm(
   common: Partial<ioBroker.StateCommon>,
   rel: string,
 ): { kind: "switch" } | { kind: "unit"; p: Presentation } | undefined {
-  if (rel.endsWith(".lastRun.energy") && common.type === "number" && RUN_ENERGY.from.includes(common.unit ?? "")) {
+  if (
+    rel.endsWith(".history.latest.energy") &&
+    common.type === "number" &&
+    RUN_ENERGY.from.includes(common.unit ?? "")
+  ) {
     return { kind: "unit", p: RUN_ENERGY };
   }
   if (key === undefined) {
@@ -450,7 +455,9 @@ function storedForm(
     return { kind: "switch" };
   }
   const p = common.type === "number" ? presentationFor(key, common.unit) : undefined;
-  return p ? { kind: "unit", p } : undefined;
+  // A number already in the unit it shows is in its current form. The water counter also takes "l" in (decision 45):
+  // without this every start divided a stored 12,905 l by 1000 again (12.9 "l", measured 2026-10-20 on a washer-dryer).
+  return p && common.unit !== p.unit ? { kind: "unit", p } : undefined;
 }
 
 /**
@@ -1848,20 +1855,29 @@ export class ApplianceSync {
    * run they describe (`history.thirdLatest.program`), decision 48. It is the same datapoint with the same
    * value type, so its object, value, recording, aliases, rooms and functions move along; `history` becomes the
    * folder the run channels sit in. Runs before priming, like every other migration.
+   *
+   * The same for the old `lastRun` channel (krobi 2026-10-20): the last run is `history.latest`. Where the history
+   * already has the datapoint (program, duration of a laundry appliance), the old one goes and what hangs on it
+   * follows to the one that stays; the channel goes with its last datapoint.
    */
   async migrateHistoryRuns(): Promise<void> {
     try {
       const ns = this.port.namespace;
       const all = await this.port.getAdapterObjects();
+      const present = new Set(Object.keys(all));
+      const lastRunChannels = new Set<string>();
       let moved = 0;
       for (const [fullId, obj] of Object.entries(all)) {
-        const match = NUMBERED_HISTORY.exec(this.relId(fullId));
-        if (!match || !obj) {
+        const rel = this.relId(fullId);
+        const numbered = NUMBERED_HISTORY.exec(rel);
+        const last = numbered ? null : LAST_RUN_STATE.exec(rel);
+        if ((!numbered && !last) || !obj) {
           continue;
         }
-        const [, deviceId, kind, digits] = match;
-        const run = this.historyRun(Number(digits));
-        const toRel = `${deviceId}.${run.channel}.${kind}`;
+        const deviceId = numbered ? numbered[1] : (last?.[1] ?? "");
+        const run = this.historyRun(numbered ? Number(numbered[3]) : 1);
+        const leaf = numbered ? numbered[2] : (last?.[2] ?? "");
+        const toRel = `${deviceId}.${run.channel}.${leaf}`;
         const toFull = `${ns}.${toRel}`;
         await this.ensureHistoryFolder(deviceId);
         await this.port.extendObject(`${deviceId}.${run.channel}`, {
@@ -1869,25 +1885,35 @@ export class ApplianceSync {
           common: { name: run.label },
           native: {},
         });
-        const { object } = rewriteMovedObject(fullId, obj, fullId, toFull);
-        await this.port.setForeignObject(toFull, object);
-        const state = (await this.port.getForeignStates(fullId))[fullId];
-        if (state) {
-          await this.port.setForeignState(toFull, {
-            val: state.val,
-            ack: state.ack,
-            ...(typeof state.ts === "number" ? { ts: state.ts } : {}),
-            ...(typeof state.lc === "number" ? { lc: state.lc } : {}),
-            ...(typeof state.q === "number" ? { q: state.q } : {}),
-          });
+        if (last) {
+          lastRunChannels.add(`${deviceId}.lastRun`);
+        }
+        if (!present.has(toFull)) {
+          const { object } = rewriteMovedObject(fullId, obj, fullId, toFull);
+          await this.port.setForeignObject(toFull, object);
+          present.add(toFull);
+          const state = (await this.port.getForeignStates(fullId))[fullId];
+          if (state) {
+            await this.port.setForeignState(toFull, {
+              val: state.val,
+              ack: state.ack,
+              ...(typeof state.ts === "number" ? { ts: state.ts } : {}),
+              ...(typeof state.lc === "number" ? { lc: state.lc } : {}),
+              ...(typeof state.q === "number" ? { q: state.q } : {}),
+            });
+          }
         }
         await retargetAliases(
           await this.port.getAliases(),
           id => (id === fullId ? toFull : undefined),
           (id, alias) => this.port.setForeignObject(id, alias),
         );
-        await this.port.deleteTreeCarryingEnums(this.relId(fullId), new Map([[fullId, [toFull]]]));
+        await this.port.deleteTreeCarryingEnums(rel, new Map([[fullId, [toFull]]]));
         moved++;
+      }
+      for (const channel of lastRunChannels) {
+        await this.port.delObject(channel).catch(() => undefined);
+        this.forgetWritten(channel);
       }
       if (moved > 0) {
         this.port.log.info(`Moved ${moved} history datapoint(s) to named runs.`);
@@ -1985,7 +2011,14 @@ export class ApplianceSync {
           (value === null || value === undefined) && isRunValueKey(native.bshKey)
             ? runValueProbe((obj.common as Partial<ioBroker.StateCommon> | undefined)?.type)
             : value;
-        const expanded = expandBshItem({ key: native.bshKey, value: shape }, lockable);
+        let expanded = expandBshItem({ key: native.bshKey, value: shape }, lockable);
+        // A door that is already one of the pair of booleans (`status.doorOpen`, `status.doorLocked`) is renamed, not
+        // reshaped: each moves 1:1 to its own successor with what hangs on it. Before, both went to both, and an alias
+        // on the lock followed to `doors.door` (measured 2026-10-20 on a washer-dryer).
+        if (expanded.length > 1 && (obj.common as Partial<ioBroker.StateCommon> | undefined)?.type === "boolean") {
+          const wanted = parts.at(-1) === "doorLocked" ? "doorLocked" : "door";
+          expanded = expanded.filter(t => t.id === wanted);
+        }
         const oneToOne = expanded.length === 1;
         const targets = expanded.map(t => `${this.port.namespace}.${deviceId}.${t.channel}.${t.id}`);
         for (const t of expanded) {
@@ -3213,6 +3246,8 @@ export class ApplianceSync {
       // here as well cost every first start one extra object write per datapoint.
       if (!this.syncing.has(deviceId)) {
         await this.drawHistoryPrograms(deviceId);
+        // a summary that came before the list waited for it (summaryIsLatest) — it draws the newest run now
+        await this.drawLastRun(deviceId);
       }
     } else if (key === HISTORY_TIME_KEY) {
       const minutes = decodeHistoryMinutes(value);
@@ -3457,7 +3492,9 @@ export class ApplianceSync {
       return;
     }
     await this.ensureHistoryFolder(deviceId);
-    const states = this.programStates(deviceId, uids);
+    // The newest run's program is the same from the list and from a summary that speaks for that run (summaryIsLatest),
+    // with the same object — only its duration differs (drawHistoryDurations).
+    const states = this.historyStates(deviceId);
     for (const [i, uid] of uids.entries()) {
       const n = i + 1;
       const run = this.historyRun(n);
@@ -3500,8 +3537,12 @@ export class ApplianceSync {
     // Called right after a history that decoded to at least one run — the decoder never returns an empty list.
     const minutesList = this.records.get(deviceId)?.minutes ?? [];
     await this.ensureHistoryFolder(deviceId);
+    const summaryDraws = this.summaryIsLatest(deviceId);
     for (const [i, minutes] of minutesList.entries()) {
       const n = i + 1;
+      if (n === 1 && summaryDraws) {
+        continue; // the run summary draws the newest run's duration, in seconds (drawLastRun)
+      }
       const run = this.historyRun(n);
       await this.applyRecordState(
         deviceId,
@@ -3591,54 +3632,95 @@ export class ApplianceSync {
   }
 
   /**
-   * `lastRun.*` — the last finished run: program, start, end, duration.
+   * Whether the run summary speaks for the newest run of the history: always without a history list (a dishwasher
+   * sends only the summary), else when it names the program the list has newest. Summary and list come in one after
+   * the other at the end of a run; until both name the same run, each keeps to its own datapoints.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns whether the summary draws `history.latest`
+   */
+  private summaryIsLatest(deviceId: string): boolean {
+    const rec = this.records.get(deviceId);
+    if (!rec?.summary) {
+      return false;
+    }
+    return !rec.uids?.length || rec.uids[0] === rec.summary.programUid;
+  }
+
+  /**
+   * The program list of the history datapoints: every program the list and the summary name, so the program and
+   * duration of the newest run keep the same object whichever of the two drew them last.
+   *
+   * @param deviceId the id-safe device path segment
+   * @returns the value labels
+   */
+  private historyStates(deviceId: string): Record<string, string> {
+    const rec = this.records.get(deviceId);
+    const uids = [...(rec?.uids ?? [])];
+    if (rec?.summary && !uids.includes(rec.summary.programUid)) {
+      uids.push(rec.summary.programUid);
+    }
+    return this.programStates(deviceId, uids);
+  }
+
+  /**
+   * `history.latest.*` — the last finished run from the appliance's run summary (krobi 2026-10-20: the last run is
+   * part of the history): program, start, end, duration and, where the appliance reports them, its consumption and
+   * how it ended. The summary measures the duration in seconds, so it draws program and duration of the newest run;
+   * the history list draws them only while no summary speaks for that run.
    *
    * @param deviceId the id-safe device path segment
    */
   private async drawLastRun(deviceId: string): Promise<void> {
     const s = this.records.get(deviceId)?.summary;
-    if (!s) {
+    if (!s || !this.summaryIsLatest(deviceId)) {
       return;
     }
+    await this.ensureHistoryFolder(deviceId);
+    const run = this.historyRun(1);
     await this.applyRecordState(
       deviceId,
-      "lastRun",
+      run.channel,
       "program",
       {
-        name: tName("lrProgram"),
-        desc: tName("lrProgramDesc"),
+        name: tName(HISTORY_PROGRAM_NAMES[0]),
+        desc: tName("histProgramDesc"),
         type: "string",
         role: "text",
-        states: this.programStates(deviceId, [s.programUid]),
+        states: this.historyStates(deviceId),
       },
       this.programValue(deviceId, s.programUid),
+      run.label,
     );
     await this.applyRecordState(
       deviceId,
-      "lastRun",
+      run.channel,
       "start",
       { name: tName("lrStart"), desc: tName("lrStartDesc"), type: "number", role: "date.start" },
       s.start,
+      run.label,
     );
     await this.applyRecordState(
       deviceId,
-      "lastRun",
+      run.channel,
       "end",
       { name: tName("lrEnd"), desc: tName("lrEndDesc"), type: "number", role: "date.end" },
       s.end,
+      run.label,
     );
     await this.applyRecordState(
       deviceId,
-      "lastRun",
+      run.channel,
       "duration",
       {
-        name: tName("lrDuration"),
-        desc: tName("lrDurationDesc"),
+        name: tName(HISTORY_DURATION_NAMES[0]),
+        desc: tName("histDurationDesc"),
         type: "number",
         role: numberRole("min", false),
         unit: "min",
       },
       Math.round((s.end - s.start) / 60_000),
+      run.label,
     );
     // The run's own figures, where the appliance reports them (laundry appliances).
     const figures: Array<[string, number, I18nKey, I18nKey, string, string, (v: number) => number]> = [
@@ -3660,10 +3742,11 @@ export class ApplianceSync {
       if (v !== undefined) {
         await this.applyRecordState(
           deviceId,
-          "lastRun",
+          run.channel,
           id,
           { name: tName(name), desc: tName(desc), type: "number", role, unit },
           scale(v),
+          run.label,
         );
       }
     }
@@ -3673,7 +3756,7 @@ export class ApplianceSync {
       const lang = this.port.language ?? DEFAULT_LABEL_LANGUAGE;
       await this.applyRecordState(
         deviceId,
-        "lastRun",
+        run.channel,
         "endTrigger",
         {
           name: tName("lrEndTrigger"),

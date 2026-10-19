@@ -10,6 +10,7 @@ import type { LogLine, LogRing } from "./log-ring";
 import { Placeholders } from "./placeholders";
 import type { ReportBody, ReportSource, ReportSourceDevice } from "./report-jobs";
 import type { AccountTrail, ApplianceTrail, TrafficRecorder } from "./traffic-recorder";
+import { PROGRAMLESS_TYPES } from "../device-catalog";
 import { pieceNumber } from "../device-id";
 
 /** The resources the live read asks, in this order: a success between the two that answer 404 while idle. */
@@ -120,21 +121,24 @@ export interface TreeEntry {
 }
 
 /** The report body before the privacy pass. */
-export interface ReportContent {
+export interface HomeConnectReportContent {
   /** The installation: js-controller, language, settings. */
   environment: Record<string, unknown>;
   /** Sign-in, stream, rate pause, request budget. */
   adapterState: Record<string, unknown>;
   /** The appliance: ids, name, its object's native, what the sync knows. */
   appliance: Record<string, unknown>;
-  /** The live read's answers, or why there are none. */
-  live: { answers: LiveAnswer[] } | { note: string };
+  /**
+   * The live read's answers, or why it failed. Absent when the appliance was not connected — the frame says so
+   * (`connected`, `liveRead`), and a fixed sentence in every report says nothing (DB-14, krobi 2026-10-20).
+   */
+  live?: { answers: LiveAnswer[] } | { error: string };
   /** The appliance's recorded traffic. */
   traffic: ApplianceTrail;
   /** The account's recorded traffic. */
   account: AccountTrail;
   /** The appliance's datapoints. */
-  tree: TreeEntry[];
+  objectTree: TreeEntry[];
   /** The log lines about the appliance. */
   logs: LogLine[];
 }
@@ -179,8 +183,15 @@ export class HomeConnectReportSource implements ReportSource<LiveAnswer[]> {
       throw new Error(blocked);
     }
     const base = `/api/homeappliances/${encodeURIComponent(appliance.haId)}`;
+    // An appliance without programs answers every program path with 409, and every error answer counts towards Home
+    // Connect's limit of ten in ten minutes — the sync never asks them either (measured 2026-10-20 on a fridge-freezer).
+    const type = this.host.applianceState(id).type;
+    const paths =
+      typeof type === "string" && PROGRAMLESS_TYPES.has(type)
+        ? LIVE_PATHS.filter(path => !path.startsWith("/programs"))
+        : LIVE_PATHS;
     const answers: LiveAnswer[] = [];
-    for (const path of LIVE_PATHS) {
+    for (const path of paths) {
       const answer = await this.host.readRaw(`${base}${path}`);
       answers.push({ ...answer, path: path || "/" });
       if (answer.status === 0) {
@@ -214,7 +225,7 @@ export class HomeConnectReportSource implements ReportSource<LiveAnswer[]> {
       this.tree(prefix),
     ]);
     const others = appliances.filter(a => a.id !== id).flatMap(a => [a.id, a.haId, a.name ?? ""]);
-    const content: ReportContent = {
+    const content: HomeConnectReportContent = {
       environment: {
         jsController: (hostObject?.common as { installedVersion?: string } | undefined)?.installedVersion,
         systemLanguage: this.host.systemLanguage,
@@ -231,10 +242,10 @@ export class HomeConnectReportSource implements ReportSource<LiveAnswer[]> {
         native: deviceObject?.native ?? {},
         sync: this.host.applianceState(id),
       },
-      live: live ? { answers: live } : { note: liveError ?? "not connected — not read live" },
+      live: live ? { answers: live } : liveError !== undefined ? { error: liveError } : undefined,
       traffic,
       account: this.host.recorder.account(),
-      tree,
+      objectTree: tree,
       logs: this.host.logRing.about([id, appliance.haId, appliance.name ?? ""], others),
     };
     const places = this.placeholders(appliances, tree);
