@@ -11,9 +11,20 @@ describe("H-12 the sign-in panel is a React component inside the jsonConfig sett
       common: { adminUI?: { config?: string } };
     };
     expect(io.common.adminUI?.config).toBe("json");
-    const config = readFileSync(join(process.cwd(), "admin", "jsonConfig.json"), "utf8");
-    expect(config).toMatch(/"type":\s*"custom"/);
-    expect(config).toMatch(/"url":\s*"custom\/customComponents\.js"/);
+    const config: unknown = JSON.parse(readFileSync(join(process.cwd(), "admin", "jsonConfig.json"), "utf8"));
+    const panels: Array<Record<string, unknown>> = [];
+    const walk = (node: unknown): void => {
+      if (node !== null && typeof node === "object") {
+        const item = node as Record<string, unknown>;
+        if (item.type === "custom" && typeof item.name === "string" && item.name.endsWith("/Components/SignIn")) {
+          panels.push(item);
+        }
+        Object.values(item).forEach(walk);
+      }
+    };
+    walk(config);
+    expect(panels).toHaveLength(1);
+    expect(panels[0].url).toBe("custom/customComponents.js");
   });
 
   it("keeps the panel's source as React", () => {
