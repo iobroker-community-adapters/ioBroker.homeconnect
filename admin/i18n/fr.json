@@ -716,5 +716,7 @@
   "setIDos2Content": "Contenu i-Dos 2",
   "setIDos2ContentDesc": "Ce que contient le second doseur automatique : lessive ou adoucissant.",
   "setTheaterMode": "Éclairage progressif à la porte",
-  "setTheaterModeDesc": "L'éclairage intérieur s'allume et s'éteint progressivement à l'ouverture et à la fermeture de la porte."
+  "setTheaterModeDesc": "L'éclairage intérieur s'allume et s'éteint progressivement à l'ouverture et à la fermeture de la porte.",
+  "tabMain": "Configuration",
+  "tabExpert": "Expert"
 }

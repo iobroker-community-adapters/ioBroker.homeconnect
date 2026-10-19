@@ -716,5 +716,7 @@
   "setIDos2Content": "Contenuto i-Dos 2",
   "setIDos2ContentDesc": "Cosa contiene il secondo dosatore automatico: detersivo o ammorbidente.",
   "setTheaterMode": "Luce interna graduale allo sportello",
-  "setTheaterModeDesc": "La luce interna si accende e si spegne gradualmente all'apertura e chiusura dello sportello."
+  "setTheaterModeDesc": "La luce interna si accende e si spegne gradualmente all'apertura e chiusura dello sportello.",
+  "tabMain": "Configurazione",
+  "tabExpert": "Esperto"
 }

@@ -461,6 +461,12 @@ Home Connect grants 1000 requests per day per application and account, at most 5
 | A write does nothing                                                                         | The appliance permits no remote operation right now (`status.remoteControlActive`), or the program option does not belong to the selected program.                          |
 | Log says "SDK.Error.NoProgramActive"                                                         | That is the normal answer of an idle appliance, not an error — it is logged at debug level.                                                                                 |
 
+## Diagnostics report
+
+When an appliance does not do what it should, open the instance settings, tab **Expert**, pick the appliance and download its diagnostics report. It holds what Home Connect answered for this appliance (also a fresh read of its status, settings and programs while it is connected), the events of the live stream, the appliance's datapoints with their values and the adapter's recent log lines. Attach the file to an issue with the form **Report a device** — the card links to it.
+
+The report is made only when you ask for it, stays in memory until the download and writes nothing. Serial numbers, the names you gave your appliances and your sign-in data stand in it as placeholders.
+
 ## Support
 
 Questions, bug reports and ideas: [github.com/iobroker-community-adapters/ioBroker.homeconnect](https://github.com/iobroker-community-adapters/ioBroker.homeconnect).

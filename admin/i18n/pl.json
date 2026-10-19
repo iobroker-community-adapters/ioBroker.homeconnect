@@ -716,5 +716,7 @@
   "setIDos2Content": "Zawartość i-Dos 2",
   "setIDos2ContentDesc": "Co zawiera drugi automatyczny dozownik: detergent czy płyn do płukania.",
   "setTheaterMode": "Łagodne światło przy drzwiach",
-  "setTheaterModeDesc": "Oświetlenie wnętrza łagodnie rozjaśnia się i przygasa przy otwieraniu i zamykaniu drzwi."
+  "setTheaterModeDesc": "Oświetlenie wnętrza łagodnie rozjaśnia się i przygasa przy otwieraniu i zamykaniu drzwi.",
+  "tabMain": "Konfiguracja",
+  "tabExpert": "Ekspert"
 }

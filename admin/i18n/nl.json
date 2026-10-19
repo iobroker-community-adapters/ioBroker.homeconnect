@@ -716,5 +716,7 @@
   "setIDos2Content": "Inhoud i-Dos 2",
   "setIDos2ContentDesc": "Wat de tweede automatische doseerder bevat: wasmiddel of wasverzachter.",
   "setTheaterMode": "Binnenlicht dimt bij de deur",
-  "setTheaterModeDesc": "Het binnenlicht dimt op en af terwijl de deur opent en sluit."
+  "setTheaterModeDesc": "Het binnenlicht dimt op en af terwijl de deur opent en sluit.",
+  "tabMain": "Configuratie",
+  "tabExpert": "Expert"
 }

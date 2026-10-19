@@ -716,5 +716,7 @@
   "setIDos2Content": "i-Dos 2 内容",
   "setIDos2ContentDesc": "第二个自动投放器装的是什么：洗涤剂或柔顺剂。",
   "setTheaterMode": "开关门时内灯渐变",
-  "setTheaterModeDesc": "开关门时内灯逐渐亮起和熄灭。"
+  "setTheaterModeDesc": "开关门时内灯逐渐亮起和熄灭。",
+  "tabMain": "配置",
+  "tabExpert": "专家"
 }

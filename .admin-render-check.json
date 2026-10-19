@@ -1,5 +1,19 @@
 {
   "instance": "homeconnect.0",
-  "tab": "Sign",
-  "mountSelectors": ["[data-testid=\"hc-signin\"]"]
+  "targets": [
+    {
+      "name": "signin",
+      "tab": "Configuration|Konfiguration",
+      "mountSelectors": ["[data-testid=\"hc-signin\"]"]
+    },
+    {
+      "name": "diagnostics",
+      "tab": "Expert|Experte",
+      "mountSelectors": [
+        "[data-testid=\"diag-export\"]",
+        "[data-testid=\"diag-no-devices\"]",
+        "[data-testid=\"diag-list-failed\"]"
+      ]
+    }
+  ]
 }

@@ -716,5 +716,7 @@
   "setIDos2Content": "i-Dos 2 Inhalt",
   "setIDos2ContentDesc": "Was der zweite automatische Dosierer enthält: Waschmittel oder Weichspüler.",
   "setTheaterMode": "Innenlicht dimmt an der Tür",
-  "setTheaterModeDesc": "Das Innenlicht wird beim Öffnen und Schließen der Tür auf- und abgedimmt."
+  "setTheaterModeDesc": "Das Innenlicht wird beim Öffnen und Schließen der Tür auf- und abgedimmt.",
+  "tabMain": "Konfiguration",
+  "tabExpert": "Experte"
 }

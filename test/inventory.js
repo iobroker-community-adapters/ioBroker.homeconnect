@@ -429,7 +429,15 @@ const OUTAGE_SHOWN = { "info.connection": false };
  * serial numbers (DB-04, krobi 2026-09-22 19:42: the report keeps the privacy it promises). Each value stands in a fixture
  * file under test/ (B02 checks it), so the list cannot name something the run never sees.
  */
-const REPORT_PERSONAL = [];
+// homeconnect: the head of every fixture haId (SIEMENS-HCFIX<type>-0001 — the serial a real haId carries), the head of
+// every appliance name the user gave in the app ("Fixture <type>"), and the account's tokens and sign-in code.
+const REPORT_PERSONAL = [
+  "SIEMENS-HCFIX",
+  "Fixture ",
+  "FIXTURE-ACCESS-TOKEN",
+  "FIXTURE-REFRESH-TOKEN",
+  "FIXTURE-DEVICE-CODE",
+];
 
 /**
  * Round 104: adapter-specific like FIXTURE_NATIVE — the writable states (ids below the namespace) that are the adapter's

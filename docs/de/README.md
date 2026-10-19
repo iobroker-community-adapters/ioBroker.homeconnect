@@ -461,6 +461,12 @@ Home Connect gewährt 1000 Anfragen pro Tag je Anwendung und Konto, höchstens 5
 | Ein Schreibvorgang bewirkt nichts                                                            | Das Gerät lässt gerade keine Fernbedienung zu (`status.remoteControlActive`), oder die Option gehört nicht zum gewählten Programm.                                             |
 | Im Log steht „SDK.Error.NoProgramActive"                                                     | Das ist die normale Antwort eines untätigen Geräts, kein Fehler — sie wird auf Debug-Stufe protokolliert.                                                                      |
 
+## Diagnosebericht
+
+Tut ein Gerät nicht, was es soll: Instanz-Einstellungen öffnen, Reiter **Experte**, Gerät wählen und den Diagnosebericht herunterladen. Er enthält, was Home Connect für dieses Gerät geantwortet hat (bei einem verbundenen Gerät auch frisch gelesen: Status, Einstellungen und Programme), die Ereignisse des Live-Stroms, die Datenpunkte des Geräts mit ihren Werten und die letzten Logzeilen des Adapters. Die Datei an ein Issue mit dem Formular **Gerät melden** anhängen — die Karte verlinkt es.
+
+Der Bericht entsteht nur auf Anforderung, bleibt bis zum Herunterladen im Speicher und schreibt nichts. Seriennummern, die Namen deiner Geräte und deine Anmeldedaten stehen darin nur als Platzhalter.
+
 ## Unterstützung
 
 Fragen, Fehlerberichte und Ideen: [github.com/iobroker-community-adapters/ioBroker.homeconnect](https://github.com/iobroker-community-adapters/ioBroker.homeconnect).

@@ -823,6 +823,47 @@ export class ApplianceSync {
   }
 
   /**
+   * The appliances this run knows, for the diagnostics report — read only.
+   *
+   * @returns device id, haId, app name and last reachable value of each
+   */
+  reportAppliances(): Array<{ id: string; haId: string; name?: string; reachable: boolean }> {
+    return [...this.haIdByDeviceId].map(([id, haId]) => ({
+      id,
+      haId,
+      name: this.nameByDeviceId.get(id),
+      reachable: this.reachableByDeviceId.get(id) === true,
+    }));
+  }
+
+  /**
+   * What the sync holds about one appliance beyond its tree, for the diagnostics report — read only.
+   *
+   * @param deviceId the device id
+   * @returns the appliance's bookkeeping
+   */
+  reportState(deviceId: string): Record<string, unknown> {
+    const haId = this.haIdByDeviceId.get(deviceId) ?? "";
+    const own = (key: string): boolean => key.startsWith(`${deviceId}|`);
+    return {
+      type: this.typeByDeviceId.get(deviceId),
+      syncing: this.syncing.has(deviceId),
+      notReady: this.notReady.has(deviceId),
+      notReadyRetries: this.retryAttempts.get(deviceId) ?? 0,
+      unsupportedPrograms: [...(this.unsupportedPrograms.get(haId) ?? [])],
+      refusedDefinitions: [...this.failedDefs.keys()].filter(own).map(key => key.slice(deviceId.length + 1)),
+      definedPrograms: Object.keys(this.programDefs.get(deviceId) ?? {}),
+      definedSettings: Object.keys(this.settingDefs.get(deviceId) ?? {}),
+      optionGate: {
+        program: this.armedProgramByDeviceId.get(deviceId),
+        options: [...(this.optionKeys.get(deviceId) ?? [])],
+      },
+      runningProgram: this.runningProgram.get(deviceId),
+      atRest: this.atRest.has(deviceId),
+    };
+  }
+
+  /**
    * Strip the instance namespace off a full id (`homeconnect.0.dev.channel.state`
    * → `dev.channel.state`). Ids that already are relative pass through.
    *

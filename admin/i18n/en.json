@@ -716,5 +716,7 @@
   "setIDos2Content": "i-Dos 2 content",
   "setIDos2ContentDesc": "What the second automatic dispenser holds: detergent or softener.",
   "setTheaterMode": "Interior light fades at the door",
-  "setTheaterModeDesc": "The interior light fades up and down while the door opens and closes."
+  "setTheaterModeDesc": "The interior light fades up and down while the door opens and closes.",
+  "tabMain": "Configuration",
+  "tabExpert": "Expert"
 }

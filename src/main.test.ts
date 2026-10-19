@@ -23,7 +23,12 @@ vi.mock("@iobroker/adapter-core", async () => {
   const fill = (text: string, args: unknown[]): string =>
     args.reduce<string>((s, a) => s.replace("%s", String(a)), text);
   class Adapter {
-    public log = { silly: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    // The adapter hooks its diagnostics log ring onto these methods (LogRing.hook); the assignment is
+    // ignored here, so the spies stay what every test reads.
+    public log = new Proxy(
+      { silly: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      { set: () => true },
+    );
     public namespace = "homeconnect.0";
     public adapterDir = "/opt/iobroker/node_modules/iobroker.homeconnect";
     public language: string | undefined = undefined;
@@ -3051,5 +3056,162 @@ describe("Homeconnect writes an object only when it changes (tooling round 61)",
     await ctx.i.refreshManifestObjects();
     expect(extended(ctx)).toHaveLength(10);
     expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("Could not read the own objects"));
+  });
+});
+
+describe("Homeconnect diagnostics report", () => {
+  const HA = "SIEMENS-WN54C2A40-68A40E123456";
+
+  /**
+   * The adapter's own report parts, as the tests reach them.
+   *
+   * @param ctx the test context
+   * @returns the private members
+   */
+  const diag = (
+    ctx: Ctx,
+  ): {
+    readRaw(path: string): Promise<{ status: number; error?: string }>;
+    recorder: {
+      snapshot(haId: string): { rest: Array<{ content?: Record<string, unknown> }>; stream: unknown[] };
+      account(): { rest: Array<{ content?: Record<string, unknown> }>; stream: Array<{ content?: unknown }> };
+    };
+  } => ctx.i as never;
+
+  /**
+   * Signed in, stream up, one appliance reachable.
+   *
+   * @returns the test context
+   */
+  const ready = async (): Promise<Ctx> => {
+    const ctx = setup();
+    withSync(ctx, s => {
+      Object.assign(s, {
+        reportAppliances: vi.fn(() => [{ id: "wn54c2a40-3456", haId: HA, name: "Trockner", reachable: true }]),
+        reportState: vi.fn(() => ({ notReady: false })),
+      });
+    });
+    await ctx.i.onReady();
+    await ctx.auths[0].port.onSignedIn();
+    await (ctx.auths[0].port.setConnected as (c: boolean) => Promise<void>)(true);
+    ctx.streams[0].deps.onConnected(true as never);
+    return ctx;
+  };
+
+  it("answers the card: every appliance with its connection", async () => {
+    const ctx = await ready();
+    await ctx.i.onMessage({ command: "diagnostics", message: { action: "list" }, from: "admin", callback: {} });
+    expect(ctx.i.sendTo).toHaveBeenCalledWith(
+      "admin",
+      "diagnostics",
+      { devices: [{ value: "wn54c2a40-3456", label: "Trockner (wn54c2a40-3456)", connected: true }] },
+      {},
+    );
+    ctx.streams[0].deps.onConnected(false as never);
+    await ctx.i.onMessage({ command: "diagnostics", message: { action: "list" }, from: "admin", callback: {} });
+    expect(ctx.i.sendTo).toHaveBeenLastCalledWith(
+      "admin",
+      "diagnostics",
+      { devices: [{ value: "wn54c2a40-3456", label: "Trockner (wn54c2a40-3456)", connected: false }] },
+      {},
+    );
+  });
+
+  it("records every REST answer and stream event for the report — never a token", async () => {
+    const ctx = await ready();
+    httpMock.getJson.mockResolvedValue(okResult({ status: [] }));
+    await ctx.i.apiGet(`/api/homeappliances/${HA}/status`);
+    ctx.streams[0].deps.onEvent({ event: "STATUS", data: JSON.stringify({ haId: HA, items: [] }), id: HA } as never);
+    const trail = diag(ctx).recorder.snapshot(HA);
+    expect(trail.rest[0].content).toEqual({
+      method: "GET",
+      path: `/api/homeappliances/${HA}/status`,
+      status: 200,
+      data: { status: [] },
+    });
+    expect(trail.stream).toHaveLength(1);
+    expect(JSON.stringify(diag(ctx).recorder.account())).not.toContain("AT");
+  });
+
+  it("records a sign-in endpoint by its status and code only", async () => {
+    const ctx = await ready();
+    httpMock.postForm.mockResolvedValue({
+      status: 400,
+      ok: false,
+      body: { error: "invalid_grant", access_token: "SECRET" },
+    });
+    await (ctx.i as unknown as { sendForm(p: string, f: Record<string, string>): Promise<unknown> }).sendForm(
+      "/security/oauth/token",
+      {},
+    );
+    const account = JSON.stringify(diag(ctx).recorder.account());
+    expect(account).toContain("invalid_grant");
+    expect(account).not.toContain("SECRET");
+  });
+
+  it("the live read tells the sync nothing — no re-read after 'not ready', no refused booking", async () => {
+    const ctx = await ready();
+    httpMock.getJson.mockResolvedValueOnce(
+      failResult(409, { error: "SDK.Error.HomeAppliance.Connection.Initialization.Failed" }),
+    );
+    await diag(ctx).readRaw(`/api/homeappliances/${HA}/status`);
+    httpMock.getJson.mockResolvedValueOnce(failResult(403));
+    await diag(ctx).readRaw(`/api/homeappliances/${HA}/programs/available/X`);
+    expect(ctx.syncs[0].noteNotReady).not.toHaveBeenCalled();
+    expect(ctx.syncs[0].noteRefused).not.toHaveBeenCalled();
+    expect(diag(ctx).recorder.snapshot(HA).rest).toEqual([]);
+  });
+
+  it("the live read sends nothing while Home Connect blocks requests", async () => {
+    const ctx = await ready();
+    ctx.i.restBlockedUntil = Date.now() + 60_000;
+    httpMock.getJson.mockClear();
+    await expect(diag(ctx).readRaw(`/api/homeappliances/${HA}/status`)).resolves.toMatchObject({ status: 0 });
+    expect(httpMock.getJson).not.toHaveBeenCalled();
+  });
+
+  it("records a write with what it sent", async () => {
+    const ctx = await ready();
+    httpMock.putJson.mockResolvedValue(failResult(409, { error: "SDK.Error.WrongOperationState" }));
+    await ctx.i.apiWrite({ method: "PUT", path: `/api/homeappliances/${HA}/settings/X`, body: { key: "X", value: 1 } });
+    const recorder = diag(ctx).recorder as unknown as {
+      snapshot(haId: string): { writes: Array<{ content?: Record<string, unknown> }> };
+    };
+    expect(recorder.snapshot(HA).writes[0].content).toMatchObject({
+      method: "PUT",
+      status: 409,
+      error: "SDK.Error.WrongOperationState",
+      body: { key: "X", value: 1 },
+    });
+  });
+
+  it("says why no live read may go out — shutdown, no sign-in, rate pause, error streak", async () => {
+    const ctx = await ready();
+    const host = (): { liveReadBlocked(): string | undefined; secrets(): string[] } =>
+      (
+        ctx.i as unknown as { reportHost(): { liveReadBlocked(): string | undefined; secrets(): string[] } }
+      ).reportHost();
+    expect(host().liveReadBlocked()).toBeUndefined();
+    (ctx.i as unknown as { errorStreak: number }).errorStreak = 8;
+    expect(host().liveReadBlocked()).toMatch(/8 error answers in a row/);
+    (ctx.i as unknown as { errorStreak: number }).errorStreak = 0;
+    ctx.i.restBlockedUntil = Date.now() + 40_000;
+    expect(host().liveReadBlocked()).toMatch(/blocks requests for another 4\d s/);
+    ctx.i.restBlockedUntil = 0;
+    ctx.auths[0].accessToken = undefined;
+    expect(host().liveReadBlocked()).toBe("not signed in to Home Connect");
+  });
+
+  it("hands the report every secret it must blank — token, client id and secret", async () => {
+    const ctx = await ready();
+    const secrets = (ctx.i as unknown as { reportHost(): { secrets(): string[] } }).reportHost().secrets();
+    expect(secrets).toEqual(expect.arrayContaining(["AT", CLIENT_ID, "sec"]));
+  });
+
+  it("a 429 during the live read pauses every request like any other 429", async () => {
+    const ctx = await ready();
+    httpMock.getJson.mockResolvedValueOnce(failResult(429, { retryAfterMs: 30_000 }));
+    await diag(ctx).readRaw(`/api/homeappliances/${HA}/status`);
+    expect(ctx.i.restBlockedUntil).toBeGreaterThan(Date.now() + 20_000);
   });
 });

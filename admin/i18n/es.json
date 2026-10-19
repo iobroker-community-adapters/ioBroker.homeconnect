@@ -716,5 +716,7 @@
   "setIDos2Content": "Contenido i-Dos 2",
   "setIDos2ContentDesc": "Qué contiene el segundo dosificador automático: detergente o suavizante.",
   "setTheaterMode": "Luz interior gradual en la puerta",
-  "setTheaterModeDesc": "La luz interior se enciende y apaga gradualmente al abrir y cerrar la puerta."
+  "setTheaterModeDesc": "La luz interior se enciende y apaga gradualmente al abrir y cerrar la puerta.",
+  "tabMain": "Configuración",
+  "tabExpert": "Experto"
 }

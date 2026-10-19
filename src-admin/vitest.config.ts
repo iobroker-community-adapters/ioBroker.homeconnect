@@ -7,5 +7,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.test.{ts,tsx}"],
+    // vitest 5's default, written out so vitest 4 behaves the same: every mock's calls are cleared before each test — a
+    // test that passes only by reading a call an earlier test made is red on every version (round 128).
+    clearMocks: true,
   },
 });

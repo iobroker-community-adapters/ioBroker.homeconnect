@@ -19,6 +19,10 @@ import { declaredLimit } from "./lib/api-limits";
 import { readSentTimes, writeSentTimes } from "./lib/request-budget";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import { tText, type I18nKey } from "./lib/i18n";
+import { LogRing } from "./lib/diagnostics/log-ring";
+import { ReportJobs } from "./lib/diagnostics/report-jobs";
+import { HomeConnectReportSource, type LiveAnswer, type ReportHost } from "./lib/diagnostics/report-source";
+import { TrafficRecorder } from "./lib/diagnostics/traffic-recorder";
 
 /** Production API host (global EU/US region; China would be api.home-connect.cn). */
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
@@ -218,6 +222,14 @@ export class Homeconnect extends utils.Adapter {
   private lastReconnectSync = 0;
   /** The deferred outage re-read, while one is waiting out the cooldown. */
   private resyncTimer: ioBroker.Timeout | undefined;
+  /** When this run started — the diagnostics report says it. */
+  private readonly startedAt = Date.now();
+  /** The adapter's last log lines at every level — what a diagnostics report shows of the past. */
+  private readonly logRing = new LogRing();
+  /** Every answer Home Connect gave, per appliance and for the account, for the diagnostics report (memory only). */
+  private readonly recorder = new TrafficRecorder();
+  /** Answers the admin's diagnostics card (list the appliances, read one and hand back its report). */
+  private readonly diagnostics = new ReportJobs(new HomeConnectReportSource(this.reportHost()));
 
   /**
    * @param options adapter options passed through by js-controller
@@ -239,6 +251,8 @@ export class Homeconnect extends utils.Adapter {
       // Translated texts (object names, connection test answers) come from admin/i18n. First, before anything can
       // translate: js-controller delivers messages before onReady has finished, so the message handler comes after.
       await I18n.init(join(this.adapterDir, "admin"), this);
+      // From here on the diagnostics report's log ring hears every line, debug included.
+      this.logRing.hook(this.log);
       this.on("message", this.onMessage.bind(this));
       // Obsolete instance keys are nulled once; that write restarts the instance, so this
       // run stops here and the next one starts with the cleaned settings.
@@ -487,6 +501,9 @@ export class Homeconnect extends utils.Adapter {
       };
     }
     const res = await postForm(DEFAULT_BASE_URL, path, form);
+    // the body carries the tokens — the report gets the status and the OAuth code only
+    const code = isRecord(res.body) && typeof res.body.error === "string" ? res.body.error : undefined;
+    this.recorder.token(path, res.status, code);
     if (res.status === 429) {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
     }
@@ -832,8 +849,12 @@ export class Homeconnect extends utils.Adapter {
     this.eventStream = this.makeEventStream({
       baseUrl: DEFAULT_BASE_URL,
       getAccessToken: () => this.authCtl?.accessToken,
-      onEvent: ev => this.sync?.handleStreamEvent(ev),
+      onEvent: ev => {
+        this.recorder.stream(ev);
+        this.sync?.handleStreamEvent(ev);
+      },
       onConnected: (connected, quietSince) => {
+        this.recorder.streamState(connected ? "opened" : "lost", connected ? undefined : this.eventStream?.lastError);
         this.streamUp = connected;
         void this.publishConnection();
         this.noteStreamState(connected, quietSince);
@@ -976,6 +997,13 @@ export class Homeconnect extends utils.Adapter {
    */
   private async onMessage(obj: ioBroker.Message): Promise<void> {
     try {
+      if (obj.command === "diagnostics") {
+        const answer = await this.diagnostics.handle(obj.message);
+        if (obj.callback) {
+          this.sendTo(obj.from, obj.command, answer as Record<string, unknown>, obj.callback);
+        }
+        return;
+      }
       if (obj.command === "checkConnection") {
         const answer = await this.checkConnection();
         if (obj.callback) {
@@ -1041,6 +1069,7 @@ export class Homeconnect extends utils.Adapter {
       }
     }
     this.countAnswer(res);
+    this.record("GET", "/api/homeappliances", res);
     if (res.status === 429) {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
       return { error: tText("ctRateLimited", rateLimitText(res.description, res.retryAfterMs)) };
@@ -1072,6 +1101,149 @@ export class Homeconnect extends utils.Adapter {
   }
 
   /**
+   * Keep one REST answer for the diagnostics report.
+   *
+   * @param method the HTTP method
+   * @param path the request path
+   * @param res the answer
+   * @param body what a write sent
+   */
+  private record(method: string, path: string, res: JsonResult, body?: unknown): void {
+    this.recorder.rest({
+      method,
+      path,
+      status: res.status,
+      ...(res.data !== undefined ? { data: res.data } : {}),
+      ...(res.error !== undefined ? { error: res.error } : {}),
+      ...(res.description !== undefined ? { description: res.description } : {}),
+      ...(body !== undefined ? { body } : {}),
+    });
+  }
+
+  /**
+   * GET one resource for the diagnostics report's live read: through the request budget, the 401 refresh and the 429
+   * pause like every request, but without a word to the sync (no "not ready" re-read, no refused-definition booking)
+   * and without a log line of the REST dedup — a report changes nothing in the adapter (DB-02).
+   *
+   * @param path the request path
+   * @returns the answer; status 0 when none came or no request could go out
+   */
+  private async readRaw(path: string): Promise<LiveAnswer> {
+    const token = this.authCtl?.accessToken;
+    if (this.terminating || !token || Date.now() < this.restBlockedUntil || !(await this.spaceRequests())) {
+      return { path, status: 0, error: "no request went out" };
+    }
+    let res = await getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage());
+    if (res.status === 401) {
+      const fresh = await this.tokenAfter401(token);
+      if (fresh && (await this.spaceRequests())) {
+        res = await getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage());
+      }
+    }
+    this.countAnswer(res);
+    if (res.status === 429) {
+      this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
+    }
+    return {
+      path,
+      status: res.status,
+      ...(res.data !== undefined ? { data: res.data } : {}),
+      ...(res.error !== undefined ? { error: res.error } : {}),
+      ...(res.description !== undefined ? { description: res.description } : {}),
+    };
+  }
+
+  /**
+   * What the diagnostics report reads of this adapter — live, so a report shows the state of the moment. Built in the
+   * constructor, so everything that js-controller gives the adapter later (log, host, version) is read when asked.
+   *
+   * @returns the host surface
+   */
+  private reportHost(): ReportHost {
+    const adapter = this;
+    return {
+      get namespace() {
+        return adapter.namespace;
+      },
+      get version() {
+        return adapter.version ?? "unknown";
+      },
+      get hostName() {
+        return adapter.host ?? "";
+      },
+      get systemLanguage() {
+        return adapter.systemLanguage;
+      },
+      get log() {
+        return adapter.log;
+      },
+      startedAt: this.startedAt,
+      logRing: this.logRing,
+      recorder: this.recorder,
+      appliances: () =>
+        (this.sync?.reportAppliances() ?? []).map(a => ({
+          id: a.id,
+          haId: a.haId,
+          name: a.name,
+          connected: a.reachable && this.signedIn && this.streamUp,
+        })),
+      config: () => ({
+        clientIdSet: typeof this.config.clientID === "string" && this.config.clientID.trim().length > 0,
+        clientIdForm: looksLikeClientId(String(this.config.clientID ?? "").trim()),
+        clientSecretSet: typeof this.config.clientSecret === "string" && this.config.clientSecret.length > 0,
+      }),
+      adapterState: () => {
+        const now = Date.now();
+        return {
+          signedIn: this.signedIn,
+          streamUp: this.streamUp,
+          streamEverUp: this.streamEverUp,
+          streamDownSince:
+            this.streamDownSince !== undefined ? new Date(this.streamDownSince).toISOString() : undefined,
+          streamLastError: this.eventStream?.lastError,
+          restPausedForS: this.restBlockedUntil > now ? Math.ceil((this.restBlockedUntil - now) / 1000) : 0,
+          requestsLastMinute: this.sentAt.filter(t => now - t < 60_000).length,
+          errorStreak: this.errorStreak,
+          lastReconnectSync: this.lastReconnectSync > 0 ? new Date(this.lastReconnectSync).toISOString() : undefined,
+          signInLastError: this.stateMirror.held("auth.lastError")?.val,
+        };
+      },
+      applianceState: id => this.sync?.reportState(id) ?? {},
+      secrets: () => {
+        const link = this.stateMirror.held("auth.verificationUrl")?.val;
+        const userCode = typeof link === "string" ? /[?&](?:user_)?code=([^&]+)/.exec(link)?.[1] : undefined;
+        return [
+          this.authCtl?.accessToken ?? "",
+          String(this.config.clientID ?? ""),
+          String(this.config.clientSecret ?? ""),
+          typeof link === "string" ? link : "",
+          userCode ?? "",
+        ];
+      },
+      liveReadBlocked: () => {
+        const now = Date.now();
+        if (this.terminating) {
+          return "the adapter is shutting down";
+        }
+        if (!this.authCtl?.accessToken) {
+          return "not signed in to Home Connect";
+        }
+        if (this.restBlockedUntil > now) {
+          return `Home Connect blocks requests for another ${Math.ceil((this.restBlockedUntil - now) / 1000)} s`;
+        }
+        if (this.errorStreak >= ERROR_STREAK_LIMIT) {
+          return `${this.errorStreak} error answers in a row — requests wait (Home Connect blocks after 10)`;
+        }
+        return undefined;
+      },
+      readRaw: path => this.readRaw(path),
+      getForeignObjectAsync: id => this.getForeignObjectAsync(id),
+      getForeignStatesAsync: pattern => this.getForeignStatesAsync(pattern),
+      getObjectViewAsync: (design, search, params) => this.getObjectViewAsync(design, search, params),
+    };
+  }
+
+  /**
    * GET a Home Connect resource with the current access token. Retries once after
    * a 401 (token refreshed), honours a 429 Retry-After pause, and dedups failure
    * logging (first per category → warn, repeats → debug, recovery → info).
@@ -1100,6 +1272,7 @@ export class Homeconnect extends utils.Adapter {
       }
     }
     this.countAnswer(res);
+    this.record("GET", path, res);
     if (!res.ok) {
       // An expected answer ("no program active", "busy") is appliance state, not
       // a failure — it never warns. It IS proof that the endpoint answers, so it
@@ -1184,6 +1357,7 @@ export class Homeconnect extends utils.Adapter {
       }
     }
     this.countAnswer(res);
+    this.record(req.method, req.path, res, req.body);
     if (res.ok) {
       this.restLog.recovered(restLogKey(source), `${source} succeeded.`);
     } else {

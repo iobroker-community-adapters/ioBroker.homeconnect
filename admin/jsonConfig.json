@@ -1,140 +1,171 @@
 {
   "i18n": true,
-  "type": "panel",
+  "type": "tabs",
   "items": {
-    "_headerCredentials": {
-      "type": "header",
-      "text": "headerCredentials",
-      "size": 3
+    "_main": {
+      "type": "panel",
+      "label": "tabMain",
+      "items": {
+        "_headerCredentials": {
+          "type": "header",
+          "text": "headerCredentials",
+          "size": 3
+        },
+        "_credentialsInfo": {
+          "type": "staticText",
+          "text": "credentialsInfo",
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12,
+          "style": {
+            "fontSize": 14,
+            "marginBottom": 16,
+            "whiteSpace": "pre-line"
+          }
+        },
+        "_registerLink": {
+          "type": "staticLink",
+          "href": "https://developer.home-connect.com/user/register",
+          "label": "registerButton",
+          "button": true,
+          "variant": "outlined",
+          "color": "primary",
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 3,
+          "xl": 3
+        },
+        "_addAppLink": {
+          "type": "staticLink",
+          "href": "https://developer.home-connect.com/applications/add",
+          "label": "addAppButton",
+          "button": true,
+          "variant": "outlined",
+          "color": "primary",
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 3,
+          "xl": 3
+        },
+        "_portalLink": {
+          "type": "staticLink",
+          "href": "https://developer.home-connect.com/applications",
+          "label": "portalButton",
+          "button": true,
+          "variant": "outlined",
+          "color": "primary",
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 3,
+          "xl": 3
+        },
+        "clientID": {
+          "type": "text",
+          "label": "label_clientId",
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 8,
+          "lg": 6,
+          "xl": 6
+        },
+        "clientSecret": {
+          "type": "password",
+          "label": "label_clientSecret",
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 8,
+          "lg": 6,
+          "xl": 6
+        },
+        "_headerSignin": {
+          "type": "header",
+          "text": "headerSignin",
+          "size": 5,
+          "newLine": true
+        },
+        "_signin": {
+          "type": "custom",
+          "i18n": true,
+          "url": "custom/customComponents.js",
+          "name": "HomeConnectComponentSet/Components/SignIn",
+          "guiApi": 2,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
+        },
+        "_supportHeader": {
+          "newLine": true,
+          "type": "header",
+          "text": "supportHeader",
+          "size": 5
+        },
+        "_aboutInfo": {
+          "type": "staticText",
+          "text": "aboutInfo",
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12,
+          "style": {
+            "fontSize": 14,
+            "marginBottom": 16
+          }
+        },
+        "_kofiLink": {
+          "type": "staticLink",
+          "href": "https://ko-fi.com/krobipd",
+          "label": "donateKofi",
+          "button": true,
+          "variant": "outlined",
+          "color": "primary",
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 4,
+          "xl": 4
+        },
+        "_paypalLink": {
+          "type": "staticLink",
+          "href": "https://paypal.me/krobipd",
+          "label": "donatePaypal",
+          "button": true,
+          "variant": "outlined",
+          "color": "primary",
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 4,
+          "xl": 4
+        }
+      }
     },
-    "_credentialsInfo": {
-      "type": "staticText",
-      "text": "credentialsInfo",
-      "xs": 12,
-      "sm": 12,
-      "md": 12,
-      "lg": 12,
-      "xl": 12,
-      "style": { "fontSize": 14, "marginBottom": 16, "whiteSpace": "pre-line" }
-    },
-    "_registerLink": {
-      "type": "staticLink",
-      "href": "https://developer.home-connect.com/user/register",
-      "label": "registerButton",
-      "button": true,
-      "variant": "outlined",
-      "color": "primary",
-      "xs": 12,
-      "sm": 6,
-      "md": 4,
-      "lg": 3,
-      "xl": 3
-    },
-    "_addAppLink": {
-      "type": "staticLink",
-      "href": "https://developer.home-connect.com/applications/add",
-      "label": "addAppButton",
-      "button": true,
-      "variant": "outlined",
-      "color": "primary",
-      "xs": 12,
-      "sm": 6,
-      "md": 4,
-      "lg": 3,
-      "xl": 3
-    },
-    "_portalLink": {
-      "type": "staticLink",
-      "href": "https://developer.home-connect.com/applications",
-      "label": "portalButton",
-      "button": true,
-      "variant": "outlined",
-      "color": "primary",
-      "xs": 12,
-      "sm": 6,
-      "md": 4,
-      "lg": 3,
-      "xl": 3
-    },
-    "clientID": {
-      "type": "text",
-      "label": "label_clientId",
-      "newLine": true,
-      "xs": 12,
-      "sm": 12,
-      "md": 8,
-      "lg": 6,
-      "xl": 6
-    },
-    "clientSecret": {
-      "type": "password",
-      "label": "label_clientSecret",
-      "newLine": true,
-      "xs": 12,
-      "sm": 12,
-      "md": 8,
-      "lg": 6,
-      "xl": 6
-    },
-    "_headerSignin": {
-      "type": "header",
-      "text": "headerSignin",
-      "size": 5,
-      "newLine": true
-    },
-    "_signin": {
-      "type": "custom",
-      "i18n": true,
-      "url": "custom/customComponents.js",
-      "name": "HomeConnectComponentSet/Components/SignIn",
-      "guiApi": 2,
-      "xs": 12,
-      "sm": 12,
-      "md": 12,
-      "lg": 12,
-      "xl": 12
-    },
-    "_supportHeader": {
-      "newLine": true,
-      "type": "header",
-      "text": "supportHeader",
-      "size": 5
-    },
-    "_aboutInfo": {
-      "type": "staticText",
-      "text": "aboutInfo",
-      "xs": 12,
-      "sm": 12,
-      "md": 12,
-      "lg": 12,
-      "xl": 12,
-      "style": { "fontSize": 14, "marginBottom": 16 }
-    },
-    "_kofiLink": {
-      "type": "staticLink",
-      "href": "https://ko-fi.com/krobipd",
-      "label": "donateKofi",
-      "button": true,
-      "variant": "outlined",
-      "color": "primary",
-      "xs": 12,
-      "sm": 6,
-      "md": 4,
-      "lg": 4,
-      "xl": 4
-    },
-    "_paypalLink": {
-      "type": "staticLink",
-      "href": "https://paypal.me/krobipd",
-      "label": "donatePaypal",
-      "button": true,
-      "variant": "outlined",
-      "color": "primary",
-      "xs": 12,
-      "sm": 6,
-      "md": 4,
-      "lg": 4,
-      "xl": 4
+    "_expert": {
+      "type": "panel",
+      "label": "tabExpert",
+      "items": {
+        "_diagnosticsPanel": {
+          "type": "custom",
+          "i18n": true,
+          "url": "custom/customComponents.js",
+          "name": "HomeConnectComponentSet/Components/DiagnosticsConfig",
+          "guiApi": 2,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
+        }
+      }
     }
   }
 }

@@ -902,6 +902,26 @@ describe("ApplianceSync.handleStreamEvent", () => {
   });
 });
 
+describe("ApplianceSync report accessors", () => {
+  it("lists each appliance with its haId, name and reachability, and what the sync holds about it", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-ON", "Oven", { status: [] });
+    appliance(port, "HA-OFF", "Washer", { status: [], connected: false });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const list = sync.reportAppliances().sort((a, b) => a.id.localeCompare(b.id));
+    expect(list.map(a => [a.id, a.haId, a.name, a.reachable])).toEqual([
+      ["oven-on", "HA-ON", "Oven", true],
+      ["washer-off", "HA-OFF", "Washer", false],
+    ]);
+    sync.noteUnsupportedProgram("/api/homeappliances/HA-ON/programs/available/Cooking.Oven.Program.X");
+    expect(sync.reportState("oven-on")).toMatchObject({
+      type: "Dishwasher",
+      unsupportedPrograms: ["Cooking.Oven.Program.X"],
+    });
+  });
+});
+
 describe("ApplianceSync reachability", () => {
   it("creates info.reachable from the appliance list's connected flag", async () => {
     const port = new FakePort();
