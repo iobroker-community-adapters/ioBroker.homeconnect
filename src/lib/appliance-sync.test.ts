@@ -8691,6 +8691,26 @@ describe("ApplianceSync: every event and every door is a datapoint of one channe
     expect(port.objects.get("fridge.events.doorAlarmFreezer")?.type).toBe("state");
   });
 
+  it("keeps the 1:1 door rule to doors — a moved run flag (operation state) still finds its place", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.wd`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-W", type: "WasherDryer" },
+      } as unknown as ioBroker.Object,
+    };
+    port.primeStates = {
+      [`${NS}.wd.misc.programRunning`]: boolean("Running", "indicator.working", "BSH.Common.Status.OperationState"),
+    };
+    seed(port);
+    port.states.set("wd.misc.programRunning", true);
+    await new ApplianceSync(port).migrateRenamedStates();
+    expect(port.objects.get("wd.status.programRunning")?.type).toBe("state");
+    expect(port.objects.has("wd.misc.programRunning")).toBe(false);
+  });
+
   it("moves each door boolean of a lockable door to its own successor, 1:1, with recording and alias", async () => {
     // Measured 2026-10-20 on a washer-dryer: both status booleans went to both door datapoints, the lock's alias
     // followed to `doors.door` and no recording came along.

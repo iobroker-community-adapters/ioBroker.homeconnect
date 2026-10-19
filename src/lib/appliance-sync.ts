@@ -2015,7 +2015,11 @@ export class ApplianceSync {
         // A door that is already one of the pair of booleans (`status.doorOpen`, `status.doorLocked`) is renamed, not
         // reshaped: each moves 1:1 to its own successor with what hangs on it. Before, both went to both, and an alias
         // on the lock followed to `doors.door` (measured 2026-10-20 on a washer-dryer).
-        if (expanded.length > 1 && (obj.common as Partial<ioBroker.StateCommon> | undefined)?.type === "boolean") {
+        if (
+          expanded.length > 1 &&
+          isDoorStatusKey(native.bshKey) &&
+          (obj.common as Partial<ioBroker.StateCommon> | undefined)?.type === "boolean"
+        ) {
           const wanted = parts.at(-1) === "doorLocked" ? "doorLocked" : "door";
           expanded = expanded.filter(t => t.id === wanted);
         }
