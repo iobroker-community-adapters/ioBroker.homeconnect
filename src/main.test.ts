@@ -194,9 +194,12 @@ vi.mock("./lib/http", async importOriginal => ({
   rateLimitText: (await importOriginal<{ rateLimitText: typeof rateLimitText }>()).rateLimitText,
 }));
 
-import { Homeconnect } from "./main";
+import * as mainModule from "./main";
 import type { JsonResult, rateLimitText } from "./lib/http";
 import type { WriteRequest } from "./lib/command-dispatch";
+
+// main.ts exports nothing by name (compact mode needs a callable module.exports); the class rides on the factory.
+const { Homeconnect } = mainModule as unknown as { Homeconnect: new () => ioBroker.Adapter };
 
 const okResult = (data: unknown = { fine: true }): JsonResult => ({
   status: 200,
@@ -255,7 +258,7 @@ interface FakeStream {
  *
  * @param adapter Adapter instance under test
  */
-function internalOf(adapter: Homeconnect): {
+function internalOf(adapter: ioBroker.Adapter): {
   onReady(): Promise<void>;
   onUnload(cb: () => void): void;
   onStateChange(id: string, state: unknown): void;

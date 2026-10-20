@@ -140,7 +140,7 @@ const NOT_READY_ANSWERS = new Set(["SDK.Error.HomeAppliance.Connection.Initializ
  * appliance's own number, speaking state ids below), a single live event stream, and a
  * write path that turns state changes back into Home Connect commands.
  */
-export class Homeconnect extends utils.Adapter {
+class Homeconnect extends utils.Adapter {
   // Construction seams for the three collaborators. Production uses the real
   // classes; the orchestration tests swap them for fakes so onReady's wiring, the
   // REST paths and the teardown are testable without a network. Behaviour is
@@ -1661,8 +1661,11 @@ export class Homeconnect extends utils.Adapter {
 }
 
 if (require.main !== module) {
-  // Export the constructor in compact mode
-  module.exports = (options: Partial<utils.AdapterOptions> | undefined) => new Homeconnect(options);
+  // Export the constructor in compact mode; the class rides on the factory for the tests (an `export` keyword next to
+  // `module.exports` makes esbuild warn commonjs-variable-in-esm)
+  module.exports = Object.assign((options: Partial<utils.AdapterOptions> | undefined) => new Homeconnect(options), {
+    Homeconnect,
+  });
 } else {
   // Start the instance directly
   (() => new Homeconnect())();
