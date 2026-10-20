@@ -269,6 +269,15 @@ const LIMIT_ACCOUNT_TYPES = JSON.parse(fs.readFileSync(path.join(__dirname, "fix
 function accountSize() {
   return counting ? LIMIT_ACCOUNT_TYPES.length : APPLIANCE_COUNT;
 }
+
+/**
+ * The appliances that come online in this run: the account's, less the one the fixture hook lists as not connected
+ * while the fleet suite "one device gone while the channel lives" sets INVENTORY_DROP_DEVICE. Counting the whole account
+ * there left both waits in their deadline (Werkbank, round 132, measured 2026-10-20).
+ */
+function onlineTarget() {
+  return accountSize() - (process.env.INVENTORY_DROP_DEVICE === "1" ? 1 : 0);
+}
 // The flag that makes the fixture hook list one more appliance, whose model is `info` (feedReservedNames). The adapter
 // keeps it once set up, so the waits count at least every fixture appliance.
 const RESERVED_FLAG = path.join(RESOURCE_DIR, "reserved-names");
@@ -286,11 +295,11 @@ async function waitForEveryAppliance(harness) {
   const deadline = Date.now() + 300000;
   for (;;) {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
-    if (online && online.val >= accountSize()) {
+    if (online && online.val >= onlineTarget()) {
       break;
     }
     if (Date.now() > deadline) {
-      throw new Error(`only ${online ? online.val : 0} of ${accountSize()} appliances came online in this run`);
+      throw new Error(`only ${online ? online.val : 0} of ${onlineTarget()} appliances came online in this run`);
     }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
@@ -351,12 +360,12 @@ async function waitForAdapterWork(harness) {
   for (;;) {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
     const connection = await harness.states.getStateAsync(`${NS}info.connection`);
-    if (online && online.val >= accountSize() && connection && connection.val === true) {
+    if (online && online.val >= onlineTarget() && connection && connection.val === true) {
       return;
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `no completed start chain — ${online ? online.val : 0} of ${accountSize()} appliances online, ` +
+        `no completed start chain — ${online ? online.val : 0} of ${onlineTarget()} appliances online, ` +
           `connection ${connection ? connection.val : "unset"}`,
       );
     }
