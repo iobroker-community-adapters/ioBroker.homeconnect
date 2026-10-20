@@ -345,12 +345,12 @@ const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
 /**
- * A stand-in value of a stored value type — it gives a value-less run value its shape when it moves (decision 49).
+ * A stand-in value of a stored value type — it gives a value-less datapoint its shape when it moves (decision 49).
  *
  * @param type the stored `common.type`
  * @returns a value of that type, or undefined for any other
  */
-function runValueProbe(type: unknown): ioBroker.StateValue | undefined {
+function valueProbe(type: unknown): ioBroker.StateValue | undefined {
   return type === "number" ? 0 : type === "boolean" ? false : type === "string" ? "" : undefined;
 }
 /** The three counters of a program's statistics and their names. */
@@ -2005,11 +2005,13 @@ export class ApplianceSync {
           isDoorStatusKey(native.bshKey) && typeof oldValue === "string"
             ? `BSH.Common.EnumType.DoorState.${oldValue.charAt(0).toUpperCase()}${oldValue.slice(1)}`
             : oldValue;
-        // A run value leaving `options` often has no value (emptied at rest, decision 48): its shape comes from the
-        // stored type then, or the move would turn a number into text. The probe only shapes — it is never written.
+        // A datapoint without a value — a run value emptied at rest (decision 48), a counter or flag never reported yet —
+        // takes its shape from the stored type, or the move would turn a number into text and leave its recording
+        // behind (upgrade from 1.25.2: 18 counters and flags into `counters`/`run`). A door keeps its own folding above.
+        // The probe only shapes — it is never written.
         const shape =
-          (value === null || value === undefined) && isRunValueKey(native.bshKey)
-            ? runValueProbe((obj.common as Partial<ioBroker.StateCommon> | undefined)?.type)
+          (value === null || value === undefined) && !isDoorStatusKey(native.bshKey)
+            ? valueProbe((obj.common as Partial<ioBroker.StateCommon> | undefined)?.type)
             : value;
         let expanded = expandBshItem({ key: native.bshKey, value: shape }, lockable);
         // A door that is already one of the pair of booleans (`status.doorOpen`, `status.doorLocked`) is renamed, not

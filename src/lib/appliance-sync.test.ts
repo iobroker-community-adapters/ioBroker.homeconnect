@@ -8538,6 +8538,71 @@ describe("run values the cloud delivers as options (decision 49)", () => {
     expect(phase.states).not.toHaveProperty("x");
   });
 
+  it("moves a counter and a status flag without a value to their new channel with type and recording", async () => {
+    const port = new FakePort();
+    port.primeDevices = {
+      [`${NS}.coffee`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-C", type: "CoffeeMaker" },
+      } as unknown as ioBroker.Object,
+      [`${NS}.dish`]: {
+        _id: "",
+        type: "device",
+        common: {},
+        native: { haId: "HA-D", type: "Dishwasher" },
+      } as unknown as ioBroker.Object,
+    };
+    // Never reported yet: the datapoint exists, its value does not (measured in the upgrade from 1.25.2, 18 of them).
+    port.primeStates = {
+      [`${NS}.coffee.status.beverageCounterCoffee`]: {
+        _id: "",
+        type: "state",
+        common: {
+          name: "Coffee",
+          type: "number",
+          role: "value",
+          read: true,
+          write: false,
+          custom: { "influxdb.0": { enabled: true } },
+        },
+        native: { bshKey: "ConsumerProducts.CoffeeMaker.Status.BeverageCounterCoffee" },
+      } as unknown as ioBroker.Object,
+      [`${NS}.dish.status.ecoDryActive`]: {
+        _id: "",
+        type: "state",
+        common: {
+          name: "Eco dry",
+          type: "boolean",
+          role: "indicator",
+          read: true,
+          write: false,
+          custom: { "history.0": { enabled: true } },
+        },
+        native: { bshKey: "Dishcare.Dishwasher.Status.EcoDryActive" },
+      } as unknown as ioBroker.Object,
+    };
+    for (const [fullId, obj] of Object.entries(port.primeStates)) {
+      port.objects.set(fullId.slice(`${NS}.`.length), obj);
+    }
+    const sync = new ApplianceSync(port);
+    await sync.migrateRenamedStates();
+
+    const counter = port.objects.get("coffee.counters.beverageCounterCoffee")?.common as ioBroker.StateCommon;
+    expect(counter.type).toBe("number");
+    expect(counter.custom).toMatchObject({
+      "influxdb.0": { enabled: true, aliasId: `${NS}.coffee.status.beverageCounterCoffee` },
+    });
+    expect(port.objects.has("coffee.status.beverageCounterCoffee")).toBe(false);
+    const flag = port.objects.get("dish.run.ecoDryActive")?.common as ioBroker.StateCommon;
+    expect(flag.type).toBe("boolean");
+    expect(flag.custom).toMatchObject({ "history.0": { enabled: true, aliasId: `${NS}.dish.status.ecoDryActive` } });
+    // The shape only decides the type — no value is made up.
+    expect(port.states.has("coffee.counters.beverageCounterCoffee")).toBe(false);
+    expect(port.states.has("dish.run.ecoDryActive")).toBe(false);
+  });
+
   it("keeps a streamed run value on its plain short value, like the option it was", async () => {
     const port = new FakePort();
     port.primeDevices = {
