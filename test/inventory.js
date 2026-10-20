@@ -2581,6 +2581,12 @@ tests.integration(ADAPTER_DIR, {
               if (node === null || typeof node !== "object") {
                 return;
               }
+              // a pointer onceEach wrote is no block: a block the file repeats twice leaves two equal pointers
+              // to its first place (round 132, govee 2026-10-20)
+              const keys = Object.keys(node);
+              if (keys.length === 1 && keys[0] === "sameAs" && typeof node.sameAs === "string") {
+                return;
+              }
               const text = JSON.stringify(node);
               const first = seen.get(text);
               if (first !== undefined && JSON.stringify({ sameAs: first }).length < text.length) {

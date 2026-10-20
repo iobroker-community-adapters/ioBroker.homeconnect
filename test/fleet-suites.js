@@ -14,7 +14,8 @@
 //                                       255.255.255.255, and every own address it names to others is the chosen one
 //                                       (network hook, section 8 — the records of every suite before count too)
 //   (in the same start)                D3 the connection test answers `result` while the counterpart is there and `error` while it
-//                                       is cut — a test that answers from memory says `result` both times
+//                                       is cut — a test that answers from memory says `result` both times; a throttled
+//                                       test declares its spacing (`spacingMs`), the suite waits it between the two
 //   "answers in the system language"    D14 the same cut test in the second system language answers in other words
 //   "a group switch reports its balance" D12 a group switch in the admin settings (krobi 2026-10-16: not a datapoint)
 //                                       flipped: one balance line when datapoints came or went, none when nothing changed
@@ -28,7 +29,8 @@
 //                                       clean start · D21 after a 429 with retry-after 60 no call to that host before
 //                                       the minute is up · D21 under a series of errors (a 500 to every answer) the calls
 //                                       to a host get fewer from minute to minute
-//   "one device gone while the channel lives" D6 the fixture drops one device: only that one shows unreachable
+//   "one device gone while the channel lives" D6 one device stays in the account's list and stops answering: only
+//                                       that one goes unreachable (a marker already down before counts not)
 //   "every call to a hung counterpart ends" D21 a start with every counterpart hung, held past the deadline: every
 //                                       call that hung — there and in the hang suites of the template — ended within
 //                                       the deadline while its process lived
@@ -108,6 +110,33 @@ function readDeclarations(adapterDir) {
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// D3 (round 132, govee 2026-10-20: a second test within 30 s answers from its throttle): the spacing an adapter
+// declares between two real connection tests. It only makes the suite wait — a spacing shorter than the throttle
+// leaves the cut test answered from the throttle, and D3 stays red. The cap only bounds a run against a wrong value
+// (two minutes, four times the longest throttle measured); a longer throttle is a question for the Werkbank.
+const SPACING_CAP_MS = 120000;
+function spacingOf(test) {
+  const spacing = test.spacingMs ?? 0;
+  assert.ok(
+    Number.isInteger(spacing) && spacing >= 0 && spacing <= SPACING_CAP_MS,
+    `fleet.json suites.connectionTest.spacingMs is a whole number of milliseconds from 0 to ${SPACING_CAP_MS}`,
+  );
+  return spacing;
+}
+
+// D6 (round 132, govee 2026-10-20): the markers that went to their stopped value with the drop — one that showed it
+// before the drop says nothing about the dropped device.
+function newlyDown(markers, before, after) {
+  return markers.filter(([id, off]) => after[id]?.val === off && before[id]?.val !== off).map(([id]) => id);
+}
+// D6: the markers that showed their device reachable before the drop — the suite needs two, or no other device could
+// wrongly go down with the dropped one.
+function upBefore(markers, before) {
+  return markers
+    .filter(([id, off]) => before[id]?.val !== undefined && before[id]?.val !== null && before[id]?.val !== off)
+    .map(([id]) => id);
+}
 
 module.exports = function fleetSuites(suite, ctx) {
   const {
@@ -280,7 +309,6 @@ module.exports = function fleetSuites(suite, ctx) {
     });
 
     it("answers result while its counterpart is there and error while it is cut (D3)", async function () {
-      this.timeout(2 * ANSWER_MS + 10000);
       const test = declared("connectionTest");
       if (test === null) {
         return;
@@ -293,7 +321,10 @@ module.exports = function fleetSuites(suite, ctx) {
         NET.length > 0,
         "fleet.json suites.connectionTest declares a test, but the adapter carries no test/network-hook.js to cut its counterpart",
       );
+      const spacing = spacingOf(test);
+      this.timeout(2 * ANSWER_MS + 10000 + spacing);
       const there = await ask(harness, test.command, test.message ?? {});
+      await sleep(spacing);
       let cut;
       fs.writeFileSync(OUTAGE_FLAG, "");
       try {
@@ -815,7 +846,7 @@ module.exports = function fleetSuites(suite, ctx) {
       assert.strictEqual(
         drop,
         true,
-        "fleet.json suites.dropDevice is true (the fixture hooks honour INVENTORY_DROP_DEVICE=1) or { none }",
+        "fleet.json suites.dropDevice is true (with INVENTORY_DROP_DEVICE=1 the fixture hooks keep one device listed and let it answer nothing) or { none }",
       );
       harness = getHarness();
       await start(harness, FIRST_LANGUAGE);
@@ -825,6 +856,7 @@ module.exports = function fleetSuites(suite, ctx) {
           ([id, o]) => o.type === "state" && String(o.common?.role ?? "") in STOPPED && id !== `${NS}info.connection`,
         )
         .map(([id, o]) => [id, STOPPED[o.common.role]]);
+      const before = await dumpStates(harness);
       process.env[DROP_DEVICE_SWITCH] = "1";
       try {
         await restartAsTheHost(harness, null, "for the dropped device");
@@ -836,9 +868,9 @@ module.exports = function fleetSuites(suite, ctx) {
       }
       const states = await dumpStates(harness);
       const live = await dumpObjects(harness);
-      const down = markers.filter(([id, off]) => states[id]?.val === off).map(([id]) => id);
+      const down = newlyDown(markers, before, states);
       verdict = {
-        markers: markers.length,
+        reachable: upBefore(markers, before).length,
         down,
         deleted: Object.keys(objects).filter(id => !(id in live)),
         connection: states[`${NS}info.connection`]?.val,
@@ -853,13 +885,13 @@ module.exports = function fleetSuites(suite, ctx) {
         return;
       }
       assert.ok(
-        verdict.markers >= 2,
-        "fewer than two devices with a reachability marker — dropDevice needs a fixture with two",
+        verdict.reachable >= 2,
+        "fewer than two devices reachable before the drop — dropDevice needs a fixture with two (one recorded offline counts not)",
       );
       assert.strictEqual(
         verdict.down.length,
         1,
-        `devices shown unreachable after one was dropped: ${verdict.down.join(", ") || "none"}`,
+        `devices that went unreachable with the drop (the dropped one must be reachable before it): ${verdict.down.join(", ") || "none"}`,
       );
       assert.deepStrictEqual(
         verdict.deleted,
@@ -975,3 +1007,6 @@ module.exports = function fleetSuites(suite, ctx) {
     });
   });
 };
+module.exports.spacingOf = spacingOf;
+module.exports.newlyDown = newlyDown;
+module.exports.upBefore = upBefore;
