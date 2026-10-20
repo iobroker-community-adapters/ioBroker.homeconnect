@@ -1009,6 +1009,15 @@ describe("Homeconnect rate limiting", () => {
       await vi.advanceTimersByTimeAsync(400);
       expect(httpMock.getJson).toHaveBeenCalledTimes(20);
       await Promise.all(quick);
+      // Set but empty: ignored too — an empty variable is no gap of 0 ms.
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "");
+      httpMock.getJson.mockClear();
+      const empty = Array.from({ length: 10 }, (_, n) => ctx.i.apiGet(`/api/e${n}`));
+      await vi.advanceTimersByTimeAsync(450);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.all(empty);
       // Widened: ignored — the 100 ms gap stays the floor (10 requests per second at most).
       await vi.advanceTimersByTimeAsync(1_000);
       vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "500");
