@@ -4,9 +4,19 @@ import { forgetLastTab } from "./tabMemory";
 const TABS = ["_main", "_expert"];
 
 describe("forgetLastTab", () => {
+  // jsdom keeps the page's own storage in `window._localStorage` under vitest 5, the name the admin uses for its
+  // server-synced storage: a test that stands in for the admin puts its object there, so the original value goes back
+  // afterwards. Deleting it left `localStorage` without methods for every later test of the file (govee 2026-10-20).
+  const page = window as unknown as { _localStorage?: unknown };
+  const original = page._localStorage;
   afterEach(() => {
-    delete (window as unknown as { _localStorage?: unknown })._localStorage;
+    page._localStorage = original;
     localStorage.clear();
+  });
+
+  it("stands in for the admin before the page storage is used, and leaves it working", () => {
+    page._localStorage = { getItem: () => null, removeItem: () => undefined };
+    expect(() => forgetLastTab("demo.0", TABS)).not.toThrow();
   });
 
   it("removes this adapter's remembered tab, and nothing else", () => {
@@ -25,7 +35,7 @@ describe("forgetLastTab", () => {
 
   it("works with the admin's server-synced storage, which cannot be enumerated", () => {
     const store: Record<string, string> = { "App.demo": "_expert", "Other.demo": "_expert" };
-    (window as unknown as { _localStorage: unknown })._localStorage = {
+    page._localStorage = {
       getItem: (k: string) => store[k] ?? null,
       removeItem: (k: string) => delete store[k],
     };
@@ -35,7 +45,7 @@ describe("forgetLastTab", () => {
 
   it("skips an index the storage has no key or no value for", () => {
     const store: Record<string, string> = { "App.demo": "_expert" };
-    (window as unknown as { _localStorage: unknown })._localStorage = {
+    page._localStorage = {
       length: 2,
       key: (i: number) => [null, "Gone.demo"][i],
       getItem: (k: string) => store[k] ?? null,
@@ -52,7 +62,7 @@ describe("forgetLastTab", () => {
   });
 
   it("gives up quietly when the storage is blocked", () => {
-    (window as unknown as { _localStorage: unknown })._localStorage = {
+    page._localStorage = {
       getItem: () => {
         throw new Error("blocked");
       },
