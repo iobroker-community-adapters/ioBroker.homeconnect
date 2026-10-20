@@ -13,7 +13,7 @@
     "@iobroker/eslint-config": "^2.3.4",
     "@iobroker/gui-components": "^10.0.5",
     "@iobroker/json-config": "^10.0.2",
-    "@module-federation/vite": "1.19.1",
+    "@module-federation/vite": "1.23.5",
     "@mui/icons-material": "^9.2.0",
     "@mui/material": "^9.2.0",
     "@testing-library/jest-dom": "^6.9.1",

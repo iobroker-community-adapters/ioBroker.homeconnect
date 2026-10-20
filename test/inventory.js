@@ -1224,9 +1224,15 @@ async function playCommands(harness) {
   harness.on("stateChange", acknowledged);
   try {
     for (const obj of writable) {
-      const val = commandValue(obj.common, (await harness.states.getStateAsync(obj._id))?.val ?? null);
+      const now = (await harness.states.getStateAsync(obj._id))?.val ?? null;
+      const val = commandValue(obj.common, now);
       if (val !== null) {
-        run.writes.push({ id: obj._id, val, t: Date.now() });
+        // round 134: a list whose only entry is the current one offers no command; D10 still hands the
+        // write to stateChange, the confirmation leaves it out (until round 133 it got no write at all)
+        const list = obj.common.states;
+        const sole =
+          typeof list === "object" && list !== null && Object.keys(list).length > 0 && String(val) === String(now);
+        run.writes.push({ id: obj._id, val, t: Date.now(), sole });
         await harness.states.setStateAsync(obj._id, { val, ack: false });
       }
     }
@@ -2198,10 +2204,12 @@ tests.integration(ADAPTER_DIR, {
         // round 104: every writable state is judged, not only the ones whose call carried the command as its cause
         // (a queue started before the command loses it — yamaha 11 of 436); nothing answers, so no `ack: true` but
         // for a state LOCAL_STATES names as the adapter's own setting, and (round 107) for a state SEND_CONFIRMED
-        // grants whose command went out without waiting for an answer
+        // grants whose command went out without waiting for an answer; (round 134) a write that offers no other
+        // entry of its list and reached no counterpart is no command
         const local = new Set(LOCAL_STATES.map(id => `${NS}${id}`));
+        const idle = w => w.sole && !command.calls.some(c => c.cause === w.id);
         const confirmed = command.writes
-          .filter(w => !local.has(w.id) && !sentWithoutAnswer(command, w.id))
+          .filter(w => !idle(w) && !local.has(w.id) && !sentWithoutAnswer(command, w.id))
           .filter(w => command.acks.some(([id, ts]) => id === w.id && ts >= w.t))
           .map(w => `${w.id} = ${JSON.stringify(w.val)}`);
         assert.deepStrictEqual(

@@ -5,6 +5,17 @@ import { federation } from "@module-federation/vite";
 import { moduleFederationShared } from "@iobroker/gui-components/modulefederation.admin.config";
 import { readFileSync } from "node:fs";
 
+// The admin provides each of these modules itself (eager, one copy for every component), so the component takes them
+// from the admin and bundles no fallback of its own: a fallback the admin never loads, megabytes per package, that
+// vite reports as a chunk over its size limit. `import: false` needs a federation plugin whose export scan accepts a
+// trailing comma in an export list (the gui-components entry has them; CLAUDE_ADMIN_UI.md names the pin).
+const shared = Object.fromEntries(
+  Object.entries(moduleFederationShared(JSON.parse(readFileSync("./package.json").toString()))).map(([pkg, cfg]) => [
+    pkg,
+    { ...cfg, import: false as const },
+  ]),
+);
+
 const config = {
   plugins: [
     federation({
@@ -19,7 +30,7 @@ const config = {
         "./Components": "./src/Components.tsx",
       },
       remotes: {},
-      shared: moduleFederationShared(JSON.parse(readFileSync("./package.json").toString())),
+      shared,
     }),
     react(),
   ],
