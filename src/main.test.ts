@@ -996,6 +996,32 @@ describe("Homeconnect rate limiting", () => {
     }
   });
 
+  it("lets the fixture environment narrow the request gap, never widen it", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValue(okResult());
+    try {
+      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "100000");
+      // Narrowed (the inventory run's pacing hook): 20 requests fit into 400 ms at a 20 ms gap.
+      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "20");
+      httpMock.getJson.mockClear();
+      const quick = Array.from({ length: 20 }, (_, n) => ctx.i.apiGet(`/api/q${n}`));
+      await vi.advanceTimersByTimeAsync(400);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(20);
+      await Promise.all(quick);
+      // Widened: ignored — the 100 ms gap stays the floor (10 requests per second at most).
+      await vi.advanceTimersByTimeAsync(1_000);
+      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "500");
+      httpMock.getJson.mockClear();
+      const slow = Array.from({ length: 10 }, (_, n) => ctx.i.apiGet(`/api/s${n}`));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await Promise.all(slow);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("puts a user's write before the reads that wait for their place", async () => {
     const ctx = setup();
     await ctx.i.onReady();

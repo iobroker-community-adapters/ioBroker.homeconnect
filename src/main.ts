@@ -38,6 +38,19 @@ const RATE_PAUSE_FALLBACK_MS = 60_000;
  */
 const MIN_REQUEST_GAP_MS = 100;
 /**
+ * The gap in force: {@link MIN_REQUEST_GAP_MS}, narrowed only by `HOMECONNECT_REQUEST_GAP_MS` — which the inventory
+ * run's pacing hook sets next to the budget (`test/inventory-pacing-hook.cjs`, never in the installations its limit tests
+ * judge): over a thousand fixture requests at 100 ms are a cold start of two minutes, the suites give one 120 s. The
+ * variable can only narrow the gap, never widen it.
+ *
+ * @returns milliseconds between two requests
+ */
+function requestGapMs(): number {
+  const raw = process.env.HOMECONNECT_REQUEST_GAP_MS;
+  const narrowed = raw ? Number(raw) : NaN;
+  return Number.isInteger(narrowed) && narrowed >= 0 && narrowed < MIN_REQUEST_GAP_MS ? narrowed : MIN_REQUEST_GAP_MS;
+}
+/**
  * Home Connect allows 50 requests per minute per application and account and blocks further ones for a minute
  * (api-docs → Rate Limiting, declared in src/lib/api-limits.json). A first read with empty definition caches — the update from 1.x — asks dozens of
  * requests per appliance; the transport holds every request to this budget, the event stream's connect included.
@@ -1456,7 +1469,7 @@ class Homeconnect extends utils.Adapter {
         const now = Date.now();
         this.sentAt = this.sentAt.filter(at => now - at < 60_000);
         const budgetWait = this.sentAt.length >= requestsPerMinute() ? this.sentAt[0] + 60_000 - now : 0;
-        const wait = Math.max(this.lastSentAt + MIN_REQUEST_GAP_MS - now, budgetWait);
+        const wait = Math.max(this.lastSentAt + requestGapMs() - now, budgetWait);
         if (budgetWait > 0 && !this.budgetNoted) {
           this.budgetNoted = true;
           this.log.info(
