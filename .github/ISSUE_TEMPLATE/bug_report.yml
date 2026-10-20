@@ -33,7 +33,7 @@ body:
     id: jscontroller-version
     attributes:
       label: js-controller-Version / js-controller version
-      placeholder: "z. B. 7.2.2 / e.g. 7.2.2"
+      placeholder: "Admin → Hosts / Admin → Hosts"
     validations:
       required: true
 
@@ -41,7 +41,7 @@ body:
     id: admin-version
     attributes:
       label: Admin-Version / Admin version
-      placeholder: "z. B. 8.0.11 / e.g. 8.0.11"
+      placeholder: "oben links neben dem Logo / top left next to the logo"
     validations:
       required: true
 
