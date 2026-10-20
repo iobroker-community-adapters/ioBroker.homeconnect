@@ -177,6 +177,8 @@ class Homeconnect extends utils.Adapter {
    * the state on every call).
    */
   private readonly stateMirror = new StateMirror();
+  /** The start has read its own objects and states: from here on a marker write compares in memory. */
+  private ownStatesRead = false;
   /** Send times of the requests within the last minute (see {@link REQUESTS_PER_MINUTE}). */
   private sentAt: number[] = [];
   /** Where the send times of the last minute outlive a restart (request-budget.ts); empty until onReady knows it. */
@@ -263,6 +265,7 @@ class Homeconnect extends utils.Adapter {
       // write is compared against them.
       await this.readOwnObjects();
       await this.readOwnStates();
+      this.ownStatesRead = true;
       // Before the first request: the minute a previous process spent still counts — Home Connect counts per account.
       this.takeOverRequestBudget();
       // Whatever goes offline at a stop goes offline at the start too: after a
@@ -1623,12 +1626,17 @@ class Homeconnect extends utils.Adapter {
       // `true` after every signed-in stop and the sign-in panel reported
       // "signed in" for an instance that was not running. Same rule as the
       // appliance markers: whatever is set at runtime is reset on the way out.
-      const writes: Promise<unknown>[] = [
-        this.setStateIfChanged("info.connection", { val: false, ack: true }),
-        this.setStateIfChanged("auth.signedIn", { val: false, ack: true }),
-        // Off: nothing to report (the fleet's reason-text rule) — the next start asks again.
-        this.setStateIfChanged("auth.lastError", { val: "Unknown", ack: true }),
-      ];
+      // A stop before the start read its own states (a host restart in the first moments) set no marker — the start
+      // writes them only after that read, and the next start does it again. Writing them here would read each one back
+      // from the database, because the mirrors know nothing yet (inventory run 2026-10-20: three single reads).
+      const writes: Promise<unknown>[] = this.ownStatesRead
+        ? [
+            this.setStateIfChanged("info.connection", { val: false, ack: true }),
+            this.setStateIfChanged("auth.signedIn", { val: false, ack: true }),
+            // Off: nothing to report (the fleet's reason-text rule) — the next start asks again.
+            this.setStateIfChanged("auth.lastError", { val: "Unknown", ack: true }),
+          ]
+        : [];
       // A rotated refresh token the object database refused earlier gets its last
       // chance here: Home Connect kills the previous one the moment it hands out
       // a new one, so losing it costs the user a fresh device-flow sign-in.

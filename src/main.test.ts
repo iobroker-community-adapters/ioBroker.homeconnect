@@ -1448,6 +1448,15 @@ describe("Homeconnect onUnload", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
+  it("writes no marker on a stop before the start read its own states", async () => {
+    const ctx = setup();
+    await new Promise<void>(resolve => ctx.i.onUnload(() => resolve()));
+    // The mirrors know nothing yet: each marker write would have read its state back from the database.
+    const markers = ["info.connection", "auth.signedIn", "auth.lastError"];
+    const touched = [...ctx.i.setStateChangedAsync.mock.calls, ...ctx.i.setState.mock.calls].map(([id]) => id);
+    expect(touched.filter(id => markers.includes(id as string))).toEqual([]);
+  });
+
   it("stops the still-running start-up chain: no REST, no late event stream", async () => {
     const ctx = setup();
     await ctx.i.onReady();
