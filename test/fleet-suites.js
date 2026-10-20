@@ -137,6 +137,12 @@ function upBefore(markers, before) {
     .filter(([id, off]) => before[id]?.val !== undefined && before[id]?.val !== null && before[id]?.val !== off)
     .map(([id]) => id);
 }
+// D11 (round 133, govee CI 39408072351): when each state was last written — the template's dumpStates carries val and ack
+// only, so D11 read no time, counted no data and was red for every adapter whose data kept arriving.
+async function stampsOf(harness, ids) {
+  const values = await harness.states.getStates(ids);
+  return Object.fromEntries(ids.map((id, i) => [id, values[i]?.ts]));
+}
 
 module.exports = function fleetSuites(suite, ctx) {
   const {
@@ -600,6 +606,7 @@ module.exports = function fleetSuites(suite, ctx) {
         await sleep(QUIET_WINDOW_MS);
         const objects = await dumpObjects(harness);
         const states = await dumpStates(harness);
+        const stamps = await stampsOf(harness, Object.keys(states));
         const connection = states[`${NS}info.connection`];
         // data = a value the counterpart sent: a state outside the manifest and outside info, written in this start with
         // ack and not its default
@@ -609,7 +616,7 @@ module.exports = function fleetSuites(suite, ctx) {
             !id.startsWith(`${NS}info.`) &&
             !manifestIds.has(id) &&
             s?.ack === true &&
-            s.ts >= since &&
+            stamps[id] >= since &&
             !EMPTY.has(s.val) &&
             s.val !== objects[id]?.common?.def,
         );
@@ -1010,3 +1017,4 @@ module.exports = function fleetSuites(suite, ctx) {
 module.exports.spacingOf = spacingOf;
 module.exports.newlyDown = newlyDown;
 module.exports.upBefore = upBefore;
+module.exports.stampsOf = stampsOf;

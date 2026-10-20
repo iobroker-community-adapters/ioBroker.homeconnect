@@ -1162,8 +1162,10 @@ function limitSlack(calls, counterparts) {
 
 /**
  * Round 101 (krobi 2026-10-07 15:54): a value the adapter can be told for a writable state — another entry of `states`,
- * the other boolean (a button: a press), a number inside min/max other than now, another colour, the current text; null
- * where none exists (the state gets no command).
+ * the other boolean (a button: a press), a number inside min/max other than now, another colour, the current text.
+ * Round 133 (govee CI 39408072351): every writable state gets one — D10 demands that each reaches the adapter's stateChange,
+ * and null left 36 govee states without a command (an empty text, a list holding only the current key, min = max); then
+ * the same key or number again, a colour or "command" for an empty text, the current value or an empty JSON otherwise.
  *
  * @param {Record<string, any>} common the state's common
  * @param {any} now its value now
@@ -1171,11 +1173,10 @@ function limitSlack(calls, counterparts) {
 function commandValue(common, now) {
   if (common.states && typeof common.states === "object") {
     const keys = Array.isArray(common.states) ? common.states.map(String) : Object.keys(common.states);
-    const next = keys.find(k => k !== String(now));
-    if (next === undefined) {
-      return null;
+    if (keys.length > 0) {
+      const next = keys.find(k => k !== String(now)) ?? keys[0];
+      return common.type === "number" ? Number(next) : common.type === "boolean" ? next === "true" : next;
     }
-    return common.type === "number" ? Number(next) : common.type === "boolean" ? next === "true" : next;
   }
   if (common.type === "boolean") {
     return String(common.role ?? "").startsWith("button") ? true : now !== true;
@@ -1184,13 +1185,21 @@ function commandValue(common, now) {
     const min = typeof common.min === "number" ? common.min : 0;
     const max = typeof common.max === "number" ? common.max : min + 100;
     const step = typeof common.step === "number" && common.step > 0 ? common.step : 1;
-    const pick = now === min ? Math.min(max, min + step) : min;
-    return pick === now ? null : pick;
+    return now === min ? Math.min(max, min + step) : min;
   }
-  if (common.type === "string" && typeof now === "string" && now !== "") {
-    return /^#[0-9a-f]{6}$/i.test(now) ? (now.toLowerCase() === "#123456" ? "#654321" : "#123456") : now;
+  if (common.type === "string") {
+    if (typeof now === "string" && /^#[0-9a-f]{6}$/i.test(now)) {
+      return now.toLowerCase() === "#123456" ? "#654321" : "#123456";
+    }
+    if (typeof now === "string" && now !== "") {
+      return now;
+    }
+    return String(common.role ?? "").includes("color") ? "#123456" : "command";
   }
-  return null;
+  if (now !== null && now !== undefined) {
+    return now;
+  }
+  return common.type === "array" ? "[]" : common.type === "json" || common.type === "object" ? "{}" : "command";
 }
 
 /**
@@ -2596,7 +2605,9 @@ tests.integration(ADAPTER_DIR, {
               if (first === undefined) {
                 seen.set(text, pointer);
               }
-              Object.entries(node).forEach(([key, item]) => walk(item, `${pointer}/${key}`));
+              Object.entries(node).forEach(([key, item]) =>
+                walk(item, `${pointer}/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`),
+              );
             };
             walk(JSON.parse(answer?.content ?? "{}"), "");
             return found;

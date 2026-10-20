@@ -173,7 +173,12 @@ let hangNext = false;
 // the listen record below is patched (no record), so the adapter's own timeouts — connect, TLS, request — run as with a
 // real device.
 let blackHole = 0;
-const hole = net.createServer(socket => socket.on("error", () => {}));
+// Round 133 (govee CI 39408072351, D21 "never ended"): the hole reads and drops what it gets — a socket it never read kept
+// the client's half-close unconsumed, so neither side ever closed and the adapter's own hung call never ended either.
+const hole = net.createServer(socket => {
+  socket.on("error", () => {});
+  socket.resume();
+});
 hole.listen(0, "127.0.0.1", () => {
   blackHole = hole.address().port;
 });
@@ -554,7 +559,9 @@ net.Server.prototype.listen = recordListen;
 // Incoming TCP: a counterpart that connects to a server of the adapter.
 const serverEmit = net.Server.prototype.emit;
 function cutServerEmit(event, ...args) {
-  if (event === "connection" && args[0] instanceof net.Socket) {
+  // round 133: the black hole's own side of a hung call is no connection of the adapter — tracked, `*` silenced it as a
+  // hang of the client's ephemeral port that never ended
+  if (event === "connection" && args[0] instanceof net.Socket && this !== hole) {
     if (down()) {
       args[0].destroy();
       return false;
