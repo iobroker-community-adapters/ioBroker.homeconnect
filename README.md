@@ -26,7 +26,7 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 - Node.js >= 22
 - js-controller >= 7.2.5
-- Admin >= 8.0.14
+- Admin >= 8.2.0
 - A free Home Connect developer account (for a Client ID and Client Secret)
 
 ## Configuration

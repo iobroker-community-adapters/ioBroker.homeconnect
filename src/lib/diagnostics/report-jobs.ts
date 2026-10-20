@@ -10,8 +10,14 @@
 // Round 104 (krobi 2026-10-07 20:53, every fleet rule complete and checked in the gate): the frame is the report's own
 // — the adapter's body can add to it but never replace a frame field (DB-06) — and it says what the live read did
 // (`liveRead`), so the inventory suite can tell a read that reached the device from one that never asked it (DB-02).
+// Round 129 (krobi 2026-10-20): the frame opens the file; the body names the three parts every report carries (DB-03:
+// environment, object tree, log lines) the same way in every adapter; and nothing stands twice — 00:29 "this debug log
+// is there to debug the device, no dummy text or anything else in it", 00:46 "always the fleet" on "no fixed text and
+// no content twice" for every adapter with a report (page "Diagnosebericht — Flottenstandard", DB-14). A block the file
+// already holds is replaced by a pointer to its first place (`onceEach`).
 
 import { errText } from "../err-text";
+import type { LogLine } from "./log-ring";
 import { reportFileName, reportFrame, type ReportFrame } from "./report-file";
 
 /** Shortest gap after a finished report before the next one of the same device — a double click is not two reports. */
@@ -68,7 +74,55 @@ export interface ReportBody {
    */
   fileId: string;
   /** Everything else the report holds. */
-  content: Record<string, unknown>;
+  content: ReportContent;
+}
+
+/** The report body: the three parts every report carries (DB-03), then whatever else the adapter adds. */
+export interface ReportContent {
+  /** The ioBroker environment the adapter runs in: js-controller, settings, how many devices. */
+  environment: Record<string, unknown>;
+  /** The device's part of the object tree, as the adapter created it. */
+  objectTree: unknown;
+  /** The log lines about the device (`LogRing.about`). */
+  logs: LogLine[];
+  /** What else the adapter adds. */
+  [part: string]: unknown;
+}
+
+/**
+ * Every block (object or array) the value already holds earlier, replaced by `{ sameAs: "<pointer>" }` to its first
+ * place (RFC 6901 JSON pointer) — only where the pointer is shorter than the block, else the file would grow. The value
+ * is read in the order it is written, so the first place keeps the content and every later one points to it.
+ *
+ * @param value the report
+ * @returns the report with every repeated block as a pointer
+ */
+export function onceEach(value: unknown): unknown {
+  const seen = new Map<string, string>();
+  const walk = (node: unknown, pointer: string): unknown => {
+    if (node === null || typeof node !== "object") {
+      return node;
+    }
+    const text = JSON.stringify(node);
+    const first = seen.get(text);
+    if (first !== undefined && JSON.stringify({ sameAs: first }).length < text.length) {
+      return { sameAs: first };
+    }
+    if (first === undefined) {
+      seen.set(text, pointer);
+    }
+    if (Array.isArray(node)) {
+      return node.map((item, i) => walk(item, `${pointer}/${i}`));
+    }
+    return Object.fromEntries(
+      Object.entries(node).map(([key, item]) => [
+        key,
+        walk(item, `${pointer}/${key.replace(/~/g, "~0").replace(/\//g, "~1")}`),
+      ]),
+    );
+  };
+  // through JSON first: a Date or any value with toJSON stands in the file as its JSON form, never as an empty object
+  return walk(value === undefined ? value : JSON.parse(JSON.stringify(value)), "");
 }
 
 /** What the adapter hands the jobs: its devices, the live read and the report body. */
@@ -238,7 +292,10 @@ export class ReportJobs<L> {
             : "read";
       const fileName = reportFileName(this.source.adapter, body.fileId, this.source.version, made);
       this.source.log.info(`${deviceId}: diagnostics report ready (${fileName})`);
-      return { fileName, content: JSON.stringify({ ...body.content, ...frame, liveRead }, null, 2) };
+      // the frame opens the file (krobi 2026-10-20) and still wins over a body key of the same name (DB-06): the first
+      // spread fixes the order, the last one the values
+      const head = { ...frame, liveRead };
+      return { fileName, content: JSON.stringify(onceEach({ ...head, ...body.content, ...head }), null, 2) };
     } catch (e) {
       const reason = errText(e);
       this.source.log.warn(`${deviceId}: diagnostics report failed: ${reason}`);

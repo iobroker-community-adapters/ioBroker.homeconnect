@@ -3,6 +3,7 @@ import {
   REPORT_COOLDOWN_MS,
   REPORT_KEEP_MS,
   ReportJobs,
+  onceEach,
   type ReportSource,
   type ReportSourceDevice,
 } from "./report-jobs";
@@ -16,7 +17,14 @@ function source(devices: ReportSourceDevice[], overrides: Partial<ReportSource<s
     build: vi.fn((id: string, live: string | undefined, liveError: string | undefined) =>
       Promise.resolve({
         fileId: id,
-        content: { device: id, ...(live ? { live } : {}), ...(liveError ? { liveError } : {}) },
+        content: {
+          environment: { jsController: "7.2.2" },
+          objectTree: [{ id: `demo.0.${id}.power` }],
+          logs: [],
+          device: id,
+          ...(live ? { live } : {}),
+          ...(liveError ? { liveError } : {}),
+        },
       }),
     ),
     log: { info: vi.fn(), warn: vi.fn() },
@@ -141,7 +149,16 @@ describe("ReportJobs", () => {
         build: () =>
           Promise.resolve({
             fileId: "lamp",
-            content: { readMe: "mine", adapter: "other", connected: true, liveRead: "read", extra: 1 },
+            content: {
+              environment: {},
+              objectTree: [],
+              logs: [],
+              readMe: "mine",
+              adapter: "other",
+              connected: true,
+              liveRead: "read",
+              extra: 1,
+            },
           }),
       }),
     );
@@ -150,6 +167,70 @@ describe("ReportJobs", () => {
     const report = JSON.parse((jobs.result(job) as { content: string }).content);
     expect(report).toMatchObject({ adapter: "iobroker.demo", connected: false, liveRead: "not connected", extra: 1 });
     expect(report.readMe).not.toBe("mine");
+  });
+
+  it("puts the frame at the top of the file, before what the adapter adds", async () => {
+    // krobi 2026-10-20: the part that says which adapter, version and runtime the report is from belongs at the start
+    const jobs = new ReportJobs(source([{ id: "lamp", connected: false }]));
+    const { job } = jobs.start("lamp") as { job: string };
+    await settle();
+    const keys = Object.keys(JSON.parse((jobs.result(job) as { content: string }).content));
+    expect(keys.slice(0, 7)).toEqual([
+      "readMe",
+      "adapter",
+      "version",
+      "exportedAt",
+      "runtime",
+      "connected",
+      "liveRead",
+    ]);
+    expect(keys.indexOf("device")).toBeGreaterThan(6);
+  });
+
+  it("says every block once: a later copy points to its first place (krobi 2026-10-20)", async () => {
+    // krobi 2026-10-20 00:46, for every adapter with a report: no fixed text and no content twice
+    const scenes = Array.from({ length: 5 }, (_, i) => ({ name: `Scene ${i}`, value: i }));
+    const jobs = new ReportJobs(
+      source([{ id: "lamp", connected: false }], {
+        build: () =>
+          Promise.resolve({
+            fileId: "lamp",
+            content: {
+              environment: {},
+              objectTree: [],
+              logs: [],
+              scenes,
+              cache: { scenes: [...scenes], "a/b~c": scenes },
+              host: { node: process.version, platform: `${process.platform} ${process.arch}` },
+              small: [{ on: true }, { on: true }],
+            },
+          }),
+      }),
+    );
+    const { job } = jobs.start("lamp") as { job: string };
+    await settle();
+    const report = JSON.parse((jobs.result(job) as { content: string }).content);
+    expect(report.scenes).toEqual(scenes);
+    expect(report.cache).toEqual({ scenes: { sameAs: "/scenes" }, "a/b~c": { sameAs: "/scenes" } });
+    // the frame comes first, so a body copy of a frame block points to the frame, never the other way round
+    expect(report.host).toEqual({ sameAs: "/runtime" });
+    expect(report.runtime).toEqual({ node: process.version, platform: `${process.platform} ${process.arch}` });
+    // a pointer longer than the block it replaces would make the file longer: such a copy stays
+    expect(report.small).toEqual([{ on: true }, { on: true }]);
+  });
+
+  it("writes a pointer to a key with a slash or a tilde the way RFC 6901 escapes it", () => {
+    const block = { text: "a block long enough for a pointer" };
+    expect(onceEach({ "a/b~c": { inner: block }, again: block })).toEqual({
+      "a/b~c": { inner: block },
+      again: { sameAs: "/a~1b~0c/inner" },
+    });
+    expect(onceEach([block, [block]])).toEqual([block, [{ sameAs: "/0" }]]);
+    expect(onceEach("plain")).toBe("plain");
+    expect(onceEach(undefined)).toBeUndefined();
+    expect(onceEach({ at: new Date("2026-10-20T00:46:00Z"), gone: undefined })).toEqual({
+      at: "2026-10-20T00:46:00.000Z",
+    });
   });
 
   it("says what the live read did (DB-02)", async () => {
@@ -169,7 +250,11 @@ describe("ReportJobs", () => {
   it("names the file after the body's placeholder, never the raw device id (DB-04, DB-12)", async () => {
     const jobs = new ReportJobs(
       source([{ id: "kueche", connected: true }], {
-        build: () => Promise.resolve({ fileId: "name-1", content: { device: "name-1" } }),
+        build: () =>
+          Promise.resolve({
+            fileId: "name-1",
+            content: { environment: {}, objectTree: [], logs: [], device: "name-1" },
+          }),
       }),
       () => Date.parse("2026-10-08T05:00:00Z"),
     );

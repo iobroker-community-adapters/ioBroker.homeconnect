@@ -8,7 +8,7 @@
 
 import type { LogLine, LogRing } from "./log-ring";
 import { Placeholders } from "./placeholders";
-import type { ReportBody, ReportSource, ReportSourceDevice } from "./report-jobs";
+import type { ReportBody, ReportContent, ReportSource, ReportSourceDevice } from "./report-jobs";
 import type { AccountTrail, ApplianceTrail, TrafficRecorder } from "./traffic-recorder";
 import { PROGRAMLESS_TYPES } from "../device-catalog";
 import { pieceNumber } from "../device-id";
@@ -121,7 +121,7 @@ export interface TreeEntry {
 }
 
 /** The report body before the privacy pass. */
-export interface HomeConnectReportContent {
+export interface HomeConnectReportContent extends ReportContent {
   /** The installation: js-controller, language, settings. */
   environment: Record<string, unknown>;
   /** Sign-in, stream, rate pause, request budget. */
@@ -250,7 +250,7 @@ export class HomeConnectReportSource implements ReportSource<LiveAnswer[]> {
     };
     const places = this.placeholders(appliances, tree);
     const blanked = blankSecrets(content, this.host.secrets());
-    return { fileId: places.text(id), content: places.deep(blanked) as Record<string, unknown> };
+    return { fileId: places.text(id), content: places.deep(blanked) as ReportContent };
   }
 
   /**
