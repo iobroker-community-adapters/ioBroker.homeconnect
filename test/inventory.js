@@ -2544,6 +2544,122 @@ tests.integration(ADAPTER_DIR, {
           );
         });
 
+        it("carries the object tree, the environment and log lines in every report", function () {
+          // DB-03 (krobi 2026-10-06 13:03): a report holds the object tree, the environment and log lines, also for
+          // a device that is not connected; the master's ReportContent names them the same in every adapter (round 129)
+          const filled = v =>
+            Array.isArray(v) ? v.length > 0 : v !== null && typeof v === "object" && Object.keys(v).length > 0;
+          const missing = [...reports.reports, ...reports.silent, ...reports.offline].flatMap(({ device, answer }) => {
+            const report = JSON.parse(answer?.content ?? "{}");
+            return ["environment", "objectTree", "logs"]
+              .filter(part => !filled(report[part]))
+              .map(part => `${device}: ${part}`);
+          });
+          assert.deepStrictEqual(
+            missing,
+            [],
+            `reports without their object tree, environment or log lines (DB-03):\n${missing.join("\n")}`,
+          );
+        });
+
+        it("holds every block once", function () {
+          // krobi 2026-10-20 00:46 for every adapter with a report, no content twice (DB-14): a block the file holds
+          // twice stands at its second place as a pointer to the first — the master's onceEach writes it
+          const twice = [...reports.reports, ...reports.silent, ...reports.offline].flatMap(({ device, answer }) => {
+            const seen = new Map();
+            const found = [];
+            const walk = (node, pointer) => {
+              if (node === null || typeof node !== "object") {
+                return;
+              }
+              const text = JSON.stringify(node);
+              const first = seen.get(text);
+              if (first !== undefined && JSON.stringify({ sameAs: first }).length < text.length) {
+                found.push(`${device}: ${pointer} repeats ${first}`);
+                return;
+              }
+              if (first === undefined) {
+                seen.set(text, pointer);
+              }
+              Object.entries(node).forEach(([key, item]) => walk(item, `${pointer}/${key}`));
+            };
+            walk(JSON.parse(answer?.content ?? "{}"), "");
+            return found;
+          });
+          assert.deepStrictEqual(twice, [], `blocks a report holds twice (DB-14):\n${twice.join("\n")}`);
+        });
+
+        it("carries no fixed text", function () {
+          // krobi 2026-10-20 00:29 "no dummy text", 00:46 for the fleet (DB-14): a sentence of four words or more that
+          // stands the same in the report of every device and holds a text of the adapter's own source says nothing
+          // about one device. A counterpart's answer or error text is no text of the source, so an account-wide block
+          // the same for every device stays out; so do the frame, the environment, the object tree and every log line
+          // (two real govee reports of 2026-10-18: exactly the five fixed sentences, no other hit)
+          const RECORDS = [
+            "readMe",
+            "adapter",
+            "version",
+            "exportedAt",
+            "runtime",
+            "connected",
+            "liveRead",
+            "environment",
+            "objectTree",
+            "logs",
+          ];
+          const words = text => text.trim().split(/\s+/).length;
+          const own = [];
+          const read = dir => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const file = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                read(file);
+              } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
+                for (const m of fs
+                  .readFileSync(file, "utf8")
+                  .matchAll(
+                    /\x22((?:\\.|[^\x22\\\n])*)\x22|\x27((?:\\.|[^\x27\\\n])*)\x27|\x60((?:\\.|[^\x60\\])*)\x60/g,
+                  )) {
+                  own.push(
+                    ...(m[1] ?? m[2] ?? m[3])
+                      .split(/\$\x7b[^\x7d]*\x7d/)
+                      .map(part => part.replace(/\\(.)/g, "$1").trim())
+                      .filter(part => words(part) >= 4),
+                  );
+                }
+              }
+            }
+          };
+          read(path.join(ADAPTER_DIR, "src"));
+          const sentences = answer => {
+            const found = new Set();
+            const walk = node => {
+              if (typeof node === "string") {
+                if (words(node) >= 4 && own.some(text => node.includes(text))) {
+                  found.add(node);
+                }
+              } else if (node !== null && typeof node === "object" && !["ts", "level", "msg"].every(k => k in node)) {
+                Object.values(node).forEach(walk);
+              }
+            };
+            Object.entries(JSON.parse(answer?.content ?? "{}"))
+              .filter(([key]) => !RECORDS.includes(key))
+              .forEach(([, part]) => walk(part));
+            return found;
+          };
+          const fixed = [reports.reports, reports.offline]
+            .filter(group => new Set(group.map(({ device }) => device)).size > 1)
+            .flatMap(group => {
+              const each = group.map(({ answer }) => sentences(answer));
+              return [...each[0]].filter(s => each.every(set => set.has(s)));
+            });
+          assert.deepStrictEqual(
+            [...new Set(fixed)],
+            [],
+            `sentences of the adapter's own source that stand the same in the report of every device (DB-14):\n${[...new Set(fixed)].join("\n")}`,
+          );
+        });
+
         it("restarts at most once for its own instance object", function () {
           assert.deepStrictEqual(restarts.again, [], "the instance object changed again after the restart it caused");
         });

@@ -133,7 +133,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Changed: complete rewrite with a new object tree and new datapoint IDs — breaking for existing scripts and visualizations
 - (krobipd) Changed: readable values with units and labels in the user's language
 - (krobipd) New: program history and the consumption of the last run as readable datapoints
-- (krobipd) Changed: the adapter requires js-controller 7.2.5 and Admin 8.0.14 or newer now
+- (krobipd) Changed: the adapter requires js-controller 7.2.5 and Admin 8.2.0 or newer now
 - (krobipd) New: sign-in panel in the instance settings with a connection test and a reset of the login
 - (krobipd) Improved: an update from 1.x keeps rooms, functions, aliases and the Home Connect sign-in
 - (krobipd) Fixed: the object database no longer grows with every value change (#387), and the start stays within the Home Connect request limits (#327, #58)
