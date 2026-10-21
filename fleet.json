@@ -26,7 +26,7 @@
       "info.devicesAllOnline": "devicesAllOnlineDesc"
     }
   },
-  "forumThread": null,
+  "forumThread": "https://forum.iobroker.net/topic/85641/test-adapter-homeconnect-2.0.0-alpha",
   "_deviceIds": "Device object ids follow the fleet scheme model + the last four characters of the unit id (decision 36), set once and never derived again; a taken id gets the whole unit id, then a counter.",
   "deviceIds": "unit",
   "serverTest": {
