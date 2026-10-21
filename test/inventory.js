@@ -2226,6 +2226,18 @@ tests.integration(ADAPTER_DIR, {
         );
       });
 
+      // Round 138: a state LOCAL_STATES names as the adapter's own setting reaches no counterpart when written —
+      // otherwise it is a command and the list took it out of the verdict above
+      it("treats no local state as a command", function () {
+        const local = new Set(LOCAL_STATES.map(id => `${NS}${id}`));
+        const sent = [...new Set(command.calls.filter(c => local.has(c.cause)).map(c => c.cause))];
+        assert.deepStrictEqual(
+          sent,
+          [],
+          `LOCAL_STATES names states whose write reached a counterpart — commands, not the adapter's own settings:\n${sent.join("\n")}`,
+        );
+      });
+
       // Round 107 (K18, govee): a limit is proven only where the run reaches its counterpart — every counterpart
       // src/lib/api-limits.json declares is called at least once in this run (every suite so far, the commands of this
       // one last); one that only credentials or a protocol the fixtures lack would reach needs its fixture
