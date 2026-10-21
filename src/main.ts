@@ -1469,15 +1469,15 @@ class Homeconnect extends utils.Adapter {
         const now = Date.now();
         this.sentAt = this.sentAt.filter(at => now - at < 60_000);
         const budgetWait = this.sentAt.length >= requestsPerMinute() ? this.sentAt[0] + 60_000 - now : 0;
-        const wait = Math.max(this.lastSentAt + requestGapMs() - now, budgetWait);
+        const pause = Math.max(this.lastSentAt + requestGapMs() - now, budgetWait);
         if (budgetWait > 0 && !this.budgetNoted) {
           this.budgetNoted = true;
           this.log.info(
             `Home Connect allows ${REQUESTS_PER_MINUTE} requests per minute — reading the appliances is spread over the next minutes; the datapoints fill in as they arrive.`,
           );
         }
-        if (wait > 0 && !this.terminating) {
-          await this.delay(wait);
+        if (pause > 0 && !this.terminating) {
+          await this.delay(pause);
           continue;
         }
         const next = this.slotQueue.shift();
