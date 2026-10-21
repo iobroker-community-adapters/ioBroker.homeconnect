@@ -127,6 +127,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
+
 ### 2.0.0-alpha.0 (2026-10-21)
 
 - (krobipd) Changed: complete rewrite with a new object tree and new datapoint IDs — breaking for existing scripts and visualizations
