@@ -194,9 +194,21 @@ vi.mock("./lib/http", async importOriginal => ({
   rateLimitText: (await importOriginal<{ rateLimitText: typeof rateLimitText }>()).rateLimitText,
 }));
 
+// The declared limits as the adapter loaded them; `widen` plays the inventory run's pacing hook, which multiplies every
+// `max` by 1000 while the adapter process loads src/lib/api-limits.json.
+const limitsMock = vi.hoisted(() => ({ widen: 1 }));
+vi.mock("./lib/api-limits", async importOriginal => {
+  const actual = await importOriginal<typeof ApiLimits>();
+  return {
+    declaredLimit: (seconds: number): number => actual.declaredLimit(seconds) * limitsMock.widen,
+    minimumGapMs: (): number => Math.ceil(actual.minimumGapMs() / limitsMock.widen),
+  };
+});
+
 import * as mainModule from "./main";
 import type { JsonResult, rateLimitText } from "./lib/http";
 import type { WriteRequest } from "./lib/command-dispatch";
+import type * as ApiLimits from "./lib/api-limits";
 
 // main.ts exports nothing by name (compact mode needs a callable module.exports); the class rides on the factory.
 const { Homeconnect } = mainModule as unknown as { Homeconnect: new () => ioBroker.Adapter };
@@ -971,64 +983,101 @@ describe("Homeconnect rate limiting", () => {
     await retry;
   });
 
-  it("lets the fixture environment widen the budget, never narrow it", async () => {
+  it("takes its pace from the declaration as the adapter loaded it — the pacing hook widens it there", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     httpMock.getJson.mockResolvedValue(okResult());
+    limitsMock.widen = 1000;
     try {
-      // Widened (the inventory run's fixture server): 60 requests pass at the 100 ms gap alone.
-      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "100000");
+      // Widened ×1000 (test/inventory-pacing-hook.cjs): 60 requests pass at a gap of 1 ms, far inside the minute budget.
       httpMock.getJson.mockClear();
       const wide = Array.from({ length: 60 }, (_, n) => ctx.i.apiGet(`/api/w${n}`));
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(100);
       expect(httpMock.getJson).toHaveBeenCalledTimes(60);
       await Promise.all(wide);
-      // Narrowed: ignored — Home Connect's 50 stays the floor of what the adapter allows itself.
-      await vi.advanceTimersByTimeAsync(60_000);
-      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "10");
-      httpMock.getJson.mockClear();
-      const narrow = Array.from({ length: 20 }, (_, n) => ctx.i.apiGet(`/api/n${n}`));
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(httpMock.getJson).toHaveBeenCalledTimes(20);
-      await Promise.all(narrow);
     } finally {
-      vi.unstubAllEnvs();
+      limitsMock.widen = 1;
     }
   });
 
-  it("lets the fixture environment narrow the request gap, never widen it", async () => {
+  it("gives the retry after a 401 a place of its own — it is a request like every other", async () => {
     const ctx = setup();
     await ctx.i.onReady();
-    httpMock.getJson.mockResolvedValue(okResult());
-    try {
-      vi.stubEnv("HOMECONNECT_REQUESTS_PER_MINUTE", "100000");
-      // Narrowed (the inventory run's pacing hook): 20 requests fit into 400 ms at a 20 ms gap.
-      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "20");
-      httpMock.getJson.mockClear();
-      const quick = Array.from({ length: 20 }, (_, n) => ctx.i.apiGet(`/api/q${n}`));
-      await vi.advanceTimersByTimeAsync(400);
-      expect(httpMock.getJson).toHaveBeenCalledTimes(20);
-      await Promise.all(quick);
-      // Set but empty: ignored too — an empty variable is no gap of 0 ms.
-      await vi.advanceTimersByTimeAsync(1_000);
-      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "");
-      httpMock.getJson.mockClear();
-      const empty = Array.from({ length: 10 }, (_, n) => ctx.i.apiGet(`/api/e${n}`));
-      await vi.advanceTimersByTimeAsync(450);
-      expect(httpMock.getJson).toHaveBeenCalledTimes(5);
-      await vi.advanceTimersByTimeAsync(1_000);
-      await Promise.all(empty);
-      // Widened: ignored — the 100 ms gap stays the floor (10 requests per second at most).
-      await vi.advanceTimersByTimeAsync(1_000);
-      vi.stubEnv("HOMECONNECT_REQUEST_GAP_MS", "500");
-      httpMock.getJson.mockClear();
-      const slow = Array.from({ length: 10 }, (_, n) => ctx.i.apiGet(`/api/s${n}`));
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
-      await Promise.all(slow);
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    ctx.auths[0].refreshNow.mockImplementation(() => {
+      ctx.auths[0].accessToken = "FRESH";
+      return Promise.resolve(true);
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    httpMock.getJson.mockClear();
+    httpMock.getJson.mockResolvedValueOnce(failResult(401)).mockResolvedValueOnce(okResult({ ok: 1 }));
+    const read = ctx.i.apiGet("/api/x");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(httpMock.getJson).toHaveBeenCalledTimes(2);
+    await expect(read).resolves.toEqual({ ok: 1 });
+
+    ctx.auths[0].accessToken = "OLD";
+    await vi.advanceTimersByTimeAsync(1_000);
+    httpMock.putJson.mockClear();
+    httpMock.putJson.mockResolvedValueOnce(failResult(401)).mockResolvedValueOnce(okResult());
+    const write = ctx.i.apiWrite({ method: "PUT", path: "/api/p", body: { key: "k" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(httpMock.putJson).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(httpMock.putJson).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(httpMock.putJson).toHaveBeenCalledTimes(2);
+    await expect(write).resolves.toMatchObject({ ok: true });
+  });
+
+  /**
+   * Make the first request leave 5 ms after its place was handed out — the work a caller does between the hand-out and
+   * the transport call. The fake clock moves inside the caller's step (timers along with it), the way real time does.
+   *
+   * @param ctx the adapter under test
+   * @returns the times the transport was called at
+   */
+  function leaveFirstLate(ctx: ReturnType<typeof setup>): number[] {
+    const callAt: number[] = [];
+    httpMock.getJson.mockImplementation(() => {
+      callAt.push(Date.now());
+      return Promise.resolve(okResult());
+    });
+    const realLanguage = ctx.i.acceptLanguage.bind(ctx.i);
+    let late = true;
+    ctx.i.acceptLanguage = () => {
+      if (late) {
+        late = false;
+        vi.advanceTimersByTime(5);
+      }
+      return realLanguage();
+    };
+    return callAt;
+  }
+
+  it("counts the gap from the moment a request went out, not from the hand-out of its place", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const callAt = leaveFirstLate(ctx);
+    const reads = [ctx.i.apiGet("/api/a"), ctx.i.apiGet("/api/b")];
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.all(reads);
+    expect(callAt).toHaveLength(2);
+    expect(callAt[1] - callAt[0]).toBeGreaterThanOrEqual(100);
+  });
+
+  it("counts the minute budget from the moment a request went out — the 51st is a full minute after the first", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const callAt = leaveFirstLate(ctx);
+    const reads = Array.from({ length: 51 }, (_, n) => ctx.i.apiGet(`/api/m${n}`));
+    await vi.advanceTimersByTimeAsync(70_000);
+    await Promise.all(reads);
+    expect(callAt).toHaveLength(51);
+    expect(callAt[50] - callAt[0]).toBeGreaterThanOrEqual(60_000);
   });
 
   it("puts a user's write before the reads that wait for their place", async () => {

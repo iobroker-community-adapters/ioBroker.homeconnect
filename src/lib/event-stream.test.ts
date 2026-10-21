@@ -328,6 +328,23 @@ describe("EventStream lifecycle guards", () => {
     es.stop();
   });
 
+  it("reports its send time after fetch was invoked, in the same step (tooling round 140)", async () => {
+    const markSent = vi.fn();
+    const h = harness({ takeSlot: () => Promise.resolve(true), markSent });
+    const stampedBefore: number[] = [];
+    const fetchMock = vi.fn().mockImplementation(() => {
+      stampedBefore.push(markSent.mock.calls.length);
+      return new Promise(() => {});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(stampedBefore).toEqual([0]);
+    expect(markSent).toHaveBeenCalledTimes(1);
+    es.stop();
+  });
+
   it("does not open the stream when the budget says the adapter is shutting down", async () => {
     const h = harness({ takeSlot: () => Promise.resolve(false) });
     const fetchMock = vi.fn();

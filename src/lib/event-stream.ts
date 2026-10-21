@@ -131,6 +131,11 @@ export interface EventStreamDeps {
    * resolves false when the adapter is shutting down.
    */
   takeSlot?: () => Promise<boolean>;
+  /**
+   * The stream's request just went out — called right after fetch was invoked, in the same synchronous step, so the
+   * adapter's budget counts its send time from that moment (tooling round 140).
+   */
+  markSent?: () => void;
   /** Log sink. */
   log: (level: "debug" | "info" | "warn", msg: string) => void;
   /** Schedule a callback (the adapter's managed setTimeout). */
@@ -272,10 +277,12 @@ export class EventStream {
       abort.abort();
     }, CONNECT_TIMEOUT_MS);
     try {
-      const res = await fetch(new URL(EVENTS_PATH, this.deps.baseUrl), {
+      const opening = fetch(new URL(EVENTS_PATH, this.deps.baseUrl), {
         headers: { authorization: `Bearer ${token}`, accept: "text/event-stream" },
         signal: abort.signal,
       });
+      this.deps.markSent?.();
+      const res = await opening;
       this.clearConnectTimer();
       if (!res.ok) {
         // Reading the (small, capped) body frees the connection too — undici

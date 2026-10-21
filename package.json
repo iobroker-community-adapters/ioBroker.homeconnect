@@ -56,7 +56,7 @@
     "@types/iobroker": "npm:@iobroker/types@^7.2.5",
     "@types/node": "^22",
     "@vitest/coverage-v8": "^5.0.5",
-    "iobroker-adapter-checks": "^0.33.0",
+    "iobroker-adapter-checks": "^0.34.0",
     "rimraf": "^6.1.3",
     "typescript": "~6.0.3",
     "vitest": "^5.0.5"

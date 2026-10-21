@@ -10,7 +10,13 @@
           "max": 20,
           "seconds": 1,
           "per": "account",
-          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 requests per second on average, 20 max. burst)"
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (20 max. burst)"
+        },
+        {
+          "max": 10,
+          "seconds": 1,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 requests per second on average)"
         },
         {
           "max": 50,
