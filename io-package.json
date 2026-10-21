@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "homeconnect",
-    "version": "1.25.2",
+    "version": "2.0.0-alpha.0",
     "news": {
+      "2.0.0-alpha.0": {
+        "en": "Complete rewrite with a new object tree and new datapoint IDs — breaking for existing scripts and visualizations\nValues appear as switches, numbers with units and translated lists\nDiagnostics report on the Expert tab, with a 'Report a device' issue form for it",
+        "de": "Kompletter Neubau mit neuem Objektbaum und neuen Datenpunkt-IDs — bestehende Skripte und Visualisierungen müssen angepasst werden\nWerte erscheinen als Schalter, Zahlen mit Einheit und übersetzte Listen\nDiagnosebericht im Reiter Experte, dazu ein Issue-Formular „Gerät melden“",
+        "ru": "Полная переработка с новым деревом объектов и новыми ID точек данных — существующие скрипты и визуализации нужно адаптировать\nЗначения отображаются как переключатели, числа с единицами и переведённые списки\nДиагностический отчёт на вкладке «Эксперт» и форма задачи «Сообщить об устройстве»",
+        "pt": "Reescrita completa com nova árvore de objetos e novos IDs de pontos de dados — scripts e visualizações existentes precisam ser adaptados\nValores aparecem como interruptores, números com unidades e listas traduzidas\nRelatório de diagnóstico na aba Especialista, com um formulário de issue 'Reportar um dispositivo'",
+        "nl": "Volledig herschreven met een nieuwe objectboom en nieuwe datapunt-ID's — bestaande scripts en visualisaties moeten worden aangepast\nWaarden verschijnen als schakelaars, getallen met eenheden en vertaalde lijsten\nDiagnoserapport op het tabblad Expert, met een issueformulier 'Apparaat melden'",
+        "fr": "Réécriture complète avec une nouvelle arborescence d'objets et de nouveaux ID de points de données — scripts et visualisations à adapter\nLes valeurs apparaissent en interrupteurs, nombres avec unités et listes traduites\nRapport de diagnostic dans l'onglet Expert, avec un formulaire d'issue « Signaler un appareil »",
+        "it": "Riscrittura completa con un nuovo albero degli oggetti e nuovi ID dei datapoint — script e visualizzazioni esistenti vanno adattati\nI valori appaiono come interruttori, numeri con unità ed elenchi tradotti\nRapporto di diagnostica nella scheda Esperto, con un modulo di issue 'Segnala un dispositivo'",
+        "es": "Reescritura completa con un nuevo árbol de objetos y nuevos ID de puntos de datos — hay que adaptar los scripts y visualizaciones existentes\nLos valores aparecen como interruptores, números con unidades y listas traducidas\nInforme de diagnóstico en la pestaña Experto, con un formulario de issue 'Notificar un dispositivo'",
+        "pl": "Całkowicie przepisany adapter z nowym drzewem obiektów i nowymi ID punktów danych — istniejące skrypty i wizualizacje trzeba dostosować\nWartości pojawiają się jako przełączniki, liczby z jednostkami i przetłumaczone listy\nRaport diagnostyczny na karcie Ekspert, z formularzem zgłoszenia „Zgłoś urządzenie”",
+        "uk": "Повна переробка з новим деревом об'єктів і новими ID точок даних — наявні скрипти та візуалізації треба адаптувати\nЗначення відображаються як перемикачі, числа з одиницями та перекладені списки\nДіагностичний звіт на вкладці «Експерт» і форма задачі «Повідомити про пристрій»",
+        "zh-cn": "完全重写，采用新的对象树和新的数据点 ID — 现有脚本和可视化需要调整\n数值显示为开关、带单位的数字和已翻译的列表\n专家选项卡中的诊断报告，并附带“报告设备”问题表单"
+      },
       "1.6.1": {
         "en": "Login/Refresh flow improved",
         "de": "Login/Refresh Flow verbessert",

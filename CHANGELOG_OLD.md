@@ -1,6 +1,16 @@
 # Older changes
 
 Versions 1.7.0 to 1.25.2 were published on GitHub only, while the rewrite was built outside this repository. Version 2.0.0 brings all of their changes to npm.
+## 1.5.0 (2025-09-02)
+
+- (Lucky-ESA) Clean up state roles and code
+- (Lucky-ESA) Added rate limiting
+- (Lucky-ESA) Dependencies updated
+- (Lucky-ESA) Added language selection
+- (Lucky-ESA) Migrated to ESLint 9
+- (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
+- (Lucky-ESA) Adapter requires admin >= 7.6.17 now
+- (mcm1957) Adapter requires node.js >= 20 now
 
 ## 1.25.2 (2026-09-29)
 

@@ -127,8 +127,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
     Placeholder for the next version (at the beginning of the line):
     ### **WORK IN PROGRESS**
 -->
-
-### **WORK IN PROGRESS**
+### 2.0.0-alpha.0 (2026-10-21)
 
 - (krobipd) Changed: complete rewrite with a new object tree and new datapoint IDs — breaking for existing scripts and visualizations
 - (krobipd) Changed: readable values with units and labels in the user's language
@@ -159,17 +158,6 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 ### 1.5.1 (2025-09-20)
 
 - (Lucky-ESA) Fixed: Name of the objects are deleted
-
-### 1.5.0 (2025-09-02)
-
-- (Lucky-ESA) Clean up state roles and code
-- (Lucky-ESA) Added rate limiting
-- (Lucky-ESA) Dependencies updated
-- (Lucky-ESA) Added language selection
-- (Lucky-ESA) Migrated to ESLint 9
-- (Lucky-ESA) Adapter requires js-controller >= 6.0.11 now
-- (Lucky-ESA) Adapter requires admin >= 7.6.17 now
-- (mcm1957) Adapter requires node.js >= 20 now
 
 [Older changelogs can be found there](CHANGELOG_OLD.md)
 
