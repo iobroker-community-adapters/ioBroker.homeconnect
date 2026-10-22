@@ -20,19 +20,6 @@ updates:
       - dependency-name: '@types/node'
         update-types:
           - 'version-update:semver-major'
-      # The lint chain (@iobroker/eslint-config -> typescript-eslint) caps TypeScript below 6.1,
-      # so every TypeScript major bump fails.
-      - dependency-name: 'typescript'
-        update-types:
-          - 'version-update:semver-major'
-      # src-admin: the ioBroker admin shares these packages with the admin component at runtime (Module Federation
-      # singletons) — their range follows the admin version the adapter requires, not npm-latest.
-      - dependency-name: '@iobroker/gui-components'
-      - dependency-name: '@iobroker/json-config'
-      - dependency-name: '@mui/icons-material'
-      - dependency-name: '@mui/material'
-      - dependency-name: 'react'
-      - dependency-name: 'react-dom'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
