@@ -124,7 +124,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 ## Changelog
 
 <!--
-    Placeholder for the next version (at the beginning of the line):
+    Placeholder for the next version (at the beginning of the line): 
     ### **WORK IN PROGRESS**
 -->
 
