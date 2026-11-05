@@ -3095,9 +3095,10 @@ export class ApplianceSync {
         constraints = { ...constraints, allowedvalues: kept };
       }
     }
-    if (raw.key === ACTIVE_PROGRAM_KEY && !constraints?.allowedvalues) {
-      // The running program reads from the same list the selection offers — one
-      // list for both, or the running program would show as a bare short value.
+    if (programRoot && !constraints?.allowedvalues) {
+      // Both program roots read from the list the selection offers — one list for
+      // both, or the running program would show as a bare short value and a
+      // streamed selection of an offered program would count as only seen.
       const offered = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues;
       if (offered && offered.length > 0) {
         constraints = { ...constraints, allowedvalues: offered };

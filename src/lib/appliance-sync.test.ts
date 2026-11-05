@@ -6510,6 +6510,27 @@ describe("readable values (2026-09-28)", () => {
     expect(sel.native.bshValues).toEqual([wd("Cotton")]);
   });
 
+  it("reads a streamed selection against the offered list — an offered program is no seen one", async () => {
+    // Forum 85641: the oven's stream selected an offered program, and the adapter put it into `seenValues` with an
+    // object write and the debug line "added … to its list" — the stream carries no list, and only the running
+    // program fell back to the selection's.
+    const port = new FakePort();
+    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton"), wd("Spin")] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    port.extendCalls.length = 0;
+    sync.handleStreamEvent({
+      event: "NOTIFY",
+      id: "HA-1",
+      data: JSON.stringify({ items: [{ key: "BSH.Common.Root.SelectedProgram", value: wd("Spin") }] }),
+    });
+    await flush();
+    expect(port.states.get("wt-1.programs.selectedProgram")).toBe("spin");
+    expect(port.extendCalls.filter(id => id === "wt-1.programs.selectedProgram")).toEqual([]);
+    const sel = port.objects.get("wt-1.programs.selectedProgram") as ioBroker.StateObject;
+    expect(sel.native.seenValues).toBeUndefined();
+  });
+
   it("keeps a seen program across a restart without rewriting the object", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
