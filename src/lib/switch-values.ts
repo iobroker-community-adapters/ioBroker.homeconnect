@@ -1,12 +1,31 @@
-// On/off as a switch (README "on/off as switches", decision 47): a key whose every known value is on or off-like is a
-// boolean datapoint, and the appliance's own value goes back on a write. Pure. The mapping follows Home Assistant's
-// `home_connect` power switch (homeassistant/components/home_connect/switch.py, HomeConnectPowerSwitch): On is on; Off
-// or Standby is off; switching off sends Off where the appliance offers it, else Standby.
+// On/off as a switch (README "on/off as switches", decision 47, core decision H-02): a key whose every known value is on
+// or off-like is a boolean datapoint, and the appliance's own value goes back on a write. Pure. The mapping follows Home
+// Assistant's `home_connect` power switch (homeassistant/components/home_connect/switch.py, HomeConnectPowerSwitch): On
+// is on; Off or Standby is off. Switching the power off sends the off value Home Connect names for the appliance type
+// (the PowerState availability table on api-docs /settings), for the microwave — listed under both — the off value it
+// last reported, and otherwise Off where the appliance offers it, else Standby.
 
 import { ENUM_TYPE_VALUES, KEY_ENUM_TYPES, KEY_VALUE_NAMES } from "./enum-catalog";
 
 /** Value tails that mean "off" — MainsOff too (the appliance off at the mains). */
 const OFF_TAILS = ["off", "standby", "mainsoff"] as const;
+/** The appliance's power, the one on/off key with a role of its own (`switch.power`). */
+export const POWER_STATE_KEY = "BSH.Common.Setting.PowerState";
+/**
+ * The types Home Connect switches off with Standby: the PowerState availability table on api-docs /settings (module
+ * `power-state-availability.json`, read 2026-11-05) lists them in its Standby column only. Its Off column (dishwasher,
+ * "Cooktop" = the hob, hood) needs no entry — Off is what the general order sends first anyway.
+ */
+const STANDBY_TYPES: ReadonlySet<string> = new Set([
+  "Oven",
+  "AirConditioner",
+  "WarmingDrawer",
+  "CoffeeMaker",
+  "CleaningRobot",
+  "CookProcessor",
+]);
+/** The type the table lists under both Off and Standby: it switches off with the off value it reported itself. */
+const BOTH_OFF_VALUES_TYPE = "Microwave";
 /** Value tails a switch key may carry besides on/off: `Undefined` is no value at all. */
 const NO_VALUE_TAILS = ["undefined"];
 
@@ -69,15 +88,41 @@ export function switchState(value: unknown): boolean | undefined {
 }
 
 /**
- * The appliance's value for a switch write: On, or the first off-like value it offers (Off, else Standby, else
- * MainsOff).
+ * The off value a power switch-off tries ahead of the general order (H-02): Standby for the types Home Connect switches
+ * off with Standby, and for the microwave when Standby is the off value it last reported.
+ *
+ * @param key the fully-qualified BSH key of the switch
+ * @param type the appliance type (Oven, Dishwasher …)
+ * @param reported the off value the appliance last reported for this key, if any
+ * @returns the value tail to try first, or undefined when the general order alone decides
+ */
+export function powerOffTail(
+  key: string | undefined,
+  type: string | undefined,
+  reported: string | undefined,
+): string | undefined {
+  if (key !== POWER_STATE_KEY || type === undefined) {
+    return undefined;
+  }
+  if (STANDBY_TYPES.has(type)) {
+    return "standby";
+  }
+  // A reported Off (or MainsOff) needs nothing ahead: the general order sends Off first.
+  const reportedStandby = reported !== undefined && tail(reported) === "standby";
+  return type === BOTH_OFF_VALUES_TYPE && reportedStandby ? "standby" : undefined;
+}
+
+/**
+ * The appliance's value for a switch write: On, or the off value to try first where the appliance offers it, then the
+ * first off-like value it offers (Off, else Standby, else MainsOff).
  *
  * @param on the written switch state
  * @param bshValues the full values the appliance offers
+ * @param offFirst the off value tail to try first ({@link powerOffTail})
  * @returns the full value to send, or undefined when the appliance offers none for that state
  */
-export function switchValue(on: boolean, bshValues: readonly string[]): string | undefined {
-  const wanted = on ? ["on"] : OFF_TAILS;
+export function switchValue(on: boolean, bshValues: readonly string[], offFirst?: string): string | undefined {
+  const wanted = on ? ["on"] : offFirst === undefined ? OFF_TAILS : [offFirst, ...OFF_TAILS];
   for (const w of wanted) {
     const hit = bshValues.find(v => tail(v) === w);
     if (hit) {
@@ -86,9 +131,6 @@ export function switchValue(on: boolean, bshValues: readonly string[]): string |
   }
   return undefined;
 }
-
-/** The appliance's power, the one on/off key with a role of its own (`switch.power`). */
-const POWER_STATE_KEY = "BSH.Common.Setting.PowerState";
 
 /**
  * The role of an on/off switch: `switch.power` for the appliance's power, `switch` for any other, `indicator` where

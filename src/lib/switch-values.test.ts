@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSwitchKey, isSwitchValueSet, switchRole, switchState, switchValue } from "./switch-values";
+import { isSwitchKey, isSwitchValueSet, powerOffTail, switchRole, switchState, switchValue } from "./switch-values";
 
 describe("on/off switches (decision 47)", () => {
   it("takes a value set as a switch only for On plus an off-like value, and nothing else but Undefined", () => {
@@ -41,6 +41,20 @@ describe("on/off switches (decision 47)", () => {
     expect(switchValue(false, [`${p}.MainsOff`, `${p}.Standby`, `${p}.On`])).toBe(`${p}.Standby`);
     expect(switchValue(false, [`${p}.MainsOff`, `${p}.On`])).toBe(`${p}.MainsOff`);
     expect(switchValue(false, [`${p}.On`])).toBeUndefined();
+  });
+
+  it("puts the type's off value ahead only for the power, and only where the appliance offers it (H-02)", () => {
+    const p = "BSH.Common.EnumType.PowerState";
+    const power = "BSH.Common.Setting.PowerState";
+    expect(powerOffTail(power, "Oven", undefined)).toBe("standby");
+    expect(powerOffTail(power, "Microwave", `${p}.Standby`)).toBe("standby");
+    expect(powerOffTail(power, "Microwave", `${p}.MainsOff`)).toBeUndefined();
+    // Another switch of the same oven: Home Connect's table names off values for the power only.
+    expect(powerOffTail("Cooking.Common.Setting.Lighting", "Oven", undefined)).toBeUndefined();
+    expect(powerOffTail(power, undefined, `${p}.Standby`)).toBeUndefined();
+    // An oven that does not offer Standby keeps the general order — a value the appliance does not offer never goes out.
+    expect(switchValue(false, [`${p}.Off`, `${p}.On`], "standby")).toBe(`${p}.Off`);
+    expect(switchValue(true, [`${p}.On`, `${p}.Standby`], "standby")).toBe(`${p}.On`);
   });
 
   it("gives the power its own role and a switch the appliance only reports an indicator", () => {

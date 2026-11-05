@@ -4,7 +4,7 @@
 // unit-testable like oauth / http / value-transformer / sse-parser.
 
 import { shortEnum, shortEnumIn } from "./value-transformer";
-import { switchValue } from "./switch-values";
+import { powerOffTail, switchValue } from "./switch-values";
 import { fromShown, shownPresentation } from "./value-units";
 
 /** The context of a single writable-state change, gathered by the adapter from the state + its object. */
@@ -27,6 +27,10 @@ export interface WriteContext {
   collapseEnum?: boolean;
   /** The written value. */
   value: ioBroker.StateValue;
+  /** The appliance's type (Oven, Dishwasher …): a power switch-off sends the off value Home Connect names for it (H-02). */
+  applianceType?: string;
+  /** The off value the appliance last reported for this key — the microwave's switch-off goes by it (H-02). */
+  reportedOff?: string;
   /** The full BSH key of the currently selected program — the payload of the "start" button. */
   selectedProgramKey?: string;
   /** The resolved option values to send with a program start (empty/absent = start with defaults). */
@@ -62,7 +66,8 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
   const key = ctx.bshKey === undefined ? undefined : encodeURIComponent(ctx.bshKey);
 
   if (ctx.channel === "settings" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
+    const offFirst = powerOffTail(ctx.bshKey, ctx.applianceType, ctx.reportedOff);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey, offFirst);
     if (value === undefined) {
       return null;
     }
@@ -120,6 +125,7 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
  * @param bshValues the full candidate values, if this is an enum or a switch
  * @param collapse whether several matching candidates mean the same thing
  * @param key the BSH key the value goes out with
+ * @param offFirst the off value tail a switch-off tries first (H-02, {@link powerOffTail})
  * @returns the API value, or undefined to ignore the write (unknown enum value, no off value)
  */
 export function resolveValue(
@@ -127,9 +133,10 @@ export function resolveValue(
   bshValues?: string[],
   collapse = false,
   key?: string,
+  offFirst?: string,
 ): ioBroker.StateValue | undefined {
   if (typeof value === "boolean" && bshValues && bshValues.length > 0) {
-    return switchValue(value, bshValues);
+    return switchValue(value, bshValues, offFirst);
   }
   if (bshValues && bshValues.length > 0) {
     return resolveEnum(value, bshValues, collapse);

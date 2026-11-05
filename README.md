@@ -125,6 +125,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 
 ### **WORK IN PROGRESS**
 - (copilot) Adapter requires node.js >= 22.19.0 now
+- (krobipd) Fixed: switching off sends the off value Home Connect names for the appliance type — an oven is switched off with Standby
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

@@ -45,7 +45,7 @@ import { LEGACY_LEAF, planLegacyCleanup } from "./legacy-cleanup";
 import { tName, type I18nKey } from "./i18n";
 import { stateText } from "./state-texts";
 import { PROGRAM_UIDS } from "./program-uids";
-import { isSwitchKey, switchRole, switchState } from "./switch-values";
+import { isSwitchKey, POWER_STATE_KEY, switchRole, switchState } from "./switch-values";
 import { boundShown, presentationFor, RUN_ENERGY, toShown, type Presentation } from "./value-units";
 import {
   catalogValues,
@@ -615,6 +615,8 @@ export class ApplianceSync {
   private readonly reachableByDeviceId = new Map<string, boolean>();
   /** device id → its appliance type ("WasherDryer", …) — drives the catalog (events, door form, programs). */
   private readonly typeByDeviceId = new Map<string, string>();
+  /** The off value each appliance last reported for its power (Off, Standby …) — a switch-off of the microwave sends it (H-02). */
+  private readonly reportedPowerOff = new Map<string, string>();
   /** device id → the appliance's display name (from the app) — for readable log lines. */
   private readonly nameByDeviceId = new Map<string, string>();
   /**
@@ -2718,6 +2720,7 @@ export class ApplianceSync {
     this.optionKeys.delete(deviceId);
     this.reachableByDeviceId.delete(deviceId);
     this.typeByDeviceId.delete(deviceId);
+    this.reportedPowerOff.delete(deviceId);
     this.nameByDeviceId.delete(deviceId);
     this.programDefs.delete(deviceId);
     this.unsupportedPrograms.delete(haId);
@@ -3072,6 +3075,9 @@ export class ApplianceSync {
       this.noteOperationState(deviceId, value);
     if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       this.noteRunningProgram(deviceId, value);
+    }
+    if (raw.key === POWER_STATE_KEY && typeof value === "string" && !staleRead && switchState(value) === false) {
+      this.reportedPowerOff.set(deviceId, value);
     }
     const { channel: itemChannel, id: itemId } = statePathForKey(raw.key);
     const programRoot = raw.key === SELECTED_PROGRAM_KEY || raw.key === ACTIVE_PROGRAM_KEY;
@@ -4659,6 +4665,8 @@ export class ApplianceSync {
         bshValues: channel === "options" ? familyOf(meta?.bshValues, optionKey) : meta?.bshValues,
         collapseEnum: channel === "options",
         value,
+        applianceType: this.typeByDeviceId.get(deviceId),
+        reportedOff: this.reportedPowerOff.get(deviceId),
       };
       if (channel === "programs" && stateId === "start") {
         ctx.selectedProgramKey = await this.resolveSelectedProgramKey(deviceId);
