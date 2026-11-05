@@ -1251,7 +1251,8 @@ export class ApplianceSync {
   /**
    * Note the active program the appliance reports and say whether the run values shown belong to an earlier run
    * (Home Assistant PR #187016, `_update_program_run`): no program ends the run, another program replaces it —
-   * unless the run had ended already: then whatever arrived since belongs to the program starting now.
+   * unless the run had ended already: then whatever arrived since belongs to the program starting now, and the
+   * program, the same one too, starts a new run.
    *
    * @param deviceId the id-safe device path segment
    * @param value the full program key, "" for none
@@ -1266,6 +1267,10 @@ export class ApplianceSync {
       return true;
     }
     const ended = this.runEnded.delete(deviceId);
+    if (ended) {
+      // A new run — of the same program too: its run summary pairs with this start, not the last run's (decision 43).
+      this.runningProgram.set(deviceId, { key: value, since: Date.now() });
+    }
     if (ended || !previous || previous === value) {
       return false;
     }
@@ -3495,7 +3500,8 @@ export class ApplianceSync {
   /**
    * Remember the program that is running — the anchor a run summary is paired
    * with to learn the appliance's number for it. "" (idle) keeps the last one:
-   * the summary of a run arrives when the run is over.
+   * the summary of a run arrives when the run is over. A new run of the same
+   * program takes its start in {@link noteActiveProgram}.
    *
    * @param deviceId the id-safe device path segment
    * @param value the full program key of the active program, "" when idle

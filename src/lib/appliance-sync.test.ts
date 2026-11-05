@@ -7953,6 +7953,45 @@ describe("decoded program records (decision 40)", () => {
     }
   });
 
+  it("pairs the summary of a second run of the same program with that run's start (forum 85641)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.parse("2026-09-27T13:00:00Z"));
+      const port = new FakePort();
+      appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
+      const sync = new ApplianceSync(port);
+      await sync.syncAppliances();
+      const active = (value: string | null): void =>
+        sync.handleStreamEvent({
+          event: "NOTIFY",
+          id: "HA-1",
+          data: JSON.stringify({ items: [{ key: "BSH.Common.Root.ActiveProgram", value }] }),
+        });
+      // A spin run at 13:00 whose summary never came …
+      active(wd("Spin"));
+      await vi.advanceTimersByTimeAsync(10);
+      vi.setSystemTime(Date.parse("2026-09-27T13:20:00Z"));
+      active(null);
+      await vi.advanceTimersByTimeAsync(10);
+      // … then the spin run the summary describes (14:35:55–14:47:59).
+      vi.setSystemTime(Date.parse("2026-09-27T14:36:10Z"));
+      active(wd("Spin"));
+      await vi.advanceTimersByTimeAsync(10);
+      vi.setSystemTime(Date.parse("2026-09-27T14:48:10Z"));
+      sync.handleStreamEvent({
+        event: "STATUS",
+        id: "HA-1",
+        data: JSON.stringify({ items: [{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: SUMMARY }] }),
+      });
+      await vi.advanceTimersByTimeAsync(50);
+      expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toEqual({
+        31670: wd("Spin"),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("learns nothing from a summary read again while another program runs", async () => {
     vi.useFakeTimers();
     try {
