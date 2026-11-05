@@ -3045,8 +3045,15 @@ export class ApplianceSync {
    * @param source "sync" for a REST sync that owns the metadata; "values" for
    *   value-only items (stream events, and a program's option values — whose
    *   object shape is owned by the option *definition*, not the value item)
+   * @param valueUnknown the item carries metadata only: its value did not arrive and writes nothing (the list of a
+   *   selection whose own read failed)
    */
-  private async applyBshItem(deviceId: string, raw: Record<string, unknown>, source: "sync" | "values"): Promise<void> {
+  private async applyBshItem(
+    deviceId: string,
+    raw: Record<string, unknown>,
+    source: "sync" | "values",
+    valueUnknown = false,
+  ): Promise<void> {
     if (this.stopped || typeof raw.key !== "string") {
       return;
     }
@@ -3060,10 +3067,11 @@ export class ApplianceSync {
     const lockableDoor = LOCKABLE_DOOR_TYPES.has(this.typeByDeviceId.get(deviceId) ?? "");
     // A REST answer that was requested before the stream delivered a newer value
     // for the same key must not put the older one back (a CONNECTED runs both
-    // side by side). Its metadata still counts; its value does not.
+    // side by side). Its metadata still counts; its value does not — like an item whose value is unknown.
     const staleRead =
-      source === "sync" &&
-      (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
+      valueUnknown ||
+      (source === "sync" &&
+        (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity));
     if (typeof value === "string" && !staleRead && switchState(value) === false) {
       this.reportedOff.set(`${deviceId}|${raw.key}`, value);
     }
@@ -4211,14 +4219,23 @@ export class ApplianceSync {
     const listKeys = liveKeys.length > 0 ? liveKeys : hasList ? [] : knownKeys;
 
     // `undefined` means the answer did not arrive (outage, rate pause, busy
-    // appliance) — nothing is known, so nothing is written and the option gate
-    // keeps its program. Only `null` ("nothing selected") or a record may say
+    // appliance) — the selection is unknown, so no value is written and the option
+    // gate keeps its program. Only `null` ("nothing selected") or a record may say
     // "idle": a single timeout used to write "" over a running program and
     // disarm the gate with it, and nothing corrected that until the next full
     // sync — the stream only reports changes.
     const selected = await this.port.apiGet(appliancePath(haId, "/programs/selected"));
     if (selected !== undefined) {
       await this.applySelectedProgram(deviceId, selected, listKeys);
+    } else if (listKeys.length > 0) {
+      // The list still counts: without it the start button stood next to a
+      // selection nobody could choose from (forum 85641, a 429 on this read).
+      await this.applyBshItem(
+        deviceId,
+        { key: SELECTED_PROGRAM_KEY, value: "", constraints: { allowedvalues: listKeys } },
+        "sync",
+        true,
+      );
     }
 
     const active = await this.port.apiGet(appliancePath(haId, "/programs/active"));

@@ -6481,6 +6481,23 @@ describe("readable values (2026-09-28)", () => {
     expect(port.states.get("spueler-1.programs.activeProgram")).toBe("auto2");
   });
 
+  it("writes the program list when the selected program does not answer — without a value", async () => {
+    // Forum 85641: a 429 on `/programs/selected` left the oven with start and stop buttons and no list to choose from.
+    const port = new FakePort();
+    appliance(port, "HA-1", "Spueler", {
+      status: [],
+      available: ["Dishcare.Dishwasher.Program.Auto2", "Dishcare.Dishwasher.Program.Eco50"],
+    });
+    port.getResponses.delete(`${base}/programs/selected`);
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const sel = port.objects.get("spueler-1.programs.selectedProgram") as ioBroker.StateObject | undefined;
+    expect(sel?.common.states).toMatchObject({ auto2: "Auto 45-65 °C", eco50: "Eco 50 °C" });
+    expect(sel?.native.bshValues).toEqual(["Dishcare.Dishwasher.Program.Auto2", "Dishcare.Dishwasher.Program.Eco50"]);
+    // An unknown selection is never written as "no program".
+    expect(port.states.has("spueler-1.programs.selectedProgram")).toBe(false);
+  });
+
   it("adds a program chosen at the appliance to both lists — once, however often it streams", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
