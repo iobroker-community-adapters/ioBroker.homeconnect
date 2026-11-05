@@ -1,6 +1,8 @@
-// Core decision C-01 (accepted 2026-10-15): outside a run (operation state not DelayedStart, Run, Pause or Finished) the
-// remaining time and the progress show no value, like Home Assistant — 0 would claim "almost done". krobi 2026-10-15
-// 20:05: "null actually says something different from 0. fine, then ok".
+// Core decision C-01 (accepted 2026-10-15, elapsed time added 2026-11-05 15:36): outside a run (operation state not
+// DelayedStart, Run, Pause or Finished) remaining time, elapsed time and progress show no value — not 0, like Home
+// Assistant; 0 would claim "almost done". krobi 2026-10-15 20:05: "null actually says something different from 0. fine,
+// then ok" — and 2026-11-05 15:36, asked whether the elapsed time should be empty after the program end like remaining
+// time and progress: "yes of course, it's logical, why doesn't it do that already today".
 import { describe, expect, it, vi } from "vitest";
 import { ApplianceSync, type AdapterPort } from "../lib/appliance-sync";
 import type { WriteRequest } from "../lib/command-dispatch";
@@ -219,30 +221,94 @@ const state = (v: string): { key: string; value: string } => ({
   value: `BSH.Common.EnumType.OperationState.${v}`,
 });
 
-describe("C-01 remaining time and progress are empty while no program runs", () => {
-  it("shows them during a run and empties them at rest", async () => {
-    const port = new MemoryPort();
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    port.appliance("HA-1", "Wt", "WasherDryer", true, [state("Run")]);
-    await sync.syncAppliances();
+/** The three values of the rule: as the appliance sends them, and as the datapoint shows them during a run. */
+const RUN_VALUES = [
+  {
+    what: "remaining time",
+    key: "BSH.Common.Option.RemainingProgramTime",
+    id: "wt-1.run.remainingProgramTime",
+    value: 600,
+    unit: "seconds",
+    shown: 10,
+  },
+  {
+    what: "elapsed time",
+    key: "BSH.Common.Option.ElapsedProgramTime",
+    id: "wt-1.run.elapsedProgramTime",
+    value: 1200,
+    unit: "seconds",
+    shown: 20,
+  },
+  {
+    what: "progress",
+    key: "BSH.Common.Option.ProgramProgress",
+    id: "wt-1.run.programProgress",
+    value: 40,
+    unit: "%",
+    shown: 40,
+  },
+];
+/** The operation states of a run — and the ones outside it. */
+const UNDER_WAY = ["DelayedStart", "Run", "Pause", "Finished"];
+const OUTSIDE = ["Inactive", "Ready", "ActionRequired", "Error", "Aborting"];
+const PROGRAM = "LaundryCare.WasherDryer.Program.Mix";
+
+/**
+ * A washer-dryer, read once in the given operation state.
+ *
+ * @param operation its operation state
+ * @param selected what its selected program read answers
+ * @returns the port, and a sender of stream messages
+ */
+async function washerDryer(
+  operation: string,
+  selected?: unknown,
+): Promise<{ port: MemoryPort; send: (items: unknown[]) => void }> {
+  const port = new MemoryPort();
+  const sync = new ApplianceSync(port);
+  port.sync = sync;
+  port.appliance("HA-1", "Wt", "WasherDryer", true, [state(operation)]);
+  if (selected !== undefined) {
+    port.answers.set("/api/homeappliances/HA-1/programs/available", { programs: [{ key: PROGRAM }] });
+    port.answers.set("/api/homeappliances/HA-1/programs/selected", selected);
+  }
+  await sync.syncAppliances();
+  await settle();
+  const send = (items: unknown[]): void =>
+    sync.handleStreamEvent({ event: "NOTIFY", id: "HA-1", data: JSON.stringify({ haId: "HA-1", items }) });
+  return { port, send };
+}
+
+describe.each(RUN_VALUES)("C-01 the $what is empty while no program runs", v => {
+  const item = { key: v.key, value: v.value, unit: v.unit };
+
+  it.each(UNDER_WAY)("shows it while the operation state is %s", async operation => {
+    const { port, send } = await washerDryer(operation);
+    send([item]);
     await settle();
-    const send = (items: unknown[]): void =>
-      sync.handleStreamEvent({ event: "NOTIFY", id: "HA-1", data: JSON.stringify({ haId: "HA-1", items }) });
-    send([
-      { key: "BSH.Common.Option.RemainingProgramTime", value: 600, unit: "seconds" },
-      { key: "BSH.Common.Option.ProgramProgress", value: 40, unit: "%" },
-    ]);
+    expect(port.states.get(v.id)?.val).toBe(v.shown);
+  });
+
+  it.each(OUTSIDE)("shows no value, not 0, once the operation state turns %s", async operation => {
+    const { port, send } = await washerDryer("Run");
+    send([item]);
     await settle();
-    expect(port.states.get("wt-1.run.remainingProgramTime")?.val).toBe(10);
-    expect(port.states.get("wt-1.run.programProgress")?.val).toBe(40);
-    send([state("Ready")]);
+    expect(port.states.get(v.id)?.val).toBe(v.shown);
+    send([state(operation)]);
     await settle();
-    expect(port.states.get("wt-1.run.remainingProgramTime")?.val ?? null).toBeNull();
-    expect(port.states.get("wt-1.run.programProgress")?.val ?? null).toBeNull();
-    // A value the appliance sends at rest stays empty too.
-    send([{ key: "BSH.Common.Option.RemainingProgramTime", value: 60, unit: "seconds" }]);
+    expect(port.states.get(v.id)?.val ?? null).toBeNull();
+  });
+
+  it("shows no value for one the appliance sends outside a run", async () => {
+    const { port, send } = await washerDryer("Ready");
+    send([item]);
     await settle();
-    expect(port.states.get("wt-1.run.remainingProgramTime")?.val ?? null).toBeNull();
+    expect(port.states.get(v.id)?.val ?? null).toBeNull();
+  });
+
+  it("shows no value for one a full read brings outside a run", async () => {
+    const { port } = await washerDryer("Ready", { key: PROGRAM, options: [item] });
+    expect(port.objects.has(v.id)).toBe(true);
+    expect(port.states.get(v.id)?.val ?? null).toBeNull();
   });
 });

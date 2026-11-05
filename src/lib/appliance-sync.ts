@@ -357,9 +357,10 @@ const SELECTED_PROGRAM_KEY = "BSH.Common.Root.SelectedProgram";
 /** The operation state: whether a program is under way. */
 const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
 /**
- * The operation states in which a program is under way. Outside them the appliance's remaining time and
- * progress are left over from the last run (a washer-dryer at rest: 1 min, 100 %) — Home Assistant empties
- * both there too ("Otherwise, some sensors report erroneous values", `sensor.py`), decision 48.
+ * The operation states in which a program is under way. Outside them the appliance's remaining time, elapsed time
+ * and progress are left over from the last run (a washer-dryer at rest: 1 min, 100 %) — Home Assistant empties them
+ * there too ("Otherwise, some sensors report erroneous values", `sensor.py`; the elapsed time since PR #187017 as a
+ * program sensor seen only during a run), decision 48 and C-01.
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
 /**
@@ -383,9 +384,10 @@ const STATISTICS_NAMES: ReadonlyArray<[string, I18nKey]> = [
   ["started", "statStarted"],
   ["runtime", "statRuntime"],
 ];
-/** The run values that only mean something while a program is under way (under `run`, tree-layout.ts). */
+/** The run values that only mean something while a program is under way (under `run`, tree-layout.ts; C-01). */
 const RUN_VALUE_KEYS: ReadonlyMap<string, string> = new Map([
   ["BSH.Common.Option.RemainingProgramTime", "run.remainingProgramTime"],
+  ["BSH.Common.Option.ElapsedProgramTime", "run.elapsedProgramTime"],
   ["BSH.Common.Option.ProgramProgress", "run.programProgress"],
 ]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
