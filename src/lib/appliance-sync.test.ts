@@ -4848,6 +4848,21 @@ describe("ApplianceSync option definition union", () => {
 });
 
 describe("ApplianceSync reports whether a sync reached the cloud", () => {
+  it("says the list arrived before it reads any appliance, and only when it arrived", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Spueler", {});
+    const sync = new ApplianceSync(port);
+    const readsAtList: string[][] = [];
+    await sync.syncAppliances(() => readsAtList.push([...port.getCalls]));
+    expect(readsAtList).toEqual([["/api/homeappliances"]]);
+    expect(port.getCalls.length).toBeGreaterThan(1);
+
+    port.getResponses.delete("/api/homeappliances");
+    const noList: string[][] = [];
+    await sync.syncAppliances(() => noList.push([...port.getCalls]));
+    expect(noList).toEqual([]);
+  });
+
   it("returns false when the appliance list does not arrive", async () => {
     const port = new FakePort();
     // No response armed at all ⇒ apiGet resolves undefined, which is what a

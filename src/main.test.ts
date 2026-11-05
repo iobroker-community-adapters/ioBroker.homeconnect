@@ -673,6 +673,23 @@ describe("Homeconnect sign-in wiring", () => {
     );
   });
 
+  it("opens the event stream right after the appliance list, before the appliances are read", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const openAtList: number[] = [];
+    ctx.syncs[0].syncAppliances.mockImplementation((onList?: () => void) => {
+      onList?.();
+      // The appliances are read after this point: the stream must already be on its way.
+      openAtList.push(ctx.streams[0]?.start.mock.calls.length ?? 0);
+      return Promise.resolve(true);
+    });
+    await ctx.auths[0].port.onSignedIn();
+    expect(openAtList).toEqual([1]);
+    expect(ctx.streams).toHaveLength(1);
+    expect(ctx.streams[0].start).toHaveBeenCalledTimes(1);
+    expect(ctx.i.subscribed).toEqual(["*"]);
+  });
+
   it("opens exactly one event stream, however often the sign-in completes", async () => {
     const ctx = setup();
     await ctx.i.onReady();

@@ -806,13 +806,24 @@ class Homeconnect extends utils.Adapter {
       if (this.terminating) {
         return;
       }
+      // The event stream opens right after the appliance list, before the appliances
+      // are read (krobi 2026-11-05 18:50, "Strom zuerst"): an event cannot be read
+      // afterwards, and the first read of four appliances took a minute (tester
+      // report 2026-10-23). Without a list it opens after the subscription below.
+      let streamOpened = false;
+      const openStream = (): void => {
+        if (!streamOpened && !this.terminating) {
+          streamOpened = true;
+          this.startEventStream();
+        }
+      };
       // The appliance read gets its own catch: a failure there must not cost the
       // write path and the live updates. Before, a single broken response ended
       // the chain right here — the instance stayed signed in, with no event
       // stream and no state subscription, until the next restart.
       if (sync) {
         try {
-          await sync.syncAppliances();
+          await sync.syncAppliances(openStream);
         } catch (e) {
           if (this.terminating) {
             this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
@@ -826,7 +837,7 @@ class Homeconnect extends utils.Adapter {
       }
       current = "state subscription";
       await this.subscribeStatesAsync("*");
-      this.startEventStream();
+      openStream();
     } catch (e) {
       if (this.terminating) {
         this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);

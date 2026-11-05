@@ -2270,8 +2270,14 @@ export class ApplianceSync {
     }
   }
 
-  /** Fetch the paired appliances and build/update their object tree. */
-  async syncAppliances(): Promise<boolean> {
+  /**
+   * Fetch the paired appliances and build/update their object tree.
+   *
+   * @param onList called once the appliance list has arrived, before any appliance is read — the start opens the event
+   *   stream there, so nothing an appliance reports during the first read is lost (krobi 2026-11-05 18:50, "Strom zuerst")
+   * @returns whether the appliance list arrived
+   */
+  async syncAppliances(onList?: () => void): Promise<boolean> {
     const data = await this.port.apiGet("/api/homeappliances");
     // A failed or malformed fetch must not report "0 appliances" — nothing was learned.
     if (!isRecord(data) || !Array.isArray(data.homeappliances)) {
@@ -2280,6 +2286,7 @@ export class ApplianceSync {
       // that never happened, nor start its cooldown on it.
       return false;
     }
+    onList?.();
     const list = data.homeappliances;
     // The summary comes FIRST — before any per-device work writes its lines
     // (fleet convention; the old trailing "N found" read like an afterthought).

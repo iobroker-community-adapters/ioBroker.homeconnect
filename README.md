@@ -129,6 +129,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: a program chosen at the appliance no longer rewrites the program list of the appliance
 - (krobipd) Changed: progress and remaining time explain that they stay empty while the appliance reports none
 - (krobipd) Fixed: a delayed start (start in / finished in) is sent with the program start; a refused start is no longer retried without it
+- (krobipd) Fixed: live updates start right after the appliance list, so no event is lost while the appliances are read
 
 <!--
     Placeholder for the next version (at the beginning of the line): 
