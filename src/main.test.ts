@@ -244,7 +244,6 @@ interface FakeSync {
   noteUnsupportedProgram: ReturnType<typeof vi.fn>;
   noteNotReady: ReturnType<typeof vi.fn>;
   noteRefused: ReturnType<typeof vi.fn>;
-  noteReadGap: ReturnType<typeof vi.fn>;
   port: Record<string, (...a: never[]) => unknown>;
 }
 interface FakeAuthCtl {
@@ -355,7 +354,6 @@ function setup(config: Record<string, unknown> = {}): Ctx {
       noteUnsupportedProgram: vi.fn(),
       noteNotReady: vi.fn(),
       noteRefused: vi.fn(),
-      noteReadGap: vi.fn(),
     };
     syncs.push(s);
     return s;
@@ -1148,52 +1146,6 @@ describe("Homeconnect rate limiting", () => {
     expect(httpMock.getJson).toHaveBeenCalledTimes(1);
   });
 
-  it("tells the sync about a read that brought nothing — with the end of the pause — never about an appliance's answer", async () => {
-    // Forum 85641: a 429 on `/programs/active` returned nothing, the pass counted as complete, and nothing read the
-    // running program again although the log said the adapter "waits and continues by itself".
-    const ctx = setup();
-    await ctx.i.onReady();
-    const gap = ctx.syncs[0].noteReadGap;
-    const path = "/api/homeappliances/A/programs/active";
-    httpMock.getJson.mockResolvedValue(failResult(429, { retryAfterMs: 30_000 }));
-    await get(ctx, path);
-    const [noted, until] = gap.mock.calls.at(-1) as [string, number];
-    expect(noted).toBe(path);
-    expect(until).toBeGreaterThanOrEqual(NOW + 30_000);
-    // Skipped during the pause: the same end.
-    await get(ctx, "/api/homeappliances/A/status");
-    expect(gap).toHaveBeenLastCalledWith("/api/homeappliances/A/status", until);
-
-    vi.setSystemTime(until + 1);
-    for (const failed of [failResult(503), failResult(0)]) {
-      gap.mockClear();
-      httpMock.getJson.mockResolvedValue(failed);
-      await get(ctx, path);
-      expect(gap).toHaveBeenCalledWith(path, undefined);
-    }
-    // A login that could not be renewed brings nothing either.
-    gap.mockClear();
-    httpMock.getJson.mockResolvedValue(failResult(401));
-    ctx.auths[0].refreshNow.mockResolvedValue(false);
-    await get(ctx, path);
-    expect(gap).toHaveBeenCalledWith(path, undefined);
-
-    // An appliance's answer and a refusal for good are no gap.
-    for (const answer of [
-      failResult(404, { error: "SDK.Error.NoProgramActive" }),
-      failResult(409, { error: "SDK.Error.WrongOperationState" }),
-      failResult(409, { error: "SDK.Error.HomeAppliance.Connection.Initialization.Failed" }),
-      failResult(400, { error: "SDK.Error.UnsupportedProgram" }),
-      failResult(404),
-    ]) {
-      gap.mockClear();
-      httpMock.getJson.mockResolvedValue(answer);
-      await get(ctx, path);
-      expect(gap).not.toHaveBeenCalled();
-    }
-    expect(ctx.syncs[0].noteRefused).toHaveBeenCalledWith(path);
-  });
-
   it("tells the user about a dropped write, but keeps a dropped read quiet", async () => {
     const ctx = setup();
     await ctx.i.onReady();
@@ -1496,21 +1448,20 @@ describe("Homeconnect onUnload", () => {
     expect(ctx.i.eventStream).toBeUndefined();
   });
 
-  it("reads no appliance when the stop lands during the start-up chain", async () => {
+  it("does not subscribe to states when the stop lands during the start-up chain", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     // The sign-in chain is fire-and-forget. Stop the adapter while it is between
     // two steps: nothing after the guard may run on a shutting-down instance.
-    // The guard after the subscription is the only one before the stream and the
-    // appliance read — which is exactly why it is not redundant.
-    ctx.i.subscribeStatesAsync.mockImplementation(() => {
+    // After the LAST step of the chain: the guard after the appliance read is the
+    // only one before the subscribe — which is exactly why it is not redundant.
+    ctx.syncs[0].syncAppliances.mockImplementation(() => {
       ctx.i.onUnload(() => undefined);
-      return Promise.resolve();
+      return Promise.resolve(true);
     });
     await ctx.auths[0].port.onSignedIn();
     await settle();
-    expect(ctx.syncs[0].syncAppliances).not.toHaveBeenCalled();
-    expect(ctx.streams).toHaveLength(0);
+    expect(ctx.i.subscribeStatesAsync).not.toHaveBeenCalled();
   });
 
   it("resets auth.signedIn — a stopped instance must not report itself signed in", async () => {
@@ -2181,30 +2132,6 @@ describe("findings of the 2026-09-04 audit", () => {
     expect(order.every(n => typeof n === "number")).toBe(true);
     expect(ctx.i.subscribed).toEqual(["*"]);
   });
-
-  it("opens the event stream before it reads the appliances", async () => {
-    // Forum 85641: the stream opened only after the whole read — 59.9 s without a live value. Home Assistant opens
-    // it first; a value it sends during the read wins over the older REST answer (ApplianceSync `lastStreamAt`).
-    const ctx = setup();
-    await ctx.i.onReady();
-    const sync = ctx.syncs[0];
-    await ctx.auths[0].port.onSignedIn();
-    const subscribed = ctx.i.subscribeStatesAsync.mock.invocationCallOrder[0];
-    const opened = ctx.streams[0].start.mock.invocationCallOrder[0];
-    const read = sync.syncAppliances.mock.invocationCallOrder[0];
-    expect(subscribed).toBeLessThan(opened);
-    expect(opened).toBeLessThan(read);
-  });
-
-  it("opens the event stream and reads the appliances when the subscription fails", async () => {
-    const ctx = setup();
-    await ctx.i.onReady();
-    ctx.i.subscribeStatesAsync.mockRejectedValueOnce(new Error("objects db down"));
-    await ctx.auths[0].port.onSignedIn();
-    expect(ctx.i.log.error).toHaveBeenCalledWith("Start-up failed at the state subscription: objects db down");
-    expect(ctx.streams[0].start).toHaveBeenCalled();
-    expect(ctx.syncs[0].syncAppliances).toHaveBeenCalled();
-  });
 });
 
 describe("Homeconnect event-stream outage", () => {
@@ -2725,7 +2652,7 @@ describe("Homeconnect findings of the 2026-09-24 audit", () => {
     ctx.syncs[0].syncAppliances.mockRejectedValue(new TypeError("terminated"));
     await expect(ctx.auths[0].port.onSignedIn()).resolves.toBeUndefined();
     expect(ctx.i.log.error).toHaveBeenCalledWith(
-      "Setting up the appliances failed: terminated — live updates run anyway.",
+      "Setting up the appliances failed: terminated — live updates start anyway.",
     );
     // Before: signed in, but no stream and no write path until a restart.
     expect(ctx.i.subscribed).toEqual(["*"]);

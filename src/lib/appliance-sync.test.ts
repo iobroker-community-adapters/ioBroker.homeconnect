@@ -306,8 +306,6 @@ class FakePort implements AdapterPort {
   readonly notReadyPaths = new Set<string>();
   /** Paths Home Connect refuses for good (a 4xx that is no appliance state). */
   readonly refusedPaths = new Set<string>();
-  /** Paths that bring nothing and no appliance answer (429, pause, 5xx, no answer) → when REST pauses until, if it does. */
-  readonly gapPaths = new Map<string, number | undefined>();
   /** Managed timers, driven by hand ({@link fire}). */
   readonly timers: Array<{ cb: () => void; ms: number; cleared: boolean; fired: boolean }> = [];
 
@@ -333,10 +331,6 @@ class FakePort implements AdapterPort {
     }
     if (this.refusedPaths.has(path)) {
       this.sync?.noteRefused(path);
-      return Promise.resolve(undefined);
-    }
-    if (this.gapPaths.has(path)) {
-      this.sync?.noteReadGap(path, this.gapPaths.get(path));
       return Promise.resolve(undefined);
     }
     return Promise.resolve(this.getResponses.get(path));
@@ -4274,71 +4268,12 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
 
     // … and a start carries B's options, not the ones of the program that was
     // selected before (the appliance rejects those, and the retry-with-defaults
-    // silently drops whatever the user had configured). The cloud has B now, with the option the user set.
-    port.getResponses.set(`/api/homeappliances/HA-1/programs/selected`, {
-      key: b,
-      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }],
-    });
+    // silently drops whatever the user had configured).
     port.writes.length = 0;
     await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
     const start = port.writes.at(-1);
     expect(start?.body?.key).toBe(b);
     expect((start?.body?.options ?? []).map(o => o.key)).toEqual(["Dishcare.Dishwasher.Option.IntensivZone"]);
-  });
-
-  it("starts with the options the appliance has selected, not what a datapoint kept (forum 85641, like Home Assistant)", async () => {
-    const port = new FakePort();
-    const { deviceId, b } = twoProgramDishwasher(port);
-    const base = "/api/homeappliances/HA-1";
-    port.getResponses.set(`${base}/programs/selected`, {
-      key: b,
-      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: false }],
-    });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    expect(port.states.get(`${deviceId}.options.intensivZone`)).toBe(false);
-
-    // The option changed in the app and no NOTIFY reached the adapter. The appliance's selection also carries a run
-    // value and an option of the other program — neither goes out with a start, only what B's definition names.
-    port.getResponses.set(`${base}/programs/selected`, {
-      key: b,
-      options: [
-        { key: "Dishcare.Dishwasher.Option.IntensivZone", value: true },
-        { key: "BSH.Common.Option.RemainingProgramTime", value: 3600 },
-        { key: "BSH.Common.Option.StartInRelative", value: 600 },
-      ],
-    });
-    port.getCalls.length = 0;
-    port.writes.length = 0;
-    await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
-    expect(port.getCalls).toEqual([`${base}/programs/selected`]);
-    expect(port.writes.map(w => w.body)).toEqual([
-      { key: b, options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }] },
-    ]);
-    // The read reaches the tree like any other.
-    expect(port.states.get(`${deviceId}.options.intensivZone`)).toBe(true);
-  });
-
-  it("starts with the datapoints' values when the appliance's selection cannot be read", async () => {
-    const port = new FakePort();
-    const { deviceId, b } = twoProgramDishwasher(port);
-    const base = "/api/homeappliances/HA-1";
-    port.getResponses.set(`${base}/programs/selected`, {
-      key: b,
-      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: false }],
-    });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    port.userWrite(`${deviceId}.options.intensivZone`, true);
-    await sync.handleWrite(`${NS}.${deviceId}.options.intensivZone`, true);
-
-    // Home Connect pauses: the start goes out as before the read existed — program and options from the datapoints.
-    port.gapPaths.set(`${base}/programs/selected`, undefined);
-    port.writes.length = 0;
-    await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
-    expect(port.writes.map(w => w.body)).toEqual([
-      { key: b, options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }] },
-    ]);
   });
 
   it("costs nothing when the same program is reported again", async () => {
@@ -5146,8 +5081,7 @@ describe("ApplianceSync read-back after a rejected write (2026-09-15, F8)", () =
     port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.WrongOperationState" };
     port.getCalls.length = 0;
     await sync.handleWrite(`${NS}.spueler-1.programs.start`, true);
-    // The one read is the appliance's selection before the start — none after the rejection.
-    expect(port.getCalls).toEqual([`${BASE}/programs/selected`]);
+    expect(port.getCalls).toEqual([]);
     expect(port.writes).toHaveLength(2); // the start and its retry with defaults
   });
 
@@ -5229,9 +5163,7 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     port.userWrite("wd-1.options.dryingTarget", "IRONDRY");
     await sync.handleWrite(`${NS}.wd-1.options.dryingTarget`, "IRONDRY");
     expect(port.writes.at(-1)?.body).toEqual({ key: dryerKey, value: dryerValues[0] });
-    // Unconfirmed, and the read before the start brings nothing: the start still finds the option in the user's
-    // spelling.
-    port.gapPaths.set(`${base}/programs/selected`, undefined);
+    // Unconfirmed, the start still finds the option in the user's spelling.
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body).toEqual({ key: A, options: [{ key: dryerKey, value: dryerValues[0] }] });
     // Confirmed as "irondry", not verbatim.
@@ -5248,8 +5180,6 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     port.userWrite("wd-1.programs.selectedProgram", B);
     await sync.handleWrite(`${NS}.wd-1.programs.selectedProgram`, B);
     port.writes.length = 0;
-    // The read before the start brings nothing: the datapoint decides.
-    port.gapPaths.set(`${base}/programs/selected`, undefined);
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body?.key).toBe(B);
     await notify(sync, [{ key: "BSH.Common.Root.SelectedProgram", value: B }]);
@@ -5275,8 +5205,6 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     // Measured before: the WasherDryer key with the Dryer family's value.
     expect(port.writes.at(-1)?.path).toBe(`${base}/programs/selected/options/${wdKey}`);
     expect(port.writes.at(-1)?.body).toEqual({ key: wdKey, value: wdValues[0] });
-    // The read before the start brings nothing: the datapoints decide.
-    port.gapPaths.set(`${base}/programs/selected`, undefined);
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body?.options).toEqual([{ key: wdKey, value: wdValues[0] }]);
   });
@@ -5387,41 +5315,6 @@ describe("findings of the 2026-09-24 audit — re-reads", () => {
     await sync.syncAppliances();
     // Before: the timer fired anyway and cost a second full pass.
     expect(port.pendingTimers()).toEqual([]);
-  });
-
-  it("applies a going-offline that arrives while the appliance list is on its way after the list", async () => {
-    // The event stream opens before the appliances are read (forum 85641: 59.9 s without live values) — the list
-    // answer is older than the event and must not put the appliance back online.
-    const { port, sync } = await ready();
-    const held = hold(port, "/api/homeappliances");
-    const pass = sync.syncAppliances();
-    await flush();
-    connected(sync, "DISCONNECTED");
-    await flush();
-    held.release();
-    await pass;
-    await flush();
-    expect(port.states.get("spueler-1.info.reachable")).toBe(false);
-  });
-
-  it("reads a new appliance whose CONNECTED arrives while the appliance list is on its way through the list", async () => {
-    const port = new FakePort();
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    appliance(port, "HA-1", "Spueler", { status: [], settings: [], commands: [] });
-    const asked: string[] = [];
-    port.onGet = p => asked.push(p);
-    const held = hold(port, "/api/homeappliances");
-    const pass = sync.syncAppliances();
-    await flush();
-    connected(sync);
-    await flush();
-    held.release();
-    await pass;
-    await flush();
-    // No second set-up of the same appliance beside the list's.
-    expect(asked.filter(p => p === base)).toEqual([]);
-    expect(port.objects.get("spueler-1")?.type).toBe("device");
   });
 
   it("A2: going offline while the read is on its way arms no re-read", async () => {
@@ -6216,72 +6109,6 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     ]);
   });
 
-  it("holds the old tree while a read that builds the new one did not arrive, and takes it over at the next full read", async () => {
-    // Without this the take-over ran after a pass whose status read had failed: the door had no successor yet, and
-    // its room went with the old tree (H-09).
-    const port = new FakePort();
-    communityTree(port);
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    await sync.sortOutLegacyTrees();
-    onAccount(port);
-    port.gapPaths.set(`/api/homeappliances/${ROOT}/status`, undefined);
-    await sync.syncAppliances();
-    expect(port.objects.has(ROOT)).toBe(true);
-    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toContain(
-      `${OLD}.status.BSH_Common_Status_DoorState`,
-    );
-    // A 5xx or no answer is not read again on its own — Home Connect blocks after ten error answers in a row.
-    expect(port.pendingTimers()).toEqual([]);
-
-    port.gapPaths.clear();
-    sync.handleStreamEvent({ event: "CONNECTED", id: ROOT, data: "{}" });
-    await flush();
-    expect([...port.objects.keys()].filter(k => k.startsWith(ROOT))).toEqual([]);
-    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
-      `${NS}.sx87tx02ce-5775.doors.door`,
-      "hm-rpc.0.X",
-    ]);
-  });
-
-  it("holds the old tree while a program definition did not arrive — a refused one holds nothing", async () => {
-    // A 1.6.x option leaf moves to an `options.*` datapoint, and only a program definition creates that.
-    const port = new FakePort();
-    communityTree(port);
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    await sync.sortOutLegacyTrees();
-    onAccount(port);
-    port.getResponses.set(`/api/homeappliances/${ROOT}/programs/available`, {
-      programs: [{ key: "Dishcare.Dishwasher.Program.Eco50" }],
-    });
-    const def = `/api/homeappliances/${ROOT}/programs/available/Dishcare.Dishwasher.Program.Eco50`;
-    port.gapPaths.set(def, undefined);
-    await sync.syncAppliances();
-    expect(port.objects.has(ROOT)).toBe(true);
-
-    port.gapPaths.clear();
-    port.refusedPaths.add(def);
-    sync.handleStreamEvent({ event: "CONNECTED", id: ROOT, data: "{}" });
-    await flush();
-    expect([...port.objects.keys()].filter(k => k.startsWith(ROOT))).toEqual([]);
-  });
-
-  it("holds the old tree while Home Connect's error limit defers a program definition", async () => {
-    const port = new FakePort();
-    communityTree(port);
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    await sync.sortOutLegacyTrees();
-    onAccount(port);
-    port.getResponses.set(`/api/homeappliances/${ROOT}/programs/available`, {
-      programs: [{ key: "Dishcare.Dishwasher.Program.Eco50" }],
-    });
-    port.errorBudget = false;
-    await sync.syncAppliances();
-    expect(port.objects.has(ROOT)).toBe(true);
-  });
-
   it("carries a room and an alias on the old stop button to the program stop button", async () => {
     // Every 1.6.x appliance had commands.BSH_Common_Command_StopProgram; Home Connect lists no such
     // command, so the raw-key expansion names a datapoint that never exists — the button lives on
@@ -6654,65 +6481,6 @@ describe("readable values (2026-09-28)", () => {
     expect(port.states.get("spueler-1.programs.activeProgram")).toBe("auto2");
   });
 
-  it("reads the appliance once more when Home Connect's pause is over", async () => {
-    // Forum 85641: a 429 on `/programs/active` left the running program unread, while the log said the adapter
-    // "waits and continues by itself" — nothing read it again.
-    const port = new FakePort();
-    appliance(port, "HA-1", "Spueler", { status: [], available: ["Dishcare.Dishwasher.Program.Auto2"] });
-    const sync = new ApplianceSync(port);
-    port.sync = sync;
-    port.gapPaths.set(`${base}/programs/active`, Date.now() + 30_000);
-    await sync.syncAppliances();
-    expect(port.objects.has("spueler-1.programs.activeProgram")).toBe(false);
-    const timers = port.pendingTimers();
-    expect(timers).toHaveLength(1);
-    expect(timers[0].ms).toBeGreaterThanOrEqual(30_000);
-    port.gapPaths.clear();
-    port.getCalls.length = 0;
-    port.fire();
-    await flush();
-    expect(port.objects.has("spueler-1.programs.activeProgram")).toBe(true);
-    expect(port.getCalls.filter(p => p === `${base}/status`)).toHaveLength(1);
-    expect(port.pendingTimers()).toEqual([]);
-  });
-
-  it("drops the re-read after a pause on a stop, a reconnect and going offline", async () => {
-    for (const end of ["stop", "CONNECTED", "DISCONNECTED"] as const) {
-      const port = new FakePort();
-      appliance(port, "HA-1", "Spueler", { status: [], available: ["Dishcare.Dishwasher.Program.Auto2"] });
-      const sync = new ApplianceSync(port);
-      port.sync = sync;
-      port.gapPaths.set(`${base}/programs/active`, Date.now() + 30_000);
-      await sync.syncAppliances();
-      const armed = port.pendingTimers()[0];
-      port.gapPaths.clear();
-      if (end === "stop") {
-        sync.stop();
-      } else {
-        sync.handleStreamEvent({ event: end, id: "HA-1", data: "{}" });
-        await flush();
-      }
-      expect(armed.cleared).toBe(true);
-    }
-  });
-
-  it("writes the program list when the selected program does not answer — without a value", async () => {
-    // Forum 85641: a 429 on `/programs/selected` left the oven with start and stop buttons and no list to choose from.
-    const port = new FakePort();
-    appliance(port, "HA-1", "Spueler", {
-      status: [],
-      available: ["Dishcare.Dishwasher.Program.Auto2", "Dishcare.Dishwasher.Program.Eco50"],
-    });
-    port.getResponses.delete(`${base}/programs/selected`);
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    const sel = port.objects.get("spueler-1.programs.selectedProgram") as ioBroker.StateObject | undefined;
-    expect(sel?.common.states).toMatchObject({ auto2: "Auto 45-65 °C", eco50: "Eco 50 °C" });
-    expect(sel?.native.bshValues).toEqual(["Dishcare.Dishwasher.Program.Auto2", "Dishcare.Dishwasher.Program.Eco50"]);
-    // An unknown selection is never written as "no program".
-    expect(port.states.has("spueler-1.programs.selectedProgram")).toBe(false);
-  });
-
   it("adds a program chosen at the appliance to both lists — once, however often it streams", async () => {
     const port = new FakePort();
     appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
@@ -6740,27 +6508,6 @@ describe("readable values (2026-09-28)", () => {
     expect(port.states.get("wt-1.programs.selectedProgram")).toBe("spin");
     // Not a write candidate: the cloud does not offer it for selection.
     expect(sel.native.bshValues).toEqual([wd("Cotton")]);
-  });
-
-  it("reads a streamed selection against the offered list — an offered program is no seen one", async () => {
-    // Forum 85641: the oven's stream selected an offered program, and the adapter put it into `seenValues` with an
-    // object write and the debug line "added … to its list" — the stream carries no list, and only the running
-    // program fell back to the selection's.
-    const port = new FakePort();
-    appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton"), wd("Spin")] });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    port.extendCalls.length = 0;
-    sync.handleStreamEvent({
-      event: "NOTIFY",
-      id: "HA-1",
-      data: JSON.stringify({ items: [{ key: "BSH.Common.Root.SelectedProgram", value: wd("Spin") }] }),
-    });
-    await flush();
-    expect(port.states.get("wt-1.programs.selectedProgram")).toBe("spin");
-    expect(port.extendCalls.filter(id => id === "wt-1.programs.selectedProgram")).toEqual([]);
-    const sel = port.objects.get("wt-1.programs.selectedProgram") as ioBroker.StateObject;
-    expect(sel.native.seenValues).toBeUndefined();
   });
 
   it("keeps a seen program across a restart without rewriting the object", async () => {
@@ -8019,45 +7766,6 @@ describe("decoded program records (decision 40)", () => {
     }
   });
 
-  it("pairs the summary of a second run of the same program with that run's start (forum 85641)", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(Date.parse("2026-09-27T13:00:00Z"));
-      const port = new FakePort();
-      appliance(port, "HA-1", "Wt", { type: "WasherDryer", status: [], available: [wd("Cotton")] });
-      const sync = new ApplianceSync(port);
-      await sync.syncAppliances();
-      const active = (value: string | null): void =>
-        sync.handleStreamEvent({
-          event: "NOTIFY",
-          id: "HA-1",
-          data: JSON.stringify({ items: [{ key: "BSH.Common.Root.ActiveProgram", value }] }),
-        });
-      // A spin run at 13:00 whose summary never came …
-      active(wd("Spin"));
-      await vi.advanceTimersByTimeAsync(10);
-      vi.setSystemTime(Date.parse("2026-09-27T13:20:00Z"));
-      active(null);
-      await vi.advanceTimersByTimeAsync(10);
-      // … then the spin run the summary describes (14:35:55–14:47:59).
-      vi.setSystemTime(Date.parse("2026-09-27T14:36:10Z"));
-      active(wd("Spin"));
-      await vi.advanceTimersByTimeAsync(10);
-      vi.setSystemTime(Date.parse("2026-09-27T14:48:10Z"));
-      sync.handleStreamEvent({
-        event: "STATUS",
-        id: "HA-1",
-        data: JSON.stringify({ items: [{ key: "BSH.Common.Status.ProgramSessionSummary.Latest", value: SUMMARY }] }),
-      });
-      await vi.advanceTimersByTimeAsync(50);
-      expect((port.objects.get("wt-1")?.native as { programUids?: object }).programUids).toEqual({
-        31670: wd("Spin"),
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("learns nothing from a summary read again while another program runs", async () => {
     vi.useFakeTimers();
     try {
@@ -9308,222 +9016,5 @@ describe("ApplianceSync: a re-read after an outage is routine", () => {
     await sync.syncAppliances();
     const lines = port.logs.filter(l => l.includes("Setting up 1 appliance(s)"));
     expect(lines.map(l => l.split(":")[0])).toEqual(["info", "debug"]);
-  });
-});
-
-describe("ApplianceSync: run values around a program start and change (forum 85641, Home Assistant PR #187016)", () => {
-  const OPERATION_STATE = "BSH.Common.Status.OperationState";
-  const ACTIVE = "BSH.Common.Root.ActiveProgram";
-  const REMAINING = "BSH.Common.Option.RemainingProgramTime";
-  const PROGRESS = "BSH.Common.Option.ProgramProgress";
-  const HOT_AIR = "Cooking.Oven.Program.HeatingMode.HotAir";
-  const TOP_BOTTOM = "Cooking.Oven.Program.HeatingMode.TopBottomHeating";
-  const RUN = "BSH.Common.EnumType.OperationState.Run";
-  const READY = "BSH.Common.EnumType.OperationState.Ready";
-  const BASE = "/api/homeappliances/HA-1";
-  const remaining = (seconds: number): unknown => ({ key: REMAINING, value: seconds, unit: "seconds" });
-  const progress = (percent: number): unknown => ({ key: PROGRESS, value: percent, unit: "%" });
-
-  /**
-   * An oven running hot air (Home Assistant's test appliance), its run values shown: 30 min left, 10 %.
-   *
-   * @returns the port, the sync, a stream sender and the two shown values
-   */
-  async function runningOven(): Promise<{
-    port: FakePort;
-    sync: ApplianceSync;
-    send: (event: string, items: unknown[]) => void;
-    shown: () => [ioBroker.StateValue | undefined, ioBroker.StateValue | undefined];
-  }> {
-    const port = new FakePort();
-    appliance(port, "HA-1", "Oven", {
-      type: "Oven",
-      status: [{ key: OPERATION_STATE, value: RUN }],
-      available: [HOT_AIR, TOP_BOTTOM],
-    });
-    port.getResponses.set(`${BASE}/programs/active`, { key: HOT_AIR, options: [] });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    const send = (event: string, items: unknown[]): void =>
-      sync.handleStreamEvent({ event, id: "HA-1", data: JSON.stringify({ items }) });
-    const shown = (): [ioBroker.StateValue | undefined, ioBroker.StateValue | undefined] => [
-      port.states.get("oven-1.run.remainingProgramTime"),
-      port.states.get("oven-1.run.programProgress"),
-    ];
-    send("NOTIFY", [remaining(1800), progress(10)]);
-    await flush();
-    expect(shown()).toEqual([30, 10]);
-    return { port, sync, send, shown };
-  }
-
-  const START: Array<[string, unknown[]]> = [
-    ["NOTIFY", [remaining(1200), progress(0)]],
-    ["NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }]],
-    ["STATUS", [{ key: OPERATION_STATE, value: RUN }]],
-  ];
-  const ORDERS = [
-    [0, 1, 2],
-    [0, 2, 1],
-    [1, 0, 2],
-    [1, 2, 0],
-    [2, 0, 1],
-    [2, 1, 0],
-  ];
-  const ENDS: Array<[string, (oven: Awaited<ReturnType<typeof runningOven>>) => Promise<void>]> = [
-    [
-      "the active program cleared",
-      async ({ send }) => {
-        send("NOTIFY", [{ key: ACTIVE, value: null }]);
-        await flush();
-      },
-    ],
-    [
-      "ready",
-      async ({ send }) => {
-        send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
-        await flush();
-      },
-    ],
-    [
-      "a reconnection while ready",
-      async ({ port, sync }) => {
-        port.getResponses.set(`${BASE}/status`, { status: [{ key: OPERATION_STATE, value: READY }] });
-        port.getResponses.set(`${BASE}/programs/active`, null);
-        sync.handleStreamEvent({ event: "DISCONNECTED", id: "HA-1", data: "{}" });
-        sync.handleStreamEvent({ event: "CONNECTED", id: "HA-1", data: "{}" });
-        await flush();
-      },
-    ],
-  ];
-  const CASES = ENDS.flatMap(([end, finish]) => ORDERS.map(order => [end, order.join(","), finish, order] as const));
-
-  it.each(CASES)("shows the run values of a new run after %s, whatever the order of its frames (%s)", async (...c) => {
-    const [, , finish, order] = c;
-    const oven = await runningOven();
-    await finish(oven);
-    expect(oven.shown()).toEqual([null, null]);
-    for (const index of order) {
-      oven.send(...START[index]);
-    }
-    await flush();
-    expect(oven.shown()).toEqual([20, 0]);
-  });
-
-  it("applies the oven's start frame — program and progress in one message — once it runs (forum 85641)", async () => {
-    const { send, shown } = await runningOven();
-    send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
-    await flush();
-    // The frame of the report, 20:22:06.864, as it came.
-    send("NOTIFY", [
-      { key: ACTIVE, value: HOT_AIR },
-      { key: "BSH.Common.Option.Duration", value: 60, unit: "seconds" },
-      progress(100),
-    ]);
-    await flush();
-    expect(shown()).toEqual([null, null]);
-    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
-    await flush();
-    expect(shown()).toEqual([null, 100]);
-  });
-
-  it("drops the run values of a program another one replaces while running — unless the message brings new ones", async () => {
-    const cases: Array<[unknown[], [number | null, number | null]]> = [
-      [[{ key: ACTIVE, value: TOP_BOTTOM }], [null, null]],
-      [
-        [{ key: ACTIVE, value: TOP_BOTTOM }, remaining(600), progress(0)],
-        [10, 0],
-      ],
-      [
-        [remaining(600), progress(0), { key: ACTIVE, value: TOP_BOTTOM }],
-        [10, 0],
-      ],
-      [[{ key: ACTIVE, value: HOT_AIR }], [30, 10]],
-    ];
-    for (const [items, expected] of cases) {
-      const { send, shown } = await runningOven();
-      send("NOTIFY", items);
-      await flush();
-      expect(shown()).toEqual(expected);
-    }
-  });
-
-  it("writes no intermediate value on a program change that brings its run values", async () => {
-    const { port, send, shown } = await runningOven();
-    port.stateWrites.length = 0;
-    send("NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }, remaining(600), progress(0)]);
-    await flush();
-    expect(port.stateWrites.filter(w => w.id.startsWith("oven-1.run."))).toEqual([
-      { id: "oven-1.run.remainingProgramTime", val: 10 },
-      { id: "oven-1.run.programProgress", val: 0 },
-    ]);
-    // The program and its values in two messages right behind each other: the emptying never lands after them.
-    send("NOTIFY", [{ key: ACTIVE, value: HOT_AIR }]);
-    send("NOTIFY", [remaining(300), progress(50)]);
-    await flush();
-    expect(shown()).toEqual([5, 50]);
-  });
-
-  it("keeps the run values over a pause", async () => {
-    const { send, shown } = await runningOven();
-    send("STATUS", [{ key: OPERATION_STATE, value: "BSH.Common.EnumType.OperationState.Pause" }]);
-    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
-    await flush();
-    expect(shown()).toEqual([30, 10]);
-  });
-
-  it("takes the run values of a program that replaced the last one while the stream was away from the re-read", async () => {
-    const cases: Array<[unknown[], [number | null, number | null]]> = [
-      [[], [null, null]],
-      [
-        [remaining(600), progress(50)],
-        [10, 50],
-      ],
-    ];
-    for (const [options, expected] of cases) {
-      const { port, sync, shown } = await runningOven();
-      sync.handleStreamEvent({ event: "DISCONNECTED", id: "HA-1", data: "{}" });
-      port.getResponses.set(`${BASE}/programs/active`, { key: TOP_BOTTOM, options });
-      sync.handleStreamEvent({ event: "CONNECTED", id: "HA-1", data: "{}" });
-      await flush();
-      expect(shown()).toEqual(expected);
-    }
-  });
-
-  it("never holds a run value a read brings while no program is under way", async () => {
-    const port = new FakePort();
-    appliance(port, "HA-1", "Oven", {
-      type: "Oven",
-      status: [{ key: OPERATION_STATE, value: READY }],
-      available: [HOT_AIR, TOP_BOTTOM],
-    });
-    // Left over from the last run (a washer-dryer at rest reads 1 min, 100 %).
-    port.getResponses.set(`${BASE}/programs/selected`, { key: HOT_AIR, options: [remaining(60), progress(100)] });
-    const sync = new ApplianceSync(port);
-    await sync.syncAppliances();
-    sync.handleStreamEvent({
-      event: "STATUS",
-      id: "HA-1",
-      data: JSON.stringify({ items: [{ key: OPERATION_STATE, value: RUN }] }),
-    });
-    await flush();
-    expect(port.states.get("oven-1.run.remainingProgramTime") ?? null).toBeNull();
-    expect(port.states.get("oven-1.run.programProgress") ?? null).toBeNull();
-  });
-
-  it("shows a progress the stream sent after the run ended at the next start, until a fresh one comes (known limit, like Home Assistant)", async () => {
-    const { sync, send, shown } = await runningOven();
-    send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
-    await flush();
-    send("NOTIFY", [progress(100)]);
-    await flush();
-    expect(shown()).toEqual([null, null]);
-    expect(sync.reportState("oven-1")).toMatchObject({ heldRunValues: [PROGRESS], runEnded: true });
-    send("NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }]);
-    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
-    await flush();
-    expect(shown()).toEqual([null, 100]);
-    send("NOTIFY", [progress(3)]);
-    await flush();
-    expect(shown()).toEqual([null, 3]);
   });
 });

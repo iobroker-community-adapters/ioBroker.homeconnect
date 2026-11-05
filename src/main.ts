@@ -786,11 +786,8 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * After a successful sign-in (the first one, and every re-sign-in at runtime):
-   * subscribe, open the stream, read the appliances — the stream first, like Home
-   * Assistant's: a read of every appliance takes up to a minute (forum 85641:
-   * 59.9 s without a live value), and a value the stream sends meanwhile wins over
-   * the older REST answer (`lastStreamAt`). The local steps (migrations, priming,
-   * the unreachable stamp) ran once in onReady.
+   * read the appliances, subscribe, open the stream. The local steps (migrations,
+   * priming, the unreachable stamp) ran once in onReady.
    *
    * Every step is gated on `terminating`. The chain is fire-and-forget, each of
    * its steps takes a while, and a stop right after start would otherwise let
@@ -804,30 +801,15 @@ class Homeconnect extends utils.Adapter {
     // lands in the controller's catch, which can only read it as a failed
     // sign-in: at start-up "Stored login could not be refreshed … retrying"
     // (with a token request every retry). The chain reports its own failures.
-    let current = "state subscription";
+    let current = "appliance sync";
     try {
       if (this.terminating) {
         return;
       }
-      // Each step gets its own catch: a failure in one must not cost the others.
-      // Before, a single broken appliance response ended the chain — the instance
-      // stayed signed in, with no event stream and no state subscription, until
-      // the next restart.
-      try {
-        await this.subscribeStatesAsync("*");
-      } catch (e) {
-        if (this.terminating) {
-          this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
-          return;
-        }
-        this.log.error(`Start-up failed at the ${current}: ${errText(e)}`);
-      }
-      if (this.terminating) {
-        return;
-      }
-      current = "event stream";
-      this.startEventStream();
-      current = "appliance sync";
+      // The appliance read gets its own catch: a failure there must not cost the
+      // write path and the live updates. Before, a single broken response ended
+      // the chain right here — the instance stayed signed in, with no event
+      // stream and no state subscription, until the next restart.
       if (sync) {
         try {
           await sync.syncAppliances();
@@ -836,9 +818,15 @@ class Homeconnect extends utils.Adapter {
             this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
             return;
           }
-          this.log.error(`Setting up the appliances failed: ${errText(e)} — live updates run anyway.`);
+          this.log.error(`Setting up the appliances failed: ${errText(e)} — live updates start anyway.`);
+        }
+        if (this.terminating) {
+          return;
         }
       }
+      current = "state subscription";
+      await this.subscribeStatesAsync("*");
+      this.startEventStream();
     } catch (e) {
       if (this.terminating) {
         this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
@@ -910,7 +898,7 @@ class Homeconnect extends utils.Adapter {
     const downSince = this.streamDownSince;
     this.streamDownSince = undefined;
     if (!this.streamEverUp) {
-      // The first connect of this run: the start-up chain reads every appliance right after opening the stream.
+      // The first connect of this run: the start-up chain already read everything.
       this.streamEverUp = true;
       return;
     }
@@ -1271,22 +1259,13 @@ class Homeconnect extends utils.Adapter {
    */
   private async apiGet(path: string): Promise<unknown> {
     const token = this.authCtl?.accessToken;
-    if (this.terminating) {
-      return undefined;
-    }
-    if (!token || this.restPaused(path)) {
-      this.noteReadGap(path);
+    if (this.terminating || !token || this.restPaused(path)) {
       return undefined;
     }
     const source = `GET ${path}`;
-    // Only a shutdown refuses the place.
-    if (!(await this.spaceRequests())) {
-      return undefined;
-    }
     // Re-checked after the wait: a 429 that arrived while this request queued
     // for its slot pauses it too.
-    if (this.restPaused(path)) {
-      this.noteReadGap(path);
+    if (!(await this.spaceRequests()) || this.restPaused(path)) {
       return undefined;
     }
     let res = await this.sent(getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
@@ -1335,25 +1314,11 @@ class Homeconnect extends utils.Adapter {
         // Refused for good — the sync books it (a definition that keeps failing
         // otherwise cost one request on every reconnect).
         this.sync?.noteRefused(path);
-        return undefined;
       }
-      this.noteReadGap(path);
       return undefined;
     }
     this.restLog.recovered(restLogKey(source), `${source} succeeded.`);
     return res.data;
-  }
-
-  /**
-   * Tell the sync that a read brought nothing and no appliance answer either (a pause, a 429, a 5xx, no answer, a
-   * login that could not be renewed) — with the end of Home Connect's pause, so the appliance is read once more then.
-   *
-   * @param path the request path
-   */
-  private noteReadGap(path: string): void {
-    if (!this.terminating) {
-      this.sync?.noteReadGap(path, Date.now() < this.restBlockedUntil ? this.restBlockedUntil : undefined);
-    }
   }
 
   /**

@@ -319,24 +319,6 @@ function familyOf(values: string[] | undefined, key: string | undefined): string
 const NOT_READY_RETRY_MS = [30_000, 60_000, 120_000] as const;
 
 /**
- * The reads whose answers build an appliance's tree. A pass that missed one of them — or a program definition, the only
- * source of the option datapoints — is not complete: what needs the whole tree (the take-over of a 1.6.x tree, H-09)
- * waits for the next full read (forum 85641, a 429 on `/programs/active`).
- */
-const TREE_READS = new Set([
-  "/status",
-  "/settings",
-  "/commands",
-  "/programs/available",
-  "/programs/selected",
-  "/programs/active",
-]);
-/** A re-read after Home Connect's pause starts this long after the pause ends — a timer may fire on its edge. */
-const GAP_RETRY_MARGIN_MS = 1000;
-/** The stream events that say whether an appliance is there and online — the appliance list says the same, older. */
-const CONNECTION_EVENTS = new Set(["CONNECTED", "PAIRED", "DISCONNECTED", "DEPAIRED"]);
-
-/**
  * The static half of one setting's definition — everything the settings LIST does
  * not carry. `GET /settings` answers `{key, name, value, unit}`; the type, the
  * allowed values and the numeric bounds live only in `GET /settings/{key}`
@@ -357,18 +339,11 @@ const SELECTED_PROGRAM_KEY = "BSH.Common.Root.SelectedProgram";
 /** The operation state: whether a program is under way. */
 const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
 /**
- * The operation states in which a program is under way. Outside them the appliance's remaining time, elapsed time
- * and progress are left over from the last run (a washer-dryer at rest: 1 min, 100 %) — Home Assistant empties them
- * there too ("Otherwise, some sensors report erroneous values", `sensor.py`; the elapsed time since PR #187017 as a
- * program sensor seen only during a run), decision 48 and C-01.
+ * The operation states in which a program is under way. Outside them the appliance's remaining time and
+ * progress are left over from the last run (a washer-dryer at rest: 1 min, 100 %) — Home Assistant empties
+ * both there too ("Otherwise, some sensors report erroneous values", `sensor.py`), decision 48.
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
-/**
- * The operation states that end a program run (Home Assistant PR #187016, `_update_program_run`): a run value the
- * stream sent before them belongs to no later run. The other states outside a run (ActionRequired, Error, Aborting)
- * can lead back into it.
- */
-const RUN_OVER = new Set(["inactive", "ready"]);
 /**
  * A stand-in value of a stored value type — it gives a value-less datapoint its shape when it moves (decision 49).
  *
@@ -384,10 +359,9 @@ const STATISTICS_NAMES: ReadonlyArray<[string, I18nKey]> = [
   ["started", "statStarted"],
   ["runtime", "statRuntime"],
 ];
-/** The run values that only mean something while a program is under way (under `run`, tree-layout.ts; C-01). */
+/** The run values that only mean something while a program is under way (under `run`, tree-layout.ts). */
 const RUN_VALUE_KEYS: ReadonlyMap<string, string> = new Map([
   ["BSH.Common.Option.RemainingProgramTime", "run.remainingProgramTime"],
-  ["BSH.Common.Option.ElapsedProgramTime", "run.elapsedProgramTime"],
   ["BSH.Common.Option.ProgramProgress", "run.programProgress"],
 ]);
 const ACTIVE_PROGRAM_KEY = "BSH.Common.Root.ActiveProgram";
@@ -677,14 +651,6 @@ export class ApplianceSync {
   private readonly retryTimers = new Map<string, unknown>();
   /** device id → how many "not ready" re-reads were armed since the last full read. */
   private readonly retryAttempts = new Map<string, number>();
-  /** device id → the running pass missed a read: when Home Connect's pause ends (epoch ms), 0 when it does not pause. */
-  private readonly readGaps = new Map<string, number>();
-  /** device id → the armed re-read after Home Connect's pause (at most one per appliance). */
-  private readonly gapTimers = new Map<string, unknown>();
-  /** How many appliance-list passes run right now ({@link syncAppliances}). */
-  private listing = 0;
-  /** The connection events that arrived while the appliance list was read and walked, in order. */
-  private readonly heldEvents: SseEvent[] = [];
   /**
    * device id → setting key → its static definition, persisted in the device
    * object's native. Fetched once per setting per appliance; every later start
@@ -715,18 +681,6 @@ export class ApplianceSync {
   private readonly statisticsFolders = new Set<string>();
   /** Appliances whose last operation state says no program is under way (decision 48). */
   private readonly atRest = new Set<string>();
-  /**
-   * device id → BSH key → a run value the stream sent while no program was under way: an appliance may send the
-   * coming run's remaining time and progress before its Run frame. Applied once a program is under way, like Home
-   * Assistant (PR #187016); dropped when the run ends or another program replaces it.
-   */
-  private readonly heldRunValues = new Map<string, Map<string, Record<string, unknown>>>();
-  /** device id → the active program as last reported ("" for none) — tells a new program from the same one. */
-  private readonly activePrograms = new Map<string, string>();
-  /** Appliances whose program run is over (Inactive, Ready or no active program): the next active program starts a new run. */
-  private readonly runEnded = new Set<string>();
-  /** `deviceId|bshKey` → the off value the appliance last reported itself — what switching off sends (H-02). */
-  private readonly reportedOff = new Map<string, string>();
   /** Appliances whose `history` folder was written in this run. */
   private readonly historyFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
@@ -793,9 +747,6 @@ export class ApplianceSync {
     for (const deviceId of [...this.retryTimers.keys()]) {
       this.cancelNotReadyRetry(deviceId);
     }
-    for (const deviceId of [...this.gapTimers.keys()]) {
-      this.cancelGapRetry(deviceId);
-    }
   }
 
   /**
@@ -810,34 +761,6 @@ export class ApplianceSync {
     const deviceId = parsed ? this.deviceIdByHaId.get(parsed.haId) : undefined;
     if (deviceId) {
       this.notReady.add(deviceId);
-    }
-  }
-
-  /**
-   * The transport's report that a read brought nothing and no appliance answer either: Home Connect's pause, a 429,
-   * a 5xx, no answer, a login that could not be renewed. A read that builds the tree ({@link TREE_READS}, a program
-   * definition) makes the running pass incomplete; after a pause the appliance is read once more.
-   *
-   * @param path the request path
-   * @param retryAt when Home Connect's pause ends (epoch ms), if it pauses
-   */
-  noteReadGap(path: string, retryAt?: number): void {
-    const parsed = parseAppliancePath(path);
-    const deviceId = parsed ? this.deviceIdByHaId.get(parsed.haId) : undefined;
-    if (parsed && deviceId && (TREE_READS.has(parsed.subpath) || parsed.subpath.startsWith("/programs/available/"))) {
-      this.markGap(deviceId, retryAt);
-    }
-  }
-
-  /**
-   * Book a gap in the running pass of an appliance — outside a pass (the read-back after a refused write) nothing.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param retryAt when Home Connect's pause ends (epoch ms), if it pauses
-   */
-  private markGap(deviceId: string, retryAt = 0): void {
-    if (this.syncing.has(deviceId)) {
-      this.readGaps.set(deviceId, Math.max(this.readGaps.get(deviceId) ?? 0, retryAt));
     }
   }
 
@@ -944,8 +867,6 @@ export class ApplianceSync {
       },
       runningProgram: this.runningProgram.get(deviceId),
       atRest: this.atRest.has(deviceId),
-      heldRunValues: [...(this.heldRunValues.get(deviceId)?.keys() ?? [])],
-      runEnded: this.runEnded.has(deviceId),
     };
   }
 
@@ -1219,111 +1140,17 @@ export class ApplianceSync {
   }
 
   /**
-   * Write "no value" to the options that only mean something while a program is under way — every write goes out at
-   * once, so a stream message right behind lands after them.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param keep the BSH keys left as they are (the message or the read that brings their new value)
-   */
-  private async emptyRunValues(deviceId: string, keep: ReadonlySet<string> = new Set()): Promise<void> {
-    await Promise.all(
-      [...RUN_VALUE_KEYS]
-        .filter(([key, id]) => !keep.has(key) && this.knownStates.has(`${deviceId}.${id}`))
-        .map(([, id]) => this.port.setStateChanged(`${deviceId}.${id}`, { val: null, ack: true })),
-    );
-  }
-
-  /**
-   * Note whether a program run is over (Home Assistant PR #187016): Inactive and Ready end it, and what the stream
-   * held for it goes; any other state a sync reads says a run may be on.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param value the operation state as sent
-   * @param source where it came from — only a sync's reading clears the mark, like Home Assistant's refresh
-   */
-  private noteRunEnd(deviceId: string, value: string, source: "sync" | "values"): void {
-    if (RUN_OVER.has(shortEnum(value).toLowerCase())) {
-      this.runEnded.add(deviceId);
-      this.heldRunValues.delete(deviceId);
-    } else if (source === "sync") {
-      this.runEnded.delete(deviceId);
-    }
-  }
-
-  /**
-   * Note the active program the appliance reports and say whether the run values shown belong to an earlier run
-   * (Home Assistant PR #187016, `_update_program_run`): no program ends the run, another program replaces it —
-   * unless the run had ended already: then whatever arrived since belongs to the program starting now, and the
-   * program, the same one too, starts a new run.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param value the full program key, "" for none
-   * @returns whether the run ended or was replaced (what was held for it is dropped)
-   */
-  private noteActiveProgram(deviceId: string, value: string): boolean {
-    const previous = this.activePrograms.get(deviceId);
-    this.activePrograms.set(deviceId, value);
-    if (value.length === 0) {
-      this.runEnded.add(deviceId);
-      this.heldRunValues.delete(deviceId);
-      return true;
-    }
-    const ended = this.runEnded.delete(deviceId);
-    if (ended) {
-      // A new run — of the same program too: its run summary pairs with this start, not the last run's (decision 43).
-      this.runningProgram.set(deviceId, { key: value, since: Date.now() });
-    }
-    if (ended || !previous || previous === value) {
-      return false;
-    }
-    this.heldRunValues.delete(deviceId);
-    return true;
-  }
-
-  /**
-   * Hold a run value the stream sends while no program is under way — it is the coming run's; one sent while a
-   * program is under way is shown at once and replaces what was held.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param key the item's BSH key
-   * @param raw the item as the stream sent it
-   */
-  private holdRunValue(deviceId: string, key: string, raw: Record<string, unknown>): void {
-    if (!RUN_VALUE_KEYS.has(key) || raw.value === undefined || raw.value === null) {
-      return;
-    }
-    if (!this.atRest.has(deviceId)) {
-      this.heldRunValues.get(deviceId)?.delete(key);
-      return;
-    }
-    const held = this.heldRunValues.get(deviceId) ?? new Map<string, Record<string, unknown>>();
-    held.set(key, raw);
-    this.heldRunValues.set(deviceId, held);
-  }
-
-  /**
-   * A program got under way: the run values the stream held take the whole value path (unit, rounding, metadata) as
-   * if they arrived now — started before any later message.
+   * Write "no value" to the options that only mean something while a program is under way.
    *
    * @param deviceId the id-safe device path segment
    */
-  private releaseHeldRunValues(deviceId: string): void {
-    const held = this.heldRunValues.get(deviceId);
-    this.heldRunValues.delete(deviceId);
-    for (const raw of held?.values() ?? []) {
-      void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
+  private async emptyRunValues(deviceId: string): Promise<void> {
+    for (const id of RUN_VALUE_KEYS.values()) {
+      const rel = `${deviceId}.${id}`;
+      if (this.knownStates.has(rel)) {
+        await this.port.setStateChanged(rel, { val: null, ack: true });
+      }
     }
-  }
-
-  /**
-   * Whether the stream reported a key after the appliance's current pass began — its value is newer than the pass's.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param key the BSH key
-   * @returns whether it did
-   */
-  private streamedDuringPass(deviceId: string, key: string): boolean {
-    return (this.lastStreamAt.get(`${deviceId}|${key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
   }
 
   /**
@@ -2346,19 +2173,14 @@ export class ApplianceSync {
       if (!haId) {
         return;
       }
-      if (this.listing > 0 && CONNECTION_EVENTS.has(event.event)) {
-        this.heldEvents.push(event);
-        return;
-      }
       const deviceId = this.deviceIdByHaId.get(haId);
 
       // A device coming (back) online, or a newly paired one: (re)build its data tree.
       if (event.event === "CONNECTED" || event.event === "PAIRED") {
         if (deviceId) {
           // The fresh pass takes over from a pending "not ready" re-read, with a
-          // fresh back-off, and from a re-read after Home Connect's pause.
+          // fresh back-off.
           this.cancelNotReadyRetry(deviceId);
-          this.cancelGapRetry(deviceId);
           if (this.syncing.has(deviceId)) {
             this.resyncPending.add(deviceId);
           }
@@ -2384,7 +2206,6 @@ export class ApplianceSync {
       if (event.event === "DISCONNECTED") {
         // Switched off again before it was ready: its next CONNECTED reads it.
         this.cancelNotReadyRetry(deviceId);
-        this.cancelGapRetry(deviceId);
         void this.guarded(() => this.setReachable(deviceId, false));
         return;
       }
@@ -2400,23 +2221,15 @@ export class ApplianceSync {
         return;
       }
 
-      const items = (Array.isArray(payload.items) ? payload.items : []).filter(isRecord);
-      // Before any item is applied: a message can carry the run values of the program that replaces the last one.
-      const program = items.find(raw => raw.key === ACTIVE_PROGRAM_KEY);
-      const programValue = program?.value === null ? "" : program?.value;
-      const runOver = typeof programValue === "string" && this.noteActiveProgram(deviceId, programValue);
+      const items = Array.isArray(payload.items) ? payload.items : [];
       const now = Date.now();
       for (const raw of items) {
-        if (typeof raw.key === "string") {
-          this.lastStreamAt.set(`${deviceId}|${raw.key}`, now);
-          this.holdRunValue(deviceId, raw.key, raw);
+        if (isRecord(raw)) {
+          if (typeof raw.key === "string") {
+            this.lastStreamAt.set(`${deviceId}|${raw.key}`, now);
+          }
+          void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
         }
-        void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
-      }
-      if (runOver) {
-        // What the message does not bring belongs to the run that is over.
-        const carried = new Set(items.filter(raw => raw.value !== undefined && raw.value !== null).map(raw => raw.key));
-        void this.guarded(() => this.emptyRunValues(deviceId, carried as Set<string>));
       }
     } catch (e) {
       this.port.log.warn(`handling stream event failed: ${errText(e)}`);
@@ -2436,34 +2249,8 @@ export class ApplianceSync {
     }
   }
 
-  /**
-   * Fetch the paired appliances and build/update their object tree. The event stream runs meanwhile (it opens first,
-   * like Home Assistant's): a connection event that arrives while the list is read and walked is newer than the list,
-   * so it applies after the walk — applied at once, the walk would put the list's older state back (an appliance
-   * online again after its DISCONNECTED) or set up an appliance the list is just creating a second time.
-   *
-   * @returns whether the cloud answered with a list
-   */
+  /** Fetch the paired appliances and build/update their object tree. */
   async syncAppliances(): Promise<boolean> {
-    this.listing++;
-    try {
-      return await this.walkApplianceList();
-    } finally {
-      this.listing--;
-      if (this.listing === 0) {
-        for (const event of this.heldEvents.splice(0)) {
-          this.handleStreamEvent(event);
-        }
-      }
-    }
-  }
-
-  /**
-   * Read the appliance list and walk it (see {@link syncAppliances}).
-   *
-   * @returns whether the cloud answered with a list
-   */
-  private async walkApplianceList(): Promise<boolean> {
     const data = await this.port.apiGet("/api/homeappliances");
     // A failed or malformed fetch must not report "0 appliances" — nothing was learned.
     if (!isRecord(data) || !Array.isArray(data.homeappliances)) {
@@ -2935,9 +2722,7 @@ export class ApplianceSync {
     this.programDefs.delete(deviceId);
     this.unsupportedPrograms.delete(haId);
     this.cancelNotReadyRetry(deviceId);
-    this.cancelGapRetry(deviceId);
     this.notReady.delete(deviceId);
-    this.readGaps.delete(deviceId);
     this.resyncPending.delete(deviceId);
     this.passStartedAt.delete(deviceId);
     for (const key of [...this.failedDefs.keys()]) {
@@ -2962,14 +2747,6 @@ export class ApplianceSync {
     this.runningProgram.delete(deviceId);
     this.records.delete(deviceId);
     this.atRest.delete(deviceId);
-    this.heldRunValues.delete(deviceId);
-    this.activePrograms.delete(deviceId);
-    this.runEnded.delete(deviceId);
-    for (const key of [...this.reportedOff.keys()]) {
-      if (key.startsWith(`${deviceId}|`)) {
-        this.reportedOff.delete(key);
-      }
-    }
     for (const key of [...this.unreadableRecords]) {
       if (key.startsWith(`${deviceId}|`)) {
         this.unreadableRecords.delete(key);
@@ -3033,7 +2810,6 @@ export class ApplianceSync {
     }
     this.syncing.add(deviceId);
     this.notReady.delete(deviceId);
-    this.readGaps.delete(deviceId);
     this.passStartedAt.set(deviceId, Date.now());
     try {
       const steps: Array<() => Promise<void>> = [
@@ -3062,17 +2838,9 @@ export class ApplianceSync {
           return;
         }
       }
-      const gap = this.readGaps.get(deviceId);
-      if (gap !== undefined) {
-        // Not a full read: nothing that needs the whole tree runs, and after a pause the appliance is read once more.
-        this.readGaps.delete(deviceId);
-        this.scheduleGapRetry(deviceId, haId, gap);
-        return;
-      }
       // A full read: a "not ready" re-read still armed from an earlier pass has
       // nothing left to do (it cost a second full pass of six requests).
       this.cancelNotReadyRetry(deviceId);
-      this.cancelGapRetry(deviceId);
       // Every datapoint the appliance has exists now — the tree the previous adapter
       // generation built for it can hand over what the user attached to it.
       await this.adoptLegacyTree(deviceId, haId);
@@ -3125,63 +2893,6 @@ export class ApplianceSync {
         void this.guarded(() => this.syncApplianceData(deviceId, haId));
       }, delay),
     );
-  }
-
-  /**
-   * Arm the one re-read of an appliance whose pass missed a read during Home Connect's pause, for the moment the pause
-   * ends. A gap without a pause (a 5xx, no answer) is not read again on its own: Home Connect blocks after ten error
-   * answers in a row, and the next reconnect or outage re-read reads the appliance anyway. All on debug.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param haId the appliance's haId
-   * @param retryAt when the pause ends (epoch ms), 0 without one
-   */
-  private scheduleGapRetry(deviceId: string, haId: string, retryAt: number): void {
-    if (
-      retryAt <= 0 ||
-      this.stopped ||
-      this.gapTimers.has(deviceId) ||
-      this.retryTimers.has(deviceId) ||
-      this.reachableByDeviceId.get(deviceId) === false
-    ) {
-      this.port.log.debug(`${this.label(deviceId)} was not read completely — the next full read completes it.`);
-      return;
-    }
-    const delay = Math.max(0, retryAt - Date.now()) + GAP_RETRY_MARGIN_MS;
-    this.port.log.debug(
-      `${this.label(deviceId)} was not read completely — reading it again in ${Math.ceil(delay / 1000)} s, when Home Connect's pause is over.`,
-    );
-    this.gapTimers.set(
-      deviceId,
-      this.port.setTimer(() => {
-        this.gapTimers.delete(deviceId);
-        if (
-          this.stopped ||
-          this.haIdByDeviceId.get(deviceId) !== haId ||
-          this.reachableByDeviceId.get(deviceId) === false
-        ) {
-          return;
-        }
-        if (this.syncing.has(deviceId)) {
-          this.resyncPending.add(deviceId);
-          return;
-        }
-        void this.guarded(() => this.syncApplianceData(deviceId, haId));
-      }, delay),
-    );
-  }
-
-  /**
-   * Drop an appliance's pending re-read after Home Connect's pause.
-   *
-   * @param deviceId the id-safe device path segment
-   */
-  private cancelGapRetry(deviceId: string): void {
-    const handle = this.gapTimers.get(deviceId);
-    if (handle !== undefined) {
-      this.port.clearTimer(handle);
-      this.gapTimers.delete(deviceId);
-    }
   }
 
   /**
@@ -3327,15 +3038,8 @@ export class ApplianceSync {
    * @param source "sync" for a REST sync that owns the metadata; "values" for
    *   value-only items (stream events, and a program's option values — whose
    *   object shape is owned by the option *definition*, not the value item)
-   * @param valueUnknown the item carries metadata only: its value did not arrive and writes nothing (the list of a
-   *   selection whose own read failed)
    */
-  private async applyBshItem(
-    deviceId: string,
-    raw: Record<string, unknown>,
-    source: "sync" | "values",
-    valueUnknown = false,
-  ): Promise<void> {
+  private async applyBshItem(deviceId: string, raw: Record<string, unknown>, source: "sync" | "values"): Promise<void> {
     if (this.stopped || typeof raw.key !== "string") {
       return;
     }
@@ -3349,11 +3053,10 @@ export class ApplianceSync {
     const lockableDoor = LOCKABLE_DOOR_TYPES.has(this.typeByDeviceId.get(deviceId) ?? "");
     // A REST answer that was requested before the stream delivered a newer value
     // for the same key must not put the older one back (a CONNECTED runs both
-    // side by side). Its metadata still counts; its value does not — like an item whose value is unknown.
-    const staleRead = valueUnknown || (source === "sync" && this.streamedDuringPass(deviceId, raw.key));
-    if (typeof value === "string" && !staleRead && switchState(value) === false) {
-      this.reportedOff.set(`${deviceId}|${raw.key}`, value);
-    }
+    // side by side). Its metadata still counts; its value does not.
+    const staleRead =
+      source === "sync" &&
+      (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
     if (isProgramRecordKey(raw.key)) {
       // An encoded record never becomes a datapoint of its own: it is decoded
       // into readable ones (decision 40).
@@ -3362,15 +3065,11 @@ export class ApplianceSync {
     }
     // The operation state decides at once whether a program is under way — before any await, so a run value
     // the stream sends right after it is judged by the new state (decision 48).
-    let restingNow = false;
-    if (raw.key === OPERATION_STATE_KEY && typeof value === "string" && !staleRead) {
-      const wasAtRest = this.atRest.has(deviceId);
-      restingNow = this.noteOperationState(deviceId, value);
-      this.noteRunEnd(deviceId, value, source);
-      if (wasAtRest && !restingNow) {
-        this.releaseHeldRunValues(deviceId);
-      }
-    }
+    const restingNow =
+      raw.key === OPERATION_STATE_KEY &&
+      typeof value === "string" &&
+      !staleRead &&
+      this.noteOperationState(deviceId, value);
     if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       this.noteRunningProgram(deviceId, value);
     }
@@ -3386,10 +3085,9 @@ export class ApplianceSync {
         constraints = { ...constraints, allowedvalues: kept };
       }
     }
-    if (programRoot && !constraints?.allowedvalues) {
-      // Both program roots read from the list the selection offers — one list for
-      // both, or the running program would show as a bare short value and a
-      // streamed selection of an offered program would count as only seen.
+    if (raw.key === ACTIVE_PROGRAM_KEY && !constraints?.allowedvalues) {
+      // The running program reads from the same list the selection offers — one
+      // list for both, or the running program would show as a bare short value.
       const offered = this.knownStates.get(`${deviceId}.programs.selectedProgram`)?.bshValues;
       if (offered && offered.length > 0) {
         constraints = { ...constraints, allowedvalues: offered };
@@ -3502,8 +3200,7 @@ export class ApplianceSync {
   /**
    * Remember the program that is running — the anchor a run summary is paired
    * with to learn the appliance's number for it. "" (idle) keeps the last one:
-   * the summary of a run arrives when the run is over. A new run of the same
-   * program takes its start in {@link noteActiveProgram}.
+   * the summary of a run arrives when the run is over.
    *
    * @param deviceId the id-safe device path segment
    * @param value the full program key of the active program, "" when idle
@@ -4503,32 +4200,19 @@ export class ApplianceSync {
     const listKeys = liveKeys.length > 0 ? liveKeys : hasList ? [] : knownKeys;
 
     // `undefined` means the answer did not arrive (outage, rate pause, busy
-    // appliance) — the selection is unknown, so no value is written and the option
-    // gate keeps its program. Only `null` ("nothing selected") or a record may say
+    // appliance) — nothing is known, so nothing is written and the option gate
+    // keeps its program. Only `null` ("nothing selected") or a record may say
     // "idle": a single timeout used to write "" over a running program and
     // disarm the gate with it, and nothing corrected that until the next full
     // sync — the stream only reports changes.
     const selected = await this.port.apiGet(appliancePath(haId, "/programs/selected"));
     if (selected !== undefined) {
       await this.applySelectedProgram(deviceId, selected, listKeys);
-    } else if (listKeys.length > 0) {
-      // The list still counts: without it the start button stood next to a
-      // selection nobody could choose from (forum 85641, a 429 on this read).
-      await this.applyBshItem(
-        deviceId,
-        { key: SELECTED_PROGRAM_KEY, value: "", constraints: { allowedvalues: listKeys } },
-        "sync",
-        true,
-      );
     }
 
     const active = await this.port.apiGet(appliancePath(haId, "/programs/active"));
     if (active !== undefined) {
       const activeKey = isRecord(active) && typeof active.key === "string" ? active.key : "";
-      // A program that replaced the last one while the stream was away (Home Assistant PR #187016): the run values
-      // shown are the last run's — unless this read or the stream brings new ones.
-      const runOver =
-        !this.streamedDuringPass(deviceId, ACTIVE_PROGRAM_KEY) && this.noteActiveProgram(deviceId, activeKey);
       // Written when there is a value, when the appliance has programs — or when the
       // state already exists: then an "idle" ("") must still overwrite a stale name.
       if (activeKey.length > 0 || knownKeys.length > 0 || this.knownStates.has(`${deviceId}.programs.activeProgram`)) {
@@ -4536,21 +4220,6 @@ export class ApplianceSync {
       }
       if (isRecord(active)) {
         await this.applyProgramOptions(deviceId, active.options);
-      }
-      if (runOver) {
-        const carried = new Set(
-          [...RUN_VALUE_KEYS.keys()].filter(
-            key =>
-              this.streamedDuringPass(deviceId, key) ||
-              [selected, active].some(
-                answer =>
-                  isRecord(answer) &&
-                  Array.isArray(answer.options) &&
-                  answer.options.some(o => isRecord(o) && o.key === key && o.value !== undefined && o.value !== null),
-              ),
-          ),
-        );
-        await this.emptyRunValues(deviceId, carried);
       }
     }
 
@@ -4613,7 +4282,9 @@ export class ApplianceSync {
     let changed = false;
     const refused = this.unsupportedPrograms.get(haId);
     for (const programKey of programKeys) {
-      if (this.notReady.has(deviceId)) {
+      // Near Home Connect's error limit the remaining definitions wait: a later pass asks again, and a selected
+      // program fetches its own.
+      if (this.notReady.has(deviceId) || !this.port.errorBudgetLeft()) {
         break;
       }
       const entry = cached[programKey];
@@ -4622,12 +4293,6 @@ export class ApplianceSync {
       }
       if (!this.mayFetchDef(deviceId, programKey)) {
         continue;
-      }
-      // Near Home Connect's error limit the remaining definitions wait: a later pass asks again, and a selected
-      // program fetches its own. Until then the options they create are missing — the pass is not complete.
-      if (!this.port.errorBudgetLeft()) {
-        this.markGap(deviceId);
-        break;
       }
       const defPath = appliancePath(haId, `/programs/available/${encodeURIComponent(programKey)}`);
       const def = await this.port.apiGet(defPath);
@@ -4994,15 +4659,10 @@ export class ApplianceSync {
         bshValues: channel === "options" ? familyOf(meta?.bshValues, optionKey) : meta?.bshValues,
         collapseEnum: channel === "options",
         value,
-        reportedOff:
-          this.reportedOff.get(`${deviceId}|${optionKey ?? meta?.bshKey}`) ??
-          this.reportedOff.get(`${deviceId}|${meta?.bshKey}`),
-        applianceType: this.typeByDeviceId.get(deviceId),
       };
-      if (channel === "programs" && stateId === "start" && value === true) {
-        const fresh = await this.readSelectionForStart(deviceId, haId);
-        ctx.selectedProgramKey = fresh ? fresh.key : await this.resolveSelectedProgramKey(deviceId);
-        ctx.selectedOptions = fresh ? fresh.options : await this.collectSelectedOptions(deviceId);
+      if (channel === "programs" && stateId === "start") {
+        ctx.selectedProgramKey = await this.resolveSelectedProgramKey(deviceId);
+        ctx.selectedOptions = await this.collectSelectedOptions(deviceId);
       }
       const req = resolveWrite(ctx);
       // Whether Home Connect answered the request at all (taken or refused) — a button press nobody answered stays
@@ -5181,51 +4841,8 @@ export class ApplianceSync {
   }
 
   /**
-   * What the appliance has selected right now, read once before a program start (like Home Assistant's start of the
-   * selected program, `services.py`): a program chosen remotely or at the appliance can leave the values of the one
-   * before in the option datapoints. The answer reaches the tree like any read and re-arms the option gate; the start
-   * takes its program and the options the gate lets through, in the appliance's own values. One request per start.
-   *
-   * @param deviceId the id-safe device path segment
-   * @param haId the appliance's haId
-   * @returns the program (undefined: none selected) and its writable options, or undefined when the read brought nothing
-   */
-  private async readSelectionForStart(
-    deviceId: string,
-    haId: string,
-  ): Promise<{ key: string | undefined; options: Array<{ key: string; value: ioBroker.StateValue }> } | undefined> {
-    // Its own "pass" for the stale-value check, like the read after a rejection.
-    this.passStartedAt.set(deviceId, Date.now());
-    const selected = await this.port.apiGet(appliancePath(haId, "/programs/selected"));
-    if (selected === undefined) {
-      return undefined;
-    }
-    await this.applySelectedProgram(deviceId, selected, []);
-    if (!isRecord(selected) || typeof selected.key !== "string" || selected.key.length === 0) {
-      return { key: undefined, options: [] };
-    }
-    const writable = new Set(
-      [...(this.optionKeys.get(deviceId) ?? [])].map(id =>
-        this.optionKeyFor(deviceId, id, this.knownStates.get(`${deviceId}.options.${id}`)?.bshKey),
-      ),
-    );
-    const options: Array<{ key: string; value: ioBroker.StateValue }> = [];
-    for (const o of Array.isArray(selected.options) ? selected.options : []) {
-      if (
-        isRecord(o) &&
-        typeof o.key === "string" &&
-        writable.has(o.key) &&
-        (typeof o.value === "string" || typeof o.value === "number" || typeof o.value === "boolean")
-      ) {
-        options.push({ key: o.key, value: o.value });
-      }
-    }
-    return { key: selected.key, options };
-  }
-
-  /**
    * Collect the selected program's option values, resolved back to their BSH
-   * values, to send with a program start — when the appliance's own selection could not be read.
+   * values, to send with a program start.
    *
    * @param deviceId the id-safe device path segment
    * @returns the option key/value pairs for the start body

@@ -4,7 +4,7 @@
 // unit-testable like oauth / http / value-transformer / sse-parser.
 
 import { shortEnum, shortEnumIn } from "./value-transformer";
-import { switchValue, type SwitchHint } from "./switch-values";
+import { switchValue } from "./switch-values";
 import { fromShown, shownPresentation } from "./value-units";
 
 /** The context of a single writable-state change, gathered by the adapter from the state + its object. */
@@ -27,10 +27,6 @@ export interface WriteContext {
   collapseEnum?: boolean;
   /** The written value. */
   value: ioBroker.StateValue;
-  /** The off value the appliance last reported itself for this key — what switching off sends first. */
-  reportedOff?: string;
-  /** The appliance type ("Oven", …) — picks the power state's off value from Home Connect's table. */
-  applianceType?: string;
   /** The full BSH key of the currently selected program — the payload of the "start" button. */
   selectedProgramKey?: string;
   /** The resolved option values to send with a program start (empty/absent = start with defaults). */
@@ -65,9 +61,8 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
   const base = `/api/homeappliances/${encodeURIComponent(ctx.haId)}`;
   const key = ctx.bshKey === undefined ? undefined : encodeURIComponent(ctx.bshKey);
 
-  const hint: SwitchHint = { reported: ctx.reportedOff, applianceType: ctx.applianceType, key: ctx.bshKey };
   if (ctx.channel === "settings" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey, hint);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
       return null;
     }
@@ -85,7 +80,7 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
   // a start). Writing to the active program is state-gated by the appliance and 409s
   // in most states, so a single predictable target is correct (decision 7).
   if (ctx.channel === "options" && ctx.bshKey) {
-    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey, hint);
+    const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
       return null;
     }
@@ -125,7 +120,6 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
  * @param bshValues the full candidate values, if this is an enum or a switch
  * @param collapse whether several matching candidates mean the same thing
  * @param key the BSH key the value goes out with
- * @param hint what a switch-off knows besides the candidates (switch-values.ts)
  * @returns the API value, or undefined to ignore the write (unknown enum value, no off value)
  */
 export function resolveValue(
@@ -133,10 +127,9 @@ export function resolveValue(
   bshValues?: string[],
   collapse = false,
   key?: string,
-  hint?: SwitchHint,
 ): ioBroker.StateValue | undefined {
   if (typeof value === "boolean" && bshValues && bshValues.length > 0) {
-    return switchValue(value, bshValues, hint);
+    return switchValue(value, bshValues);
   }
   if (bshValues && bshValues.length > 0) {
     return resolveEnum(value, bshValues, collapse);

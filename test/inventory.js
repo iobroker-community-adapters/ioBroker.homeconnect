@@ -352,10 +352,10 @@ async function waitForEveryAppliance(harness) {
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  */
 async function waitForAdapterWork(harness) {
-  // homeconnect: the start chain subscribes, opens the event stream (`info.connection` turns true with it) and reads
-  // the appliances last; `info.devicesOnline` is flushed once at the end of that whole pass (the start stamps every
-  // appliance offline first) — the last write of the chain. The fixture stream sends one keep-alive and nothing else,
-  // so nothing is written after it.
+  // homeconnect: `info.devicesOnline` is flushed once at the end of the whole appliance pass (the start stamps every
+  // appliance offline first), and `info.connection` turns true only after the pass, the subscription and the event
+  // stream — the last step of the start chain. The fixture stream sends one keep-alive and nothing else, so nothing is
+  // written after it.
   const deadline = Date.now() + 300000;
   for (;;) {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);

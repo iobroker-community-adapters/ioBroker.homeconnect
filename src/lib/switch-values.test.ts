@@ -43,25 +43,6 @@ describe("on/off switches (decision 47)", () => {
     expect(switchValue(false, [`${p}.On`])).toBeUndefined();
   });
 
-  it("switches off with the reported off value first, then the power state table's value for the type (H-02)", () => {
-    const p = "BSH.Common.EnumType.PowerState";
-    const key = "BSH.Common.Setting.PowerState";
-    const oven = [`${p}.MainsOff`, `${p}.Off`, `${p}.On`, `${p}.Standby`];
-    // Forum 85641: the oven offers Off and refuses it — the table names Standby alone for ovens.
-    expect(switchValue(false, oven, { applianceType: "Oven", key })).toBe(`${p}.Standby`);
-    expect(switchValue(false, oven, { applianceType: "Oven", key, reported: `${p}.Off` })).toBe(`${p}.Off`);
-    // A reported value the appliance does not offer, or one that is not off, is passed over.
-    expect(switchValue(false, [`${p}.On`, `${p}.Off`], { reported: `${p}.Standby` })).toBe(`${p}.Off`);
-    expect(switchValue(false, [`${p}.On`, `${p}.Off`, `${p}.Standby`], { reported: `${p}.On` })).toBe(`${p}.Off`);
-    // The table only speaks for the power state, and only where it names one value the appliance offers.
-    expect(switchValue(false, oven, { applianceType: "Oven", key: "BSH.Common.Setting.TimeLight" })).toBe(`${p}.Off`);
-    expect(switchValue(false, [`${p}.On`, `${p}.Off`], { applianceType: "Oven", key })).toBe(`${p}.Off`);
-    expect(switchValue(false, [`${p}.On`, `${p}.Standby`, `${p}.Off`], { applianceType: "Microwave", key })).toBe(
-      `${p}.Off`,
-    );
-    expect(switchValue(true, oven, { applianceType: "Oven", key, reported: `${p}.Standby` })).toBe(`${p}.On`);
-  });
-
   it("gives the power its own role and a switch the appliance only reports an indicator", () => {
     expect(switchRole("BSH.Common.Setting.PowerState", true)).toBe("switch.power");
     expect(switchRole("Dishcare.Dishwasher.Setting.TimeLight", true)).toBe("switch");
