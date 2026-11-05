@@ -78,7 +78,7 @@ krobi's decisions for this adapter. The register with his verbatim words lives i
 - **H-13** An appliance answering 'not ready' after being switched on is read again by the adapter after 30, 60 and 120 s; giving up is logged on debug only.
 - **H-14** When a Home Connect quota blocks, the log says which limit and for how long, in one line, without overdoing it.
 - **B-02** An appliance Home Connect reports as removed from the account (DEPAIRED) has its tree deleted; an appliance that is merely switched off keeps its tree.
-- **C-01** Outside a run (operation state not DelayedStart, Run, Pause or Finished) remaining time and progress show no value — not 0.
+- **C-01** Outside a run (operation state not DelayedStart, Run, Pause or Finished) remaining time, elapsed time and progress show no value — not 0.
 
 <!-- core-decisions:end -->
 
