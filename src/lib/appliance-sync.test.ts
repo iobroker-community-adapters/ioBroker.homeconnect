@@ -935,6 +935,92 @@ describe("ApplianceSync.handleStreamEvent", () => {
     expect(port.extendCalls.filter(x => x === id).length).toBeLessThanOrEqual(3);
   });
 
+  describe("a connection event for an appliance the pass has listed but not reached yet", () => {
+    // The list says whether an appliance was connected when the list was read; an event after it is newer. Since
+    // the stream opens right after the list, such an event can come before the pass reaches its appliance.
+    const KEY = "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator";
+
+    /**
+     * An oven and a fridge on the account; the list reports the fridge as given.
+     *
+     * @param fridgeListed whether the list reports the fridge as connected
+     * @param restarted whether the tree exists from an earlier run (else a fresh installation)
+     * @returns the port and the sync of the run under test
+     */
+    async function account(
+      fridgeListed: boolean,
+      restarted: boolean,
+    ): Promise<{ port: FakePort; sync: ApplianceSync }> {
+      const port = new FakePort();
+      appliance(port, "HA-1", "Oven", { type: "Oven", status: [] });
+      appliance(port, "HA-2", "Kuehl", { type: "FridgeFreezer", status: [], settings: [{ key: KEY, value: 4 }] });
+      // What a CONNECTED for an appliance the run does not know yet fetches.
+      port.getResponses.set("/api/homeappliances/HA-2", {
+        haId: "HA-2",
+        name: "Kuehl",
+        connected: true,
+        type: "FridgeFreezer",
+        enumber: "Kuehl",
+      });
+      let sync = new ApplianceSync(port);
+      if (restarted) {
+        await sync.syncAppliances();
+        sync = await restart(port);
+      }
+      const list = port.getResponses.get("/api/homeappliances") as { homeappliances: Array<Record<string, unknown>> };
+      list.homeappliances[1].connected = fridgeListed;
+      port.getCalls.length = 0;
+      return { port, sync };
+    }
+
+    /**
+     * Run a pass that receives the given event right after its list.
+     *
+     * @param sync the sync under test
+     * @param event the stream event's name
+     */
+    async function passWith(sync: ApplianceSync, event: string): Promise<void> {
+      await sync.syncAppliances(() =>
+        sync.handleStreamEvent({ event, id: "HA-2", data: JSON.stringify({ haId: "HA-2" }) }),
+      );
+      await flush();
+    }
+
+    const reads = (port: FakePort, path: string): number => port.getCalls.filter(p => p === path).length;
+
+    it.each([false, true])("reads a CONNECTED appliance once (tree from an earlier run: %s)", async restarted => {
+      const { port, sync } = await account(true, restarted);
+      await passWith(sync, "CONNECTED");
+      expect(reads(port, "/api/homeappliances/HA-2/status")).toBe(1);
+      expect(reads(port, "/api/homeappliances/HA-2")).toBe(0);
+      expect(port.states.get("kuehl-2.info.reachable")).toBe(true);
+    });
+
+    it("reads an appliance the list called offline as online once it connected", async () => {
+      const { port, sync } = await account(false, true);
+      await passWith(sync, "CONNECTED");
+      expect(reads(port, "/api/homeappliances/HA-2/status")).toBe(1);
+      expect(port.states.get("kuehl-2.info.reachable")).toBe(true);
+    });
+
+    it("does not read an appliance that disconnected after the list, and shows it offline", async () => {
+      const { port, sync } = await account(true, true);
+      await passWith(sync, "DISCONNECTED");
+      expect(reads(port, "/api/homeappliances/HA-2/status")).toBe(0);
+      expect(port.states.get("kuehl-2.info.reachable")).toBe(false);
+    });
+
+    it.each([false, true])(
+      "does not build an appliance removed after the list again (earlier run: %s)",
+      async restarted => {
+        const { port, sync } = await account(true, restarted);
+        await passWith(sync, "DEPAIRED");
+        expect(reads(port, "/api/homeappliances/HA-2/status")).toBe(0);
+        expect([...port.objects.keys()].filter(id => id.startsWith("kuehl-2"))).toEqual([]);
+      },
+    );
+  });
+
   it("fetches only the affected appliance on a CONNECTED for an unknown haId", async () => {
     const port = new FakePort();
     port.getResponses.set("/api/homeappliances/HA-NEW", { haId: "HA-NEW", name: "New Oven", connected: false });
@@ -4461,6 +4547,20 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
       await (await restart(port)).syncAppliances();
       expect(port.states.get(id)).toBe(0);
       expect(port.acks.get(id)).toBe(true);
+    });
+
+    it("keeps the start value over a restart when the appliance reports none for it, and sends it with the start", async () => {
+      const { port, deviceId, id } = await wished();
+      port.getResponses.set("/api/homeappliances/HA-1/programs/selected", {
+        key: "Dishcare.Dishwasher.Program.Eco50",
+        options: [],
+      });
+      const sync = await restart(port);
+      await sync.syncAppliances();
+      expect(port.states.get(id)).toBe(30);
+      expect(port.acks.get(id)).toBe(false);
+      await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+      expect(port.writes.at(-1)?.body?.options).toContainEqual({ key: START, value: 1800 });
     });
   });
 

@@ -615,6 +615,16 @@ export class ApplianceSync {
    * next reconnect or the re-read after an event-stream outage (at most one per hour).
    */
   private readonly resyncPending = new Set<string>();
+  /**
+   * The appliances a running pass has listed and not reached yet (haId → how many passes wait for it), and what
+   * their own connection events said since. The list tells whether an appliance was connected when the list was
+   * read; an event after it is newer. Since the stream opens right after the list (krobi 2026-11-05 18:50, "Strom
+   * zuerst"), such an event can come before the pass reaches its appliance — the pass then goes by the event: one
+   * read instead of a second one alongside, no "offline" from the list after a CONNECTED, no read of an appliance
+   * that went away, and no tree built again for one that was removed.
+   */
+  private readonly listedNotReached = new Map<string, number>();
+  private readonly connectionSinceList = new Map<string, "connected" | "disconnected" | "removed">();
   /** device id → epoch-ms the running (or last) data pass started. */
   private readonly passStartedAt = new Map<string, number>();
   /**
@@ -2196,6 +2206,28 @@ export class ApplianceSync {
       }
       const deviceId = this.deviceIdByHaId.get(haId);
 
+      // An appliance a running pass has listed and not reached yet: the pass reads it by this event's word
+      // instead of the older list's (see listedNotReached). A removal still takes away what is known at once.
+      if (this.listedNotReached.has(haId)) {
+        const word =
+          event.event === "CONNECTED" || event.event === "PAIRED"
+            ? "connected"
+            : event.event === "DISCONNECTED"
+              ? "disconnected"
+              : event.event === "DEPAIRED"
+                ? "removed"
+                : undefined;
+        if (word) {
+          this.connectionSinceList.set(haId, word);
+          if (word !== "removed") {
+            if (deviceId) {
+              this.cancelNotReadyRetry(deviceId);
+            }
+            return;
+          }
+        }
+      }
+
       // A device coming (back) online, or a newly paired one: (re)build its data tree.
       if (event.event === "CONNECTED" || event.event === "PAIRED") {
         if (deviceId) {
@@ -2286,7 +2318,6 @@ export class ApplianceSync {
       // that never happened, nor start its cooldown on it.
       return false;
     }
-    onList?.();
     const list = data.homeappliances;
     // The summary comes FIRST — before any per-device work writes its lines
     // (fleet convention; the old trailing "N found" read like an afterthought).
@@ -2299,19 +2330,26 @@ export class ApplianceSync {
     // One flush of the three sums at the end of the pass, not after every
     // appliance — see {@link rollupBatched}.
     this.rollupBatched = true;
+    const waiting = this.markListed(list);
     try {
+      onList?.();
       for (const raw of list) {
         if (this.stopped) {
           break;
         }
         if (isRecord(raw)) {
+          const since = typeof raw.haId === "string" ? this.reachListed(raw.haId, waiting) : undefined;
+          if (since === "removed") {
+            // Its DEPAIRED already removed what was known; the list read before it does not build it again.
+            continue;
+          }
           if (typeof raw.haId === "string") {
             seen.add(raw.haId);
           }
           // One appliance whose objects cannot be written must not cost the
           // others, the removal pass and the sums: the failure stays with it.
           try {
-            await this.syncAppliance(raw);
+            await this.syncAppliance(since === undefined ? raw : { ...raw, connected: since === "connected" });
           } catch (e) {
             if (this.stopped) {
               break;
@@ -2323,6 +2361,9 @@ export class ApplianceSync {
       }
     } finally {
       this.rollupBatched = false;
+      for (const haId of waiting) {
+        this.releaseListed(haId);
+      }
     }
     if (this.stopped) {
       // Stopped mid-pass: the rollup and the removal pass below belong to a
@@ -2362,6 +2403,53 @@ export class ApplianceSync {
       }
     }
     return true;
+  }
+
+  /**
+   * Note every appliance of a fresh list as waiting for this pass (see {@link listedNotReached}).
+   *
+   * @param list the appliance list as it arrived
+   * @returns the haIds this pass has still to reach
+   */
+  private markListed(list: readonly unknown[]): Set<string> {
+    const waiting = new Set<string>();
+    for (const raw of list) {
+      if (isRecord(raw) && typeof raw.haId === "string" && !waiting.has(raw.haId)) {
+        waiting.add(raw.haId);
+        this.listedNotReached.set(raw.haId, (this.listedNotReached.get(raw.haId) ?? 0) + 1);
+      }
+    }
+    return waiting;
+  }
+
+  /**
+   * The pass reaches an appliance of its list: what the appliance's own events said since the list, if anything.
+   *
+   * @param haId the appliance
+   * @param waiting the haIds this pass has still to reach
+   * @returns the newest word of its connection events, or undefined when the list is still the newest
+   */
+  private reachListed(haId: string, waiting: Set<string>): "connected" | "disconnected" | "removed" | undefined {
+    const since = this.connectionSinceList.get(haId);
+    if (waiting.delete(haId)) {
+      this.releaseListed(haId);
+    }
+    return since;
+  }
+
+  /**
+   * One pass no longer waits for an appliance; the last one to let go forgets what its events said.
+   *
+   * @param haId the appliance
+   */
+  private releaseListed(haId: string): void {
+    const left = (this.listedNotReached.get(haId) ?? 1) - 1;
+    if (left > 0) {
+      this.listedNotReached.set(haId, left);
+    } else {
+      this.listedNotReached.delete(haId);
+      this.connectionSinceList.delete(haId);
+    }
   }
 
   /**

@@ -131,6 +131,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: a delayed start (start in / finished in) is sent with the program start
 - (krobipd) Fixed: a refused start with a delayed start set is no longer retried without the options, which would start the program at once
 - (krobipd) Fixed: live updates start right after the appliance list, so no event is lost while the appliances are read
+- (krobipd) Fixed: an appliance that connects, disconnects or is removed while the appliances are being read is read and shown by that newer state
 
 <!--
     Placeholder for the next version (at the beginning of the line): 
