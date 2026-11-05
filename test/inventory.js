@@ -353,9 +353,10 @@ async function waitForEveryAppliance(harness) {
  */
 async function waitForAdapterWork(harness) {
   // homeconnect: `info.devicesOnline` is flushed once at the end of the whole appliance pass (the start stamps every
-  // appliance offline first), and `info.connection` turns true only after the pass, the subscription and the event
-  // stream — the last step of the start chain. The fixture stream sends one keep-alive and nothing else, so nothing is
-  // written after it.
+  // appliance offline first) — the last value the start chain writes; only the state subscription follows, which writes
+  // nothing. `info.connection` turns true once signed in and the event stream is up, which opens right after the
+  // appliance list, before the appliances are read (decision 32), so it is no end marker on its own. The fixture stream
+  // sends one keep-alive and nothing else, so nothing is written after the pass.
   const deadline = Date.now() + 300000;
   for (;;) {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);

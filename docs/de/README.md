@@ -67,7 +67,7 @@ Zwei Eigenschaften sind wichtig zu wissen:
 
 - **Eine Einstellung:** den Wert in den Datenpunkt unter `settings` schreiben. `"true"`, `1` und `true` funktionieren gleichermaßen — der Adapter wandelt vor dem Senden in den Typ des Datenpunkts.
 - **Ein Programm starten:** in `programs.selectedProgram` wählen, die gewünschten Optionen unter `options` setzen, dann `programs.start` auf `true`. Der Adapter schickt die gewählten Optionen mit dem Start; verweigert das Gerät diese Kombination, wiederholt er einmal mit den Vorgaben des Programms — außer bei gesetzter Startzeitvorwahl, denn mit den Vorgaben liefe das Programm sofort los.
-- **Startzeitvorwahl:** `options.startInRelative` (Start in … Minuten) oder `options.finishInRelative` (fertig in … Minuten) vor dem Start setzen. Home Connect nimmt beide nur mit dem Start an: Der Wert bleibt unbestätigt stehen, bis `programs.start` ihn mitschickt. Wartet das Gerät auf den Start (Betriebszustand „Startzeitvorwahl“), ändert eine neue Zeit das laufende Programm.
+- **Startzeitvorwahl:** `options.startInRelative` (Start in … Minuten) oder `options.finishInRelative` (fertig in … Minuten) vor dem Start setzen. Home Connect nimmt beide nur mit dem Start an: Der Wert bleibt unbestätigt stehen, bis `programs.start` ihn mitschickt. Startet der Adapter vor dem Programmstart neu, ersetzt ein Wert, den das Gerät dafür meldet, die gesetzte Zeit — dann die Zeit vor dem Start neu setzen. Wartet das Gerät auf den Start (Betriebszustand „Startzeitvorwahl“), ändert eine neue Zeit das laufende Programm.
 - **Ein Programm stoppen:** `programs.stop` auf `true` setzen.
 - **Einen Befehl auslösen:** die Schaltfläche unter `commands` auf `true` setzen; sie fällt von selbst auf `false` zurück.
 

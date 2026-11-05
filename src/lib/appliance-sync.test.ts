@@ -443,6 +443,31 @@ function appliance(
   }
 }
 
+/**
+ * A restart of the adapter on the same database: the stored objects become what the next process primes from, and
+ * a new sync with nothing in memory takes over.
+ *
+ * @param port the port whose stored objects the restart finds
+ * @returns the new process's sync, primed from the stored tree
+ */
+async function restart(port: FakePort): Promise<ApplianceSync> {
+  const byType: Record<string, Record<string, ioBroker.Object>> = {
+    device: port.primeDevices,
+    channel: port.primeChannels,
+    folder: port.primeFolders,
+    state: port.primeStates,
+  };
+  for (const [id, obj] of port.objects) {
+    const into = byType[(obj as ioBroker.Object).type];
+    if (into) {
+      into[`${NS}.${id}`] = structuredClone(obj) as ioBroker.Object;
+    }
+  }
+  const sync = new ApplianceSync(port);
+  await sync.primeFromObjects();
+  return sync;
+}
+
 describe("ApplianceSync.syncAppliances", () => {
   let port: FakePort;
   let sync: ApplianceSync;
@@ -867,6 +892,47 @@ describe("ApplianceSync.handleStreamEvent", () => {
     // Without a value the transformer can only guess text; that guess must not
     // refresh the metadata, stale or not (measured: number → string).
     expect((port.objects.get(id)?.common as ioBroker.StateCommon | undefined)?.type).toBe("number");
+  });
+
+  it("takes an event that arrives after the list and before its appliance is read, then the newer read", async () => {
+    // The stream opens right after the appliance list (krobi 2026-11-05 18:50, "Strom zuerst"), so an appliance
+    // can report while the one before it is still being read.
+    const port = new FakePort();
+    const key = "Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator";
+    appliance(port, "HA-1", "Oven", { type: "Oven", status: [] });
+    appliance(port, "HA-2", "Kuehl", { type: "FridgeFreezer", status: [], settings: [{ key, value: 4, unit: "°C" }] });
+    await new ApplianceSync(port).syncAppliances();
+    const id = "kuehl-2.settings.setpointTemperatureRefrigerator";
+    expect(port.objects.has(id)).toBe(true);
+    // The datapoint is not in the stored tree yet (an update brings it), and the appliance changes once more
+    // between its event and its read.
+    port.objects.delete(id);
+    port.states.delete(id);
+    port.getResponses.set("/api/homeappliances/HA-2/settings", { settings: [{ key, value: 6, unit: "°C" }] });
+    const sync = await restart(port);
+    port.extendCalls.length = 0;
+    port.stateWrites.length = 0;
+
+    // The fake answers at once, so the event and the start of the second appliance's pass can fall into the same
+    // millisecond — which the stale check rightly reads as "the stream is newer". In the field the first
+    // appliance's requests lie between them; a clock that moves on every reading models that.
+    let clock = Date.now();
+    const now = vi.spyOn(Date, "now").mockImplementation(() => ++clock);
+    try {
+      await sync.syncAppliances(() =>
+        sync.handleStreamEvent({ event: "NOTIFY", id: "HA-2", data: JSON.stringify({ items: [{ key, value: 5 }] }) }),
+      );
+      await flush();
+    } finally {
+      now.mockRestore();
+    }
+    // The event lands at once, and the read sent after it is the newer value — not judged stale.
+    expect(port.stateWrites.filter(w => w.id === id).map(w => w.val)).toEqual([5, 6]);
+    const common = port.objects.get(id)?.common as ioBroker.StateCommon | undefined;
+    expect(common?.type).toBe("number");
+    expect(common?.unit).toBe("°C");
+    // The fleet's object-write rule of the inventory suites: at most three writes per object and start.
+    expect(port.extendCalls.filter(x => x === id).length).toBeLessThanOrEqual(3);
   });
 
   it("fetches only the affected appliance on a CONNECTED for an unknown haId", async () => {
@@ -4388,6 +4454,13 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
       notify(sync, [{ key: START, value: 0, unit: "seconds" }]);
       await flush();
       expect(port.states.get(id)).toBe(0);
+    });
+
+    it("lets the appliance's value replace the start value after a restart before the start, as the docs say", async () => {
+      const { port, id } = await wished();
+      await (await restart(port)).syncAppliances();
+      expect(port.states.get(id)).toBe(0);
+      expect(port.acks.get(id)).toBe(true);
     });
   });
 

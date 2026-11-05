@@ -67,7 +67,7 @@ Two properties are worth knowing:
 
 - **A setting:** write the value into the data point under `settings`. `"true"`, `1` and `true` all work — the adapter converts to the data point's type before sending.
 - **Start a program:** pick it in `programs.selectedProgram`, set the options you want under `options`, then set `programs.start` to `true`. The adapter sends the selected options with the start; if the appliance refuses that combination, it retries once with the program's defaults — except with a delayed start set, because the defaults would start the program at once.
-- **Delayed start:** set `options.startInRelative` (start in … minutes) or `options.finishInRelative` (finished in … minutes) before the start. Home Connect takes both only with the start: the value stays unconfirmed until `programs.start` sends it along. While the appliance waits for its start (operation state "Delayed start"), a new time changes the program under way.
+- **Delayed start:** set `options.startInRelative` (start in … minutes) or `options.finishInRelative` (finished in … minutes) before the start. Home Connect takes both only with the start: the value stays unconfirmed until `programs.start` sends it along. If the adapter restarts before the program start, a value the appliance reports for it replaces the time you set — then set the time again before the start. While the appliance waits for its start (operation state "Delayed start"), a new time changes the program under way.
 - **Stop a program:** set `programs.stop` to `true`.
 - **A command:** set the button under `commands` to `true`; it falls back to `false` by itself.
 
