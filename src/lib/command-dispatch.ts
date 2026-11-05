@@ -31,6 +31,8 @@ export interface WriteContext {
   applianceType?: string;
   /** The off value the appliance last reported for this key — the microwave's switch-off goes by it (H-02). */
   reportedOff?: string;
+  /** An option goes to the active program instead of the selected one (a start value in DelayedStart). */
+  toActiveProgram?: boolean;
   /** The full BSH key of the currently selected program — the payload of the "start" button. */
   selectedProgramKey?: string;
   /** The resolved option values to send with a program start (empty/absent = start with defaults). */
@@ -83,13 +85,15 @@ export function resolveWrite(ctx: WriteContext): WriteRequest | null {
 
   // A program option → set it on the selected program (the one you configure before
   // a start). Writing to the active program is state-gated by the appliance and 409s
-  // in most states, so a single predictable target is correct (decision 7).
+  // in most states, so a single predictable target is correct (decision 7) — except a
+  // start value in DelayedStart, the one state Home Connect lets it change in.
   if (ctx.channel === "options" && ctx.bshKey) {
     const value = resolveValue(ctx.value, ctx.bshValues, ctx.collapseEnum, ctx.bshKey);
     if (value === undefined) {
       return null;
     }
-    return { method: "PUT", path: `${base}/programs/selected/options/${key}`, body: { key: ctx.bshKey, value } };
+    const program = ctx.toActiveProgram === true ? "active" : "selected";
+    return { method: "PUT", path: `${base}/programs/${program}/options/${key}`, body: { key: ctx.bshKey, value } };
   }
 
   if (ctx.channel === "programs") {

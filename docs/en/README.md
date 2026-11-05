@@ -66,7 +66,8 @@ Two properties are worth knowing:
 ## Operating appliances
 
 - **A setting:** write the value into the data point under `settings`. `"true"`, `1` and `true` all work — the adapter converts to the data point's type before sending.
-- **Start a program:** pick it in `programs.selectedProgram`, set the options you want under `options`, then set `programs.start` to `true`. The adapter sends the selected options with the start; if the appliance refuses that combination, it retries once with the program's defaults.
+- **Start a program:** pick it in `programs.selectedProgram`, set the options you want under `options`, then set `programs.start` to `true`. The adapter sends the selected options with the start; if the appliance refuses that combination, it retries once with the program's defaults — except with a delayed start set, because the defaults would start the program at once.
+- **Delayed start:** set `options.startInRelative` (start in … minutes) or `options.finishInRelative` (finished in … minutes) before the start. Home Connect takes both only with the start: the value stays unconfirmed until `programs.start` sends it along. While the appliance waits for its start (operation state "Delayed start"), a new time changes the program under way.
 - **Stop a program:** set `programs.stop` to `true`.
 - **A command:** set the button under `commands` to `true`; it falls back to `false` by itself.
 
@@ -90,6 +91,7 @@ What you have to do:
 
 1. Make a backup before the update. Going back to 1.x is not supported — the old tree is removed once it has been handed over, and 1.x cannot read the login 2.0 stores encrypted.
 2. Adjust your scripts and visualizations to the new IDs. The table lists, for the last part of every old ID, the datapoint that replaces it (below the new device folder). Rows marked (decoded) are new datapoints read from the old raw value; rooms, functions, aliases and recordings of the old raw datapoint are not carried to them.
+3. Select and start programs the new way: in 1.x every option stood per program under `programs.selected.options.<program>`, and a program started with a write to `programs.active.BSH_Common_Root_ActiveProgram`. In 2.0 you pick the program in `programs.selectedProgram`, set the options under `options` (a delayed start there too) and start with `programs.start` — see [Operating appliances](#operating-appliances).
 
 | Old ID, last part (1.x)                                                        | New datapoint (2.0)                                                    |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |

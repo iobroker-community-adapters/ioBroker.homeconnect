@@ -66,7 +66,8 @@ Zwei Eigenschaften sind wichtig zu wissen:
 ## Geräte bedienen
 
 - **Eine Einstellung:** den Wert in den Datenpunkt unter `settings` schreiben. `"true"`, `1` und `true` funktionieren gleichermaßen — der Adapter wandelt vor dem Senden in den Typ des Datenpunkts.
-- **Ein Programm starten:** in `programs.selectedProgram` wählen, die gewünschten Optionen unter `options` setzen, dann `programs.start` auf `true`. Der Adapter schickt die gewählten Optionen mit dem Start; verweigert das Gerät diese Kombination, wiederholt er einmal mit den Vorgaben des Programms.
+- **Ein Programm starten:** in `programs.selectedProgram` wählen, die gewünschten Optionen unter `options` setzen, dann `programs.start` auf `true`. Der Adapter schickt die gewählten Optionen mit dem Start; verweigert das Gerät diese Kombination, wiederholt er einmal mit den Vorgaben des Programms — außer bei gesetzter Startzeitvorwahl, denn mit den Vorgaben liefe das Programm sofort los.
+- **Startzeitvorwahl:** `options.startInRelative` (Start in … Minuten) oder `options.finishInRelative` (fertig in … Minuten) vor dem Start setzen. Home Connect nimmt beide nur mit dem Start an: Der Wert bleibt unbestätigt stehen, bis `programs.start` ihn mitschickt. Wartet das Gerät auf den Start (Betriebszustand „Startzeitvorwahl“), ändert eine neue Zeit das laufende Programm.
 - **Ein Programm stoppen:** `programs.stop` auf `true` setzen.
 - **Einen Befehl auslösen:** die Schaltfläche unter `commands` auf `true` setzen; sie fällt von selbst auf `false` zurück.
 
@@ -90,6 +91,7 @@ Was du tun musst:
 
 1. Vor dem Update ein Backup machen. Zurück auf 1.x geht nicht — der alte Baum wird entfernt, sobald er übergeben ist, und 1.x kann die Anmeldung nicht lesen, die 2.0 verschlüsselt speichert.
 2. Skripte und Visualisierungen auf die neuen IDs umstellen. Die Tabelle nennt zum letzten Teil jeder alten ID den Datenpunkt, der sie ersetzt (unter dem neuen Geräte-Ordner). Zeilen mit (entschlüsselt) sind neue Datenpunkte aus dem alten Rohwert; Räume, Funktionen, Aliase und Aufzeichnungen des alten Roh-Datenpunkts ziehen nicht mit.
+3. Programme anders wählen und starten: In 1.x stand jede Option je Programm unter `programs.selected.options.<Programm>`, und ein Programm startete mit einer Schreibung auf `programs.active.BSH_Common_Root_ActiveProgram`. In 2.0 wählst du das Programm in `programs.selectedProgram`, setzt die Optionen unter `options` (eine Startzeitvorwahl ebenfalls dort) und startest mit `programs.start` — siehe [Geräte bedienen](#geräte-bedienen).
 
 | Alte ID, letzter Teil (1.x)                                                    | Neuer Datenpunkt (2.0)                                                 |
 | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |

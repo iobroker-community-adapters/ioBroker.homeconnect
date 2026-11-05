@@ -128,6 +128,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: switching off sends the off value Home Connect names for the appliance type — an oven is switched off with Standby
 - (krobipd) Fixed: a program chosen at the appliance no longer rewrites the program list of the appliance
 - (krobipd) Changed: progress and remaining time explain that they stay empty while the appliance reports none
+- (krobipd) Fixed: a delayed start (start in / finished in) is sent with the program start; a refused start is no longer retried without it
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

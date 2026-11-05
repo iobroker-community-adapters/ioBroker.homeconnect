@@ -4297,6 +4297,100 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
     expect(native.seenValues ?? []).not.toContain(b);
   });
 
+  describe("start values (krobi 2026-11-05: StartInRelative and FinishInRelative go with the start)", () => {
+    const START = "BSH.Common.Option.StartInRelative";
+    const notify = (sync: ApplianceSync, items: unknown[]): void =>
+      sync.handleStreamEvent({ event: "NOTIFY", data: JSON.stringify({ haId: "HA-1", items }), id: undefined });
+
+    /**
+     * A synced dishwasher with program A selected and a start delay of 30 min written before the start.
+     *
+     * @returns the port, the sync, the device, the start value's full id and the other program
+     */
+    async function wished(): Promise<{ port: FakePort; sync: ApplianceSync; deviceId: string; id: string; b: string }> {
+      const port = new FakePort();
+      const { deviceId, b } = twoProgramDishwasher(port);
+      const sync = new ApplianceSync(port);
+      await sync.syncAppliances();
+      const id = `${deviceId}.options.startInRelative`;
+      // What #322 measured: the selected program refuses the option, and it reports 0 for it.
+      port.getResponses.set("/api/homeappliances/HA-1/programs/selected", {
+        key: "Dishcare.Dishwasher.Program.Eco50",
+        options: [{ key: START, value: 0, unit: "seconds" }],
+      });
+      const accepted = port.writeResult;
+      port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.OptionNotSelectable" };
+      port.writes.length = 0;
+      port.userWrite(id, 30);
+      await sync.handleWrite(`${NS}.${id}`, 30);
+      port.writeResult = accepted;
+      return { port, sync, deviceId, id, b };
+    }
+
+    it("sends no request for a start value written before the start", async () => {
+      const { port, id } = await wished();
+      expect(port.writes).toEqual([]);
+      expect(port.states.get(id)).toBe(30);
+      expect(port.acks.get(id)).toBe(false);
+    });
+
+    it("sends the start value with the program start, in the appliance's unit", async () => {
+      const { port, sync, deviceId } = await wished();
+      await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+      expect(port.writes.at(-1)?.path).toBe("/api/homeappliances/HA-1/programs/active");
+      expect(port.writes.at(-1)?.body?.options).toContainEqual({ key: START, value: 1800 });
+    });
+
+    it("keeps the start value against the appliance's 0 until the start", async () => {
+      const { port, sync, deviceId, id } = await wished();
+      notify(sync, [{ key: START, value: 0, unit: "seconds" }]);
+      await flush();
+      expect(port.states.get(id)).toBe(30);
+      await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+      expect(port.writes.at(-1)?.body?.options).toContainEqual({ key: START, value: 1800 });
+      // The start is taken: from now on the appliance's value shows again.
+      notify(sync, [{ key: START, value: 1740, unit: "seconds" }]);
+      await flush();
+      expect(port.states.get(id)).toBe(29);
+    });
+
+    it("does not retry a refused start without its options while a delay is set", async () => {
+      const { port, sync, deviceId } = await wished();
+      port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.InvalidOptionState" };
+      await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+      expect(port.writes).toHaveLength(1);
+      expect(port.logs.some(l => l.startsWith("info") && l.includes("not retried without them"))).toBe(true);
+    });
+
+    it("changes the start value of the active program in DelayedStart", async () => {
+      const { port, sync, deviceId, id } = await wished();
+      await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+      notify(sync, [
+        { key: "BSH.Common.Status.OperationState", value: "BSH.Common.EnumType.OperationState.DelayedStart" },
+      ]);
+      await flush();
+      port.writes.length = 0;
+      port.userWrite(id, 20);
+      await sync.handleWrite(`${NS}.${id}`, 20);
+      expect(port.writes).toEqual([
+        {
+          method: "PUT",
+          path: `/api/homeappliances/HA-1/programs/active/options/${START}`,
+          body: { key: START, value: 1200 },
+        },
+      ]);
+    });
+
+    it("drops the start value when another program is selected", async () => {
+      const { port, sync, id, b } = await wished();
+      notify(sync, [{ key: "BSH.Common.Root.SelectedProgram", value: b }]);
+      await flush();
+      notify(sync, [{ key: START, value: 0, unit: "seconds" }]);
+      await flush();
+      expect(port.states.get(id)).toBe(0);
+    });
+  });
+
   it("costs nothing when the same program is reported again", async () => {
     const port = new FakePort();
     const { a } = twoProgramDishwasher(port);
@@ -4623,7 +4717,12 @@ describe("ApplianceSync rollup, gate and device object", () => {
     port.getResponses.set("/api/homeappliances/HA-1/programs/available/Dishcare.Dishwasher.Program.Eco50", {
       key: "Dishcare.Dishwasher.Program.Eco50",
       options: [
-        { key: "BSH.Common.Option.StartInRelative", type: "Int", unit: "seconds", constraints: { min: 0, max: 86400 } },
+        {
+          key: "Cooking.Oven.Option.SetpointTemperature",
+          type: "Int",
+          unit: "°C",
+          constraints: { min: 0, max: 86400 },
+        },
       ],
     });
     port.getResponses.set("/api/homeappliances/HA-1/programs/selected", {
@@ -4632,7 +4731,7 @@ describe("ApplianceSync rollup, gate and device object", () => {
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
     // Armed: the option is writable.
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 600);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 600);
     expect(port.writes).toHaveLength(1);
 
     // Deselected AT THE APPLIANCE — arrives as a value item with an empty key.
@@ -4646,7 +4745,7 @@ describe("ApplianceSync rollup, gate and device object", () => {
     // With no program selected, sending its options is a wasted request that the
     // cloud answers `SDK.Error.NoProgramSelected` — and apiWrite reports that as
     // a warning for a situation the adapter could have known itself.
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 900);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 900);
     expect(port.writes).toHaveLength(1);
   });
 
@@ -4775,7 +4874,12 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     port.getResponses.set(`${BASE}/programs/available/${ECO}`, {
       key: ECO,
       options: [
-        { key: "BSH.Common.Option.StartInRelative", type: "Int", unit: "seconds", constraints: { min: 0, max: 86400 } },
+        {
+          key: "Cooking.Oven.Option.SetpointTemperature",
+          type: "Int",
+          unit: "°C",
+          constraints: { min: 0, max: 86400 },
+        },
       ],
     });
     port.getResponses.set(`${BASE}/programs/selected`, { key: ECO });
@@ -4798,7 +4902,7 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     expect(port.stateWrites.filter(w => w.id.startsWith("spueler-1.programs."))).toEqual([]);
     expect(port.states.get("spueler-1.programs.selectedProgram")).toBe("eco50");
     // The gate still lets the option through.
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 600);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 600);
     expect(port.writes).toHaveLength(1);
   });
 
@@ -4808,7 +4912,7 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     port.getResponses.set(`${BASE}/programs/selected`, null);
     await sync.syncAppliances();
     expect(port.states.get("spueler-1.programs.selectedProgram")).toBe("");
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 600);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 600);
     expect(port.writes).toHaveLength(0);
   });
 
@@ -4847,7 +4951,7 @@ describe("ApplianceSync findings of the 2026-09-15 audit", () => {
     await flush();
     expect(port.states.get("spueler-1.programs.selectedProgram")).toBe("");
     expect(port.states.get("spueler-1.programs.activeProgram")).toBe("");
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 600);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 600);
     expect(port.writes).toHaveLength(0);
   });
 
@@ -5074,16 +5178,21 @@ describe("ApplianceSync read-back after a rejected write (2026-09-15, F8)", () =
     port.getResponses.set(`${BASE}/programs/available/${ECO}`, {
       key: ECO,
       options: [
-        { key: "BSH.Common.Option.StartInRelative", type: "Int", unit: "seconds", constraints: { min: 0, max: 86400 } },
+        {
+          key: "Cooking.Oven.Option.SetpointTemperature",
+          type: "Int",
+          unit: "°C",
+          constraints: { min: 0, max: 86400 },
+        },
       ],
     });
     port.getResponses.set(`${BASE}/programs/selected`, {
       key: ECO,
-      options: [{ key: "BSH.Common.Option.StartInRelative", value: 600 }],
+      options: [{ key: "Cooking.Oven.Option.SetpointTemperature", value: 600 }],
     });
     const sync = new ApplianceSync(port);
     await sync.syncAppliances();
-    expect(port.states.get("spueler-1.options.startInRelative")).toBe(600);
+    expect(port.states.get("spueler-1.options.setpointTemperature")).toBe(600);
     return { port, sync };
   }
 
@@ -5091,9 +5200,9 @@ describe("ApplianceSync read-back after a rejected write (2026-09-15, F8)", () =
     const { port, sync } = await dishwasher();
     port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.WrongOperationState" };
     port.getCalls.length = 0;
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 900);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 900);
     expect(port.getCalls).toEqual([`${BASE}/programs/selected`]);
-    expect(port.states.get("spueler-1.options.startInRelative")).toBe(600);
+    expect(port.states.get("spueler-1.options.setpointTemperature")).toBe(600);
     expect(port.states.get("spueler-1.programs.selectedProgram")).toBe("eco50");
   });
 
@@ -5110,7 +5219,7 @@ describe("ApplianceSync read-back after a rejected write (2026-09-15, F8)", () =
     const { port, sync } = await dishwasher();
     port.writeResult = undefined; // rate pause / not signed in
     port.getCalls.length = 0;
-    await sync.handleWrite(`${NS}.spueler-1.options.startInRelative`, 900);
+    await sync.handleWrite(`${NS}.spueler-1.options.setpointTemperature`, 900);
     expect(port.getCalls).toEqual([]);
   });
 });

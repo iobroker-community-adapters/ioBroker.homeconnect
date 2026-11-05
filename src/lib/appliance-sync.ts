@@ -345,6 +345,17 @@ const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
 /**
+ * The start values (krobi 2026-11-05 18:50, "Als Startwerte"): Home Connect takes them only with the program start
+ * ("this option can't be used in a program selection command. This is only supported by the program start command",
+ * api-docs /programs-and-options) and lets them change in DelayedStart only ("It can be updated in operation state
+ * DelayedStart"). Before the start a write is the user's wish, sent with the start; in DelayedStart it goes to the
+ * active program.
+ */
+const START_VALUE_KEYS: ReadonlySet<string> = new Set([
+  "BSH.Common.Option.StartInRelative",
+  "BSH.Common.Option.FinishInRelative",
+]);
+/**
  * A stand-in value of a stored value type — it gives a value-less datapoint its shape when it moves (decision 49).
  *
  * @param type the stored `common.type`
@@ -683,6 +694,13 @@ export class ApplianceSync {
   private readonly statisticsFolders = new Set<string>();
   /** Appliances whose last operation state says no program is under way (decision 48). */
   private readonly atRest = new Set<string>();
+  /** Each appliance's operation state as last noted (short value, lower case) — a start value goes by it. */
+  private readonly operationStateByDeviceId = new Map<string, string>();
+  /**
+   * The start values a user set before the start, per appliance and option id: sent with the start, and no value of
+   * the appliance replaces them until a start is taken or another program is selected.
+   */
+  private readonly startWishes = new Map<string, Map<string, ioBroker.StateValue>>();
   /** Appliances whose `history` folder was written in this run. */
   private readonly historyFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
@@ -1133,6 +1151,7 @@ export class ApplianceSync {
    * @returns whether the appliance is at rest now
    */
   private noteOperationState(deviceId: string, value: string): boolean {
+    this.operationStateByDeviceId.set(deviceId, shortEnum(value).toLowerCase());
     if (PROGRAM_UNDER_WAY.has(shortEnum(value).toLowerCase())) {
       this.atRest.delete(deviceId);
       return false;
@@ -2721,6 +2740,8 @@ export class ApplianceSync {
     this.reachableByDeviceId.delete(deviceId);
     this.typeByDeviceId.delete(deviceId);
     this.reportedPowerOff.delete(deviceId);
+    this.operationStateByDeviceId.delete(deviceId);
+    this.startWishes.delete(deviceId);
     this.nameByDeviceId.delete(deviceId);
     this.programDefs.delete(deviceId);
     this.unsupportedPrograms.delete(haId);
@@ -3151,6 +3172,10 @@ export class ApplianceSync {
       // 40 would go out as "40"), and the next item with a value would turn it
       // back: one object write per alternation. It refreshes nothing.
       const valueless = value === undefined || value === null;
+      if (START_VALUE_KEYS.has(raw.key) && this.startWishes.get(deviceId)?.has(t.id)) {
+        // The user's start value waits for the start: the appliance's own (0 before a start) does not replace it.
+        t.value = undefined;
+      }
       if (RUN_VALUE_KEYS.has(raw.key) && this.atRest.has(deviceId)) {
         // A value left over from the last run: the metadata still counts, the value is not shown (decision 48).
         t.value = undefined;
@@ -3175,6 +3200,7 @@ export class ApplianceSync {
         // reports as a warning for a situation the adapter could have known.
         this.optionKeys.delete(deviceId);
         this.armedProgramByDeviceId.delete(deviceId);
+        this.startWishes.delete(deviceId);
       } else {
         const haId = this.haIdByDeviceId.get(deviceId);
         if (haId) {
@@ -4370,6 +4396,10 @@ export class ApplianceSync {
     ) {
       return;
     }
+    if (this.armedProgramByDeviceId.get(deviceId) !== programKey) {
+      // Another program: the start values set for the previous one do not carry over.
+      this.startWishes.delete(deviceId);
+    }
     let cached = this.programDefs.get(deviceId);
     if ((cached?.[programKey]?.v ?? 0) < PROGRAM_DEF_GENERATION) {
       await this.syncProgramDefs(deviceId, haId, [programKey]);
@@ -4659,6 +4689,15 @@ export class ApplianceSync {
       // An option goes out with the key the SELECTED program uses for it, and its
       // value is resolved within that key's value family (see ProgramDef.keys).
       const optionKey = channel === "options" ? this.optionKeyFor(deviceId, stateId, meta?.bshKey) : undefined;
+      const startValue = channel === "options" && START_VALUE_KEYS.has(optionKey ?? meta?.bshKey ?? "");
+      const delayed = this.operationStateByDeviceId.get(deviceId) === "delayedstart";
+      if (startValue && !delayed) {
+        // Before the start a start value is the user's wish: Home Connect refuses it on the selected program
+        // (SDK.Error.OptionNotSelectable, #322) and takes it only with the start, which sends it along.
+        this.rememberStartWish(deviceId, stateId, value);
+        this.port.log.debug(`${rel} = ${JSON.stringify(value)} is kept and sent with the next program start.`);
+        return;
+      }
       const ctx: WriteContext = {
         haId,
         channel,
@@ -4669,6 +4708,7 @@ export class ApplianceSync {
         value,
         applianceType: this.typeByDeviceId.get(deviceId),
         reportedOff: this.reportedPowerOff.get(deviceId),
+        toActiveProgram: startValue && delayed,
       };
       if (channel === "programs" && stateId === "start") {
         ctx.selectedProgramKey = await this.resolveSelectedProgramKey(deviceId);
@@ -4844,10 +4884,40 @@ export class ApplianceSync {
       await this.activateProgramOptions(deviceId, haId, req.body.key);
       return;
     }
-    if (channel === "programs" && stateId === "start" && res.status === 409 && req.body?.options) {
-      this.port.log.info("Program did not start with the selected options — retrying with defaults.");
-      await this.port.apiWrite({ method: "PUT", path: req.path, body: { key: req.body.key } });
+    if (channel === "programs" && stateId === "start" && res.ok) {
+      this.startWishes.delete(deviceId);
+      return;
     }
+    if (channel === "programs" && stateId === "start" && res.status === 409 && req.body?.options) {
+      const delay = req.body.options.find(
+        o => START_VALUE_KEYS.has(o.key) && typeof o.value === "number" && o.value > 0,
+      );
+      if (delay) {
+        // The program's defaults carry no delay: a retry without the options would start it at once.
+        this.port.log.info(
+          "Program did not start with the selected options — not retried without them, because a delayed start is set. Check the options and start again.",
+        );
+        return;
+      }
+      this.port.log.info("Program did not start with the selected options — retrying with defaults.");
+      const retry = await this.port.apiWrite({ method: "PUT", path: req.path, body: { key: req.body.key } });
+      if (retry?.ok) {
+        this.startWishes.delete(deviceId);
+      }
+    }
+  }
+
+  /**
+   * Keep a start value the user set before the start (see {@link START_VALUE_KEYS}).
+   *
+   * @param deviceId the id-safe device path segment
+   * @param stateId the option's id
+   * @param value the written value, in the datapoint's own form
+   */
+  private rememberStartWish(deviceId: string, stateId: string, value: ioBroker.StateValue): void {
+    const wishes = this.startWishes.get(deviceId) ?? new Map<string, ioBroker.StateValue>();
+    wishes.set(stateId, value);
+    this.startWishes.set(deviceId, wishes);
   }
 
   /**
@@ -4870,12 +4940,13 @@ export class ApplianceSync {
       if (!key) {
         continue;
       }
-      const st = await this.port.getState(relId);
-      if (!st || st.val === null || st.val === undefined) {
+      const wish = this.startWishes.get(deviceId)?.get(id);
+      const val = wish ?? (await this.port.getState(relId))?.val;
+      if (val === null || val === undefined) {
         continue;
       }
       const values = familyOf(meta?.bshValues, key);
-      const value = resolveValue(st.val, values, true, key);
+      const value = resolveValue(val, values, true, key);
       if (value !== undefined && value !== null) {
         result.push({ key, value });
       }
