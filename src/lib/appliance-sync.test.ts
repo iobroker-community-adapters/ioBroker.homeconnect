@@ -306,6 +306,8 @@ class FakePort implements AdapterPort {
   readonly notReadyPaths = new Set<string>();
   /** Paths Home Connect refuses for good (a 4xx that is no appliance state). */
   readonly refusedPaths = new Set<string>();
+  /** Paths that bring nothing and no appliance answer (429, pause, 5xx, no answer) → when REST pauses until, if it does. */
+  readonly gapPaths = new Map<string, number | undefined>();
   /** Managed timers, driven by hand ({@link fire}). */
   readonly timers: Array<{ cb: () => void; ms: number; cleared: boolean; fired: boolean }> = [];
 
@@ -331,6 +333,10 @@ class FakePort implements AdapterPort {
     }
     if (this.refusedPaths.has(path)) {
       this.sync?.noteRefused(path);
+      return Promise.resolve(undefined);
+    }
+    if (this.gapPaths.has(path)) {
+      this.sync?.noteReadGap(path, this.gapPaths.get(path));
       return Promise.resolve(undefined);
     }
     return Promise.resolve(this.getResponses.get(path));
@@ -6109,6 +6115,72 @@ describe("ApplianceSync trees of the previous adapter generation (community 1.6.
     ]);
   });
 
+  it("holds the old tree while a read that builds the new one did not arrive, and takes it over at the next full read", async () => {
+    // Without this the take-over ran after a pass whose status read had failed: the door had no successor yet, and
+    // its room went with the old tree (H-09).
+    const port = new FakePort();
+    communityTree(port);
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    await sync.sortOutLegacyTrees();
+    onAccount(port);
+    port.gapPaths.set(`/api/homeappliances/${ROOT}/status`, undefined);
+    await sync.syncAppliances();
+    expect(port.objects.has(ROOT)).toBe(true);
+    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toContain(
+      `${OLD}.status.BSH_Common_Status_DoorState`,
+    );
+    // A 5xx or no answer is not read again on its own — Home Connect blocks after ten error answers in a row.
+    expect(port.pendingTimers()).toEqual([]);
+
+    port.gapPaths.clear();
+    sync.handleStreamEvent({ event: "CONNECTED", id: ROOT, data: "{}" });
+    await flush();
+    expect([...port.objects.keys()].filter(k => k.startsWith(ROOT))).toEqual([]);
+    expect((port.foreign.get("enum.rooms.kitchen")?.common as { members: string[] }).members).toEqual([
+      `${NS}.sx87tx02ce-5775.doors.door`,
+      "hm-rpc.0.X",
+    ]);
+  });
+
+  it("holds the old tree while a program definition did not arrive — a refused one holds nothing", async () => {
+    // A 1.6.x option leaf moves to an `options.*` datapoint, and only a program definition creates that.
+    const port = new FakePort();
+    communityTree(port);
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    await sync.sortOutLegacyTrees();
+    onAccount(port);
+    port.getResponses.set(`/api/homeappliances/${ROOT}/programs/available`, {
+      programs: [{ key: "Dishcare.Dishwasher.Program.Eco50" }],
+    });
+    const def = `/api/homeappliances/${ROOT}/programs/available/Dishcare.Dishwasher.Program.Eco50`;
+    port.gapPaths.set(def, undefined);
+    await sync.syncAppliances();
+    expect(port.objects.has(ROOT)).toBe(true);
+
+    port.gapPaths.clear();
+    port.refusedPaths.add(def);
+    sync.handleStreamEvent({ event: "CONNECTED", id: ROOT, data: "{}" });
+    await flush();
+    expect([...port.objects.keys()].filter(k => k.startsWith(ROOT))).toEqual([]);
+  });
+
+  it("holds the old tree while Home Connect's error limit defers a program definition", async () => {
+    const port = new FakePort();
+    communityTree(port);
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    await sync.sortOutLegacyTrees();
+    onAccount(port);
+    port.getResponses.set(`/api/homeappliances/${ROOT}/programs/available`, {
+      programs: [{ key: "Dishcare.Dishwasher.Program.Eco50" }],
+    });
+    port.errorBudget = false;
+    await sync.syncAppliances();
+    expect(port.objects.has(ROOT)).toBe(true);
+  });
+
   it("carries a room and an alias on the old stop button to the program stop button", async () => {
     // Every 1.6.x appliance had commands.BSH_Common_Command_StopProgram; Home Connect lists no such
     // command, so the raw-key expansion names a datapoint that never exists — the button lives on
@@ -6479,6 +6551,48 @@ describe("readable values (2026-09-28)", () => {
     const active = port.objects.get("spueler-1.programs.activeProgram")?.common as ioBroker.StateCommon;
     expect(active.states).toEqual({ "": "No program", auto2: "Auto 45-65 °C" });
     expect(port.states.get("spueler-1.programs.activeProgram")).toBe("auto2");
+  });
+
+  it("reads the appliance once more when Home Connect's pause is over", async () => {
+    // Forum 85641: a 429 on `/programs/active` left the running program unread, while the log said the adapter
+    // "waits and continues by itself" — nothing read it again.
+    const port = new FakePort();
+    appliance(port, "HA-1", "Spueler", { status: [], available: ["Dishcare.Dishwasher.Program.Auto2"] });
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    port.gapPaths.set(`${base}/programs/active`, Date.now() + 30_000);
+    await sync.syncAppliances();
+    expect(port.objects.has("spueler-1.programs.activeProgram")).toBe(false);
+    const timers = port.pendingTimers();
+    expect(timers).toHaveLength(1);
+    expect(timers[0].ms).toBeGreaterThanOrEqual(30_000);
+    port.gapPaths.clear();
+    port.getCalls.length = 0;
+    port.fire();
+    await flush();
+    expect(port.objects.has("spueler-1.programs.activeProgram")).toBe(true);
+    expect(port.getCalls.filter(p => p === `${base}/status`)).toHaveLength(1);
+    expect(port.pendingTimers()).toEqual([]);
+  });
+
+  it("drops the re-read after a pause on a stop, a reconnect and going offline", async () => {
+    for (const end of ["stop", "CONNECTED", "DISCONNECTED"] as const) {
+      const port = new FakePort();
+      appliance(port, "HA-1", "Spueler", { status: [], available: ["Dishcare.Dishwasher.Program.Auto2"] });
+      const sync = new ApplianceSync(port);
+      port.sync = sync;
+      port.gapPaths.set(`${base}/programs/active`, Date.now() + 30_000);
+      await sync.syncAppliances();
+      const armed = port.pendingTimers()[0];
+      port.gapPaths.clear();
+      if (end === "stop") {
+        sync.stop();
+      } else {
+        sync.handleStreamEvent({ event: end, id: "HA-1", data: "{}" });
+        await flush();
+      }
+      expect(armed.cleared).toBe(true);
+    }
   });
 
   it("writes the program list when the selected program does not answer — without a value", async () => {

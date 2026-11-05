@@ -319,6 +319,22 @@ function familyOf(values: string[] | undefined, key: string | undefined): string
 const NOT_READY_RETRY_MS = [30_000, 60_000, 120_000] as const;
 
 /**
+ * The reads whose answers build an appliance's tree. A pass that missed one of them — or a program definition, the only
+ * source of the option datapoints — is not complete: what needs the whole tree (the take-over of a 1.6.x tree, H-09)
+ * waits for the next full read (forum 85641, a 429 on `/programs/active`).
+ */
+const TREE_READS = new Set([
+  "/status",
+  "/settings",
+  "/commands",
+  "/programs/available",
+  "/programs/selected",
+  "/programs/active",
+]);
+/** A re-read after Home Connect's pause starts this long after the pause ends — a timer may fire on its edge. */
+const GAP_RETRY_MARGIN_MS = 1000;
+
+/**
  * The static half of one setting's definition — everything the settings LIST does
  * not carry. `GET /settings` answers `{key, name, value, unit}`; the type, the
  * allowed values and the numeric bounds live only in `GET /settings/{key}`
@@ -651,6 +667,10 @@ export class ApplianceSync {
   private readonly retryTimers = new Map<string, unknown>();
   /** device id → how many "not ready" re-reads were armed since the last full read. */
   private readonly retryAttempts = new Map<string, number>();
+  /** device id → the running pass missed a read: when Home Connect's pause ends (epoch ms), 0 when it does not pause. */
+  private readonly readGaps = new Map<string, number>();
+  /** device id → the armed re-read after Home Connect's pause (at most one per appliance). */
+  private readonly gapTimers = new Map<string, unknown>();
   /**
    * device id → setting key → its static definition, persisted in the device
    * object's native. Fetched once per setting per appliance; every later start
@@ -749,6 +769,9 @@ export class ApplianceSync {
     for (const deviceId of [...this.retryTimers.keys()]) {
       this.cancelNotReadyRetry(deviceId);
     }
+    for (const deviceId of [...this.gapTimers.keys()]) {
+      this.cancelGapRetry(deviceId);
+    }
   }
 
   /**
@@ -763,6 +786,34 @@ export class ApplianceSync {
     const deviceId = parsed ? this.deviceIdByHaId.get(parsed.haId) : undefined;
     if (deviceId) {
       this.notReady.add(deviceId);
+    }
+  }
+
+  /**
+   * The transport's report that a read brought nothing and no appliance answer either: Home Connect's pause, a 429,
+   * a 5xx, no answer, a login that could not be renewed. A read that builds the tree ({@link TREE_READS}, a program
+   * definition) makes the running pass incomplete; after a pause the appliance is read once more.
+   *
+   * @param path the request path
+   * @param retryAt when Home Connect's pause ends (epoch ms), if it pauses
+   */
+  noteReadGap(path: string, retryAt?: number): void {
+    const parsed = parseAppliancePath(path);
+    const deviceId = parsed ? this.deviceIdByHaId.get(parsed.haId) : undefined;
+    if (parsed && deviceId && (TREE_READS.has(parsed.subpath) || parsed.subpath.startsWith("/programs/available/"))) {
+      this.markGap(deviceId, retryAt);
+    }
+  }
+
+  /**
+   * Book a gap in the running pass of an appliance — outside a pass (the read-back after a refused write) nothing.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param retryAt when Home Connect's pause ends (epoch ms), if it pauses
+   */
+  private markGap(deviceId: string, retryAt = 0): void {
+    if (this.syncing.has(deviceId)) {
+      this.readGaps.set(deviceId, Math.max(this.readGaps.get(deviceId) ?? 0, retryAt));
     }
   }
 
@@ -2181,8 +2232,9 @@ export class ApplianceSync {
       if (event.event === "CONNECTED" || event.event === "PAIRED") {
         if (deviceId) {
           // The fresh pass takes over from a pending "not ready" re-read, with a
-          // fresh back-off.
+          // fresh back-off, and from a re-read after Home Connect's pause.
           this.cancelNotReadyRetry(deviceId);
+          this.cancelGapRetry(deviceId);
           if (this.syncing.has(deviceId)) {
             this.resyncPending.add(deviceId);
           }
@@ -2208,6 +2260,7 @@ export class ApplianceSync {
       if (event.event === "DISCONNECTED") {
         // Switched off again before it was ready: its next CONNECTED reads it.
         this.cancelNotReadyRetry(deviceId);
+        this.cancelGapRetry(deviceId);
         void this.guarded(() => this.setReachable(deviceId, false));
         return;
       }
@@ -2724,7 +2777,9 @@ export class ApplianceSync {
     this.programDefs.delete(deviceId);
     this.unsupportedPrograms.delete(haId);
     this.cancelNotReadyRetry(deviceId);
+    this.cancelGapRetry(deviceId);
     this.notReady.delete(deviceId);
+    this.readGaps.delete(deviceId);
     this.resyncPending.delete(deviceId);
     this.passStartedAt.delete(deviceId);
     for (const key of [...this.failedDefs.keys()]) {
@@ -2817,6 +2872,7 @@ export class ApplianceSync {
     }
     this.syncing.add(deviceId);
     this.notReady.delete(deviceId);
+    this.readGaps.delete(deviceId);
     this.passStartedAt.set(deviceId, Date.now());
     try {
       const steps: Array<() => Promise<void>> = [
@@ -2845,9 +2901,17 @@ export class ApplianceSync {
           return;
         }
       }
+      const gap = this.readGaps.get(deviceId);
+      if (gap !== undefined) {
+        // Not a full read: nothing that needs the whole tree runs, and after a pause the appliance is read once more.
+        this.readGaps.delete(deviceId);
+        this.scheduleGapRetry(deviceId, haId, gap);
+        return;
+      }
       // A full read: a "not ready" re-read still armed from an earlier pass has
       // nothing left to do (it cost a second full pass of six requests).
       this.cancelNotReadyRetry(deviceId);
+      this.cancelGapRetry(deviceId);
       // Every datapoint the appliance has exists now — the tree the previous adapter
       // generation built for it can hand over what the user attached to it.
       await this.adoptLegacyTree(deviceId, haId);
@@ -2900,6 +2964,63 @@ export class ApplianceSync {
         void this.guarded(() => this.syncApplianceData(deviceId, haId));
       }, delay),
     );
+  }
+
+  /**
+   * Arm the one re-read of an appliance whose pass missed a read during Home Connect's pause, for the moment the pause
+   * ends. A gap without a pause (a 5xx, no answer) is not read again on its own: Home Connect blocks after ten error
+   * answers in a row, and the next reconnect or outage re-read reads the appliance anyway. All on debug.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param haId the appliance's haId
+   * @param retryAt when the pause ends (epoch ms), 0 without one
+   */
+  private scheduleGapRetry(deviceId: string, haId: string, retryAt: number): void {
+    if (
+      retryAt <= 0 ||
+      this.stopped ||
+      this.gapTimers.has(deviceId) ||
+      this.retryTimers.has(deviceId) ||
+      this.reachableByDeviceId.get(deviceId) === false
+    ) {
+      this.port.log.debug(`${this.label(deviceId)} was not read completely — the next full read completes it.`);
+      return;
+    }
+    const delay = Math.max(0, retryAt - Date.now()) + GAP_RETRY_MARGIN_MS;
+    this.port.log.debug(
+      `${this.label(deviceId)} was not read completely — reading it again in ${Math.ceil(delay / 1000)} s, when Home Connect's pause is over.`,
+    );
+    this.gapTimers.set(
+      deviceId,
+      this.port.setTimer(() => {
+        this.gapTimers.delete(deviceId);
+        if (
+          this.stopped ||
+          this.haIdByDeviceId.get(deviceId) !== haId ||
+          this.reachableByDeviceId.get(deviceId) === false
+        ) {
+          return;
+        }
+        if (this.syncing.has(deviceId)) {
+          this.resyncPending.add(deviceId);
+          return;
+        }
+        void this.guarded(() => this.syncApplianceData(deviceId, haId));
+      }, delay),
+    );
+  }
+
+  /**
+   * Drop an appliance's pending re-read after Home Connect's pause.
+   *
+   * @param deviceId the id-safe device path segment
+   */
+  private cancelGapRetry(deviceId: string): void {
+    const handle = this.gapTimers.get(deviceId);
+    if (handle !== undefined) {
+      this.port.clearTimer(handle);
+      this.gapTimers.delete(deviceId);
+    }
   }
 
   /**
@@ -4310,9 +4431,7 @@ export class ApplianceSync {
     let changed = false;
     const refused = this.unsupportedPrograms.get(haId);
     for (const programKey of programKeys) {
-      // Near Home Connect's error limit the remaining definitions wait: a later pass asks again, and a selected
-      // program fetches its own.
-      if (this.notReady.has(deviceId) || !this.port.errorBudgetLeft()) {
+      if (this.notReady.has(deviceId)) {
         break;
       }
       const entry = cached[programKey];
@@ -4321,6 +4440,12 @@ export class ApplianceSync {
       }
       if (!this.mayFetchDef(deviceId, programKey)) {
         continue;
+      }
+      // Near Home Connect's error limit the remaining definitions wait: a later pass asks again, and a selected
+      // program fetches its own. Until then the options they create are missing — the pass is not complete.
+      if (!this.port.errorBudgetLeft()) {
+        this.markGap(deviceId);
+        break;
       }
       const defPath = appliancePath(haId, `/programs/available/${encodeURIComponent(programKey)}`);
       const def = await this.port.apiGet(defPath);

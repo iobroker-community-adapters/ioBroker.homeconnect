@@ -1259,13 +1259,22 @@ class Homeconnect extends utils.Adapter {
    */
   private async apiGet(path: string): Promise<unknown> {
     const token = this.authCtl?.accessToken;
-    if (this.terminating || !token || this.restPaused(path)) {
+    if (this.terminating) {
+      return undefined;
+    }
+    if (!token || this.restPaused(path)) {
+      this.noteReadGap(path);
       return undefined;
     }
     const source = `GET ${path}`;
+    // Only a shutdown refuses the place.
+    if (!(await this.spaceRequests())) {
+      return undefined;
+    }
     // Re-checked after the wait: a 429 that arrived while this request queued
     // for its slot pauses it too.
-    if (!(await this.spaceRequests()) || this.restPaused(path)) {
+    if (this.restPaused(path)) {
+      this.noteReadGap(path);
       return undefined;
     }
     let res = await this.sent(getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
@@ -1314,11 +1323,25 @@ class Homeconnect extends utils.Adapter {
         // Refused for good — the sync books it (a definition that keeps failing
         // otherwise cost one request on every reconnect).
         this.sync?.noteRefused(path);
+        return undefined;
       }
+      this.noteReadGap(path);
       return undefined;
     }
     this.restLog.recovered(restLogKey(source), `${source} succeeded.`);
     return res.data;
+  }
+
+  /**
+   * Tell the sync that a read brought nothing and no appliance answer either (a pause, a 429, a 5xx, no answer, a
+   * login that could not be renewed) — with the end of Home Connect's pause, so the appliance is read once more then.
+   *
+   * @param path the request path
+   */
+  private noteReadGap(path: string): void {
+    if (!this.terminating) {
+      this.sync?.noteReadGap(path, Date.now() < this.restBlockedUntil ? this.restBlockedUntil : undefined);
+    }
   }
 
   /**

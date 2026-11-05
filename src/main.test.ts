@@ -244,6 +244,7 @@ interface FakeSync {
   noteUnsupportedProgram: ReturnType<typeof vi.fn>;
   noteNotReady: ReturnType<typeof vi.fn>;
   noteRefused: ReturnType<typeof vi.fn>;
+  noteReadGap: ReturnType<typeof vi.fn>;
   port: Record<string, (...a: never[]) => unknown>;
 }
 interface FakeAuthCtl {
@@ -354,6 +355,7 @@ function setup(config: Record<string, unknown> = {}): Ctx {
       noteUnsupportedProgram: vi.fn(),
       noteNotReady: vi.fn(),
       noteRefused: vi.fn(),
+      noteReadGap: vi.fn(),
     };
     syncs.push(s);
     return s;
@@ -1144,6 +1146,52 @@ describe("Homeconnect rate limiting", () => {
     vi.setSystemTime(NOW + 60_001);
     await get(ctx, "/api/y");
     expect(httpMock.getJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the sync about a read that brought nothing — with the end of the pause — never about an appliance's answer", async () => {
+    // Forum 85641: a 429 on `/programs/active` returned nothing, the pass counted as complete, and nothing read the
+    // running program again although the log said the adapter "waits and continues by itself".
+    const ctx = setup();
+    await ctx.i.onReady();
+    const gap = ctx.syncs[0].noteReadGap;
+    const path = "/api/homeappliances/A/programs/active";
+    httpMock.getJson.mockResolvedValue(failResult(429, { retryAfterMs: 30_000 }));
+    await get(ctx, path);
+    const [noted, until] = gap.mock.calls.at(-1) as [string, number];
+    expect(noted).toBe(path);
+    expect(until).toBeGreaterThanOrEqual(NOW + 30_000);
+    // Skipped during the pause: the same end.
+    await get(ctx, "/api/homeappliances/A/status");
+    expect(gap).toHaveBeenLastCalledWith("/api/homeappliances/A/status", until);
+
+    vi.setSystemTime(until + 1);
+    for (const failed of [failResult(503), failResult(0)]) {
+      gap.mockClear();
+      httpMock.getJson.mockResolvedValue(failed);
+      await get(ctx, path);
+      expect(gap).toHaveBeenCalledWith(path, undefined);
+    }
+    // A login that could not be renewed brings nothing either.
+    gap.mockClear();
+    httpMock.getJson.mockResolvedValue(failResult(401));
+    ctx.auths[0].refreshNow.mockResolvedValue(false);
+    await get(ctx, path);
+    expect(gap).toHaveBeenCalledWith(path, undefined);
+
+    // An appliance's answer and a refusal for good are no gap.
+    for (const answer of [
+      failResult(404, { error: "SDK.Error.NoProgramActive" }),
+      failResult(409, { error: "SDK.Error.WrongOperationState" }),
+      failResult(409, { error: "SDK.Error.HomeAppliance.Connection.Initialization.Failed" }),
+      failResult(400, { error: "SDK.Error.UnsupportedProgram" }),
+      failResult(404),
+    ]) {
+      gap.mockClear();
+      httpMock.getJson.mockResolvedValue(answer);
+      await get(ctx, path);
+      expect(gap).not.toHaveBeenCalled();
+    }
+    expect(ctx.syncs[0].noteRefused).toHaveBeenCalledWith(path);
   });
 
   it("tells the user about a dropped write, but keeps a dropped read quiet", async () => {
