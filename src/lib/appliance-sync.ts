@@ -4997,9 +4997,10 @@ export class ApplianceSync {
           this.reportedOff.get(`${deviceId}|${meta?.bshKey}`),
         applianceType: this.typeByDeviceId.get(deviceId),
       };
-      if (channel === "programs" && stateId === "start") {
-        ctx.selectedProgramKey = await this.resolveSelectedProgramKey(deviceId);
-        ctx.selectedOptions = await this.collectSelectedOptions(deviceId);
+      if (channel === "programs" && stateId === "start" && value === true) {
+        const fresh = await this.readSelectionForStart(deviceId, haId);
+        ctx.selectedProgramKey = fresh ? fresh.key : await this.resolveSelectedProgramKey(deviceId);
+        ctx.selectedOptions = fresh ? fresh.options : await this.collectSelectedOptions(deviceId);
       }
       const req = resolveWrite(ctx);
       // Whether Home Connect answered the request at all (taken or refused) — a button press nobody answered stays
@@ -5178,8 +5179,51 @@ export class ApplianceSync {
   }
 
   /**
+   * What the appliance has selected right now, read once before a program start (like Home Assistant's start of the
+   * selected program, `services.py`): a program chosen remotely or at the appliance can leave the values of the one
+   * before in the option datapoints. The answer reaches the tree like any read and re-arms the option gate; the start
+   * takes its program and the options the gate lets through, in the appliance's own values. One request per start.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param haId the appliance's haId
+   * @returns the program (undefined: none selected) and its writable options, or undefined when the read brought nothing
+   */
+  private async readSelectionForStart(
+    deviceId: string,
+    haId: string,
+  ): Promise<{ key: string | undefined; options: Array<{ key: string; value: ioBroker.StateValue }> } | undefined> {
+    // Its own "pass" for the stale-value check, like the read after a rejection.
+    this.passStartedAt.set(deviceId, Date.now());
+    const selected = await this.port.apiGet(appliancePath(haId, "/programs/selected"));
+    if (selected === undefined) {
+      return undefined;
+    }
+    await this.applySelectedProgram(deviceId, selected, []);
+    if (!isRecord(selected) || typeof selected.key !== "string" || selected.key.length === 0) {
+      return { key: undefined, options: [] };
+    }
+    const writable = new Set(
+      [...(this.optionKeys.get(deviceId) ?? [])].map(id =>
+        this.optionKeyFor(deviceId, id, this.knownStates.get(`${deviceId}.options.${id}`)?.bshKey),
+      ),
+    );
+    const options: Array<{ key: string; value: ioBroker.StateValue }> = [];
+    for (const o of Array.isArray(selected.options) ? selected.options : []) {
+      if (
+        isRecord(o) &&
+        typeof o.key === "string" &&
+        writable.has(o.key) &&
+        (typeof o.value === "string" || typeof o.value === "number" || typeof o.value === "boolean")
+      ) {
+        options.push({ key: o.key, value: o.value });
+      }
+    }
+    return { key: selected.key, options };
+  }
+
+  /**
    * Collect the selected program's option values, resolved back to their BSH
-   * values, to send with a program start.
+   * values, to send with a program start — when the appliance's own selection could not be read.
    *
    * @param deviceId the id-safe device path segment
    * @returns the option key/value pairs for the start body

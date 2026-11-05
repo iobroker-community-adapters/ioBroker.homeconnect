@@ -4274,12 +4274,71 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
 
     // … and a start carries B's options, not the ones of the program that was
     // selected before (the appliance rejects those, and the retry-with-defaults
-    // silently drops whatever the user had configured).
+    // silently drops whatever the user had configured). The cloud has B now, with the option the user set.
+    port.getResponses.set(`/api/homeappliances/HA-1/programs/selected`, {
+      key: b,
+      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }],
+    });
     port.writes.length = 0;
     await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
     const start = port.writes.at(-1);
     expect(start?.body?.key).toBe(b);
     expect((start?.body?.options ?? []).map(o => o.key)).toEqual(["Dishcare.Dishwasher.Option.IntensivZone"]);
+  });
+
+  it("starts with the options the appliance has selected, not what a datapoint kept (forum 85641, like Home Assistant)", async () => {
+    const port = new FakePort();
+    const { deviceId, b } = twoProgramDishwasher(port);
+    const base = "/api/homeappliances/HA-1";
+    port.getResponses.set(`${base}/programs/selected`, {
+      key: b,
+      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: false }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    expect(port.states.get(`${deviceId}.options.intensivZone`)).toBe(false);
+
+    // The option changed in the app and no NOTIFY reached the adapter. The appliance's selection also carries a run
+    // value and an option of the other program — neither goes out with a start, only what B's definition names.
+    port.getResponses.set(`${base}/programs/selected`, {
+      key: b,
+      options: [
+        { key: "Dishcare.Dishwasher.Option.IntensivZone", value: true },
+        { key: "BSH.Common.Option.RemainingProgramTime", value: 3600 },
+        { key: "BSH.Common.Option.StartInRelative", value: 600 },
+      ],
+    });
+    port.getCalls.length = 0;
+    port.writes.length = 0;
+    await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+    expect(port.getCalls).toEqual([`${base}/programs/selected`]);
+    expect(port.writes.map(w => w.body)).toEqual([
+      { key: b, options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }] },
+    ]);
+    // The read reaches the tree like any other.
+    expect(port.states.get(`${deviceId}.options.intensivZone`)).toBe(true);
+  });
+
+  it("starts with the datapoints' values when the appliance's selection cannot be read", async () => {
+    const port = new FakePort();
+    const { deviceId, b } = twoProgramDishwasher(port);
+    const base = "/api/homeappliances/HA-1";
+    port.getResponses.set(`${base}/programs/selected`, {
+      key: b,
+      options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: false }],
+    });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    port.userWrite(`${deviceId}.options.intensivZone`, true);
+    await sync.handleWrite(`${NS}.${deviceId}.options.intensivZone`, true);
+
+    // Home Connect pauses: the start goes out as before the read existed — program and options from the datapoints.
+    port.gapPaths.set(`${base}/programs/selected`, undefined);
+    port.writes.length = 0;
+    await sync.handleWrite(`${NS}.${deviceId}.programs.start`, true);
+    expect(port.writes.map(w => w.body)).toEqual([
+      { key: b, options: [{ key: "Dishcare.Dishwasher.Option.IntensivZone", value: true }] },
+    ]);
   });
 
   it("costs nothing when the same program is reported again", async () => {
@@ -5087,7 +5146,8 @@ describe("ApplianceSync read-back after a rejected write (2026-09-15, F8)", () =
     port.writeResult = { status: 409, ok: false, data: undefined, error: "SDK.Error.WrongOperationState" };
     port.getCalls.length = 0;
     await sync.handleWrite(`${NS}.spueler-1.programs.start`, true);
-    expect(port.getCalls).toEqual([]);
+    // The one read is the appliance's selection before the start — none after the rejection.
+    expect(port.getCalls).toEqual([`${BASE}/programs/selected`]);
     expect(port.writes).toHaveLength(2); // the start and its retry with defaults
   });
 
@@ -5169,7 +5229,9 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     port.userWrite("wd-1.options.dryingTarget", "IRONDRY");
     await sync.handleWrite(`${NS}.wd-1.options.dryingTarget`, "IRONDRY");
     expect(port.writes.at(-1)?.body).toEqual({ key: dryerKey, value: dryerValues[0] });
-    // Unconfirmed, the start still finds the option in the user's spelling.
+    // Unconfirmed, and the read before the start brings nothing: the start still finds the option in the user's
+    // spelling.
+    port.gapPaths.set(`${base}/programs/selected`, undefined);
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body).toEqual({ key: A, options: [{ key: dryerKey, value: dryerValues[0] }] });
     // Confirmed as "irondry", not verbatim.
@@ -5186,6 +5248,8 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     port.userWrite("wd-1.programs.selectedProgram", B);
     await sync.handleWrite(`${NS}.wd-1.programs.selectedProgram`, B);
     port.writes.length = 0;
+    // The read before the start brings nothing: the datapoint decides.
+    port.gapPaths.set(`${base}/programs/selected`, undefined);
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body?.key).toBe(B);
     await notify(sync, [{ key: "BSH.Common.Root.SelectedProgram", value: B }]);
@@ -5211,6 +5275,8 @@ describe("findings of the 2026-09-24 audit — write path", () => {
     // Measured before: the WasherDryer key with the Dryer family's value.
     expect(port.writes.at(-1)?.path).toBe(`${base}/programs/selected/options/${wdKey}`);
     expect(port.writes.at(-1)?.body).toEqual({ key: wdKey, value: wdValues[0] });
+    // The read before the start brings nothing: the datapoints decide.
+    port.gapPaths.set(`${base}/programs/selected`, undefined);
     await sync.handleWrite(`${NS}.wd-1.programs.start`, true);
     expect(port.writes.at(-1)?.body?.options).toEqual([{ key: wdKey, value: wdValues[0] }]);
   });
