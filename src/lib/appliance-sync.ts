@@ -681,6 +681,8 @@ export class ApplianceSync {
   private readonly statisticsFolders = new Set<string>();
   /** Appliances whose last operation state says no program is under way (decision 48). */
   private readonly atRest = new Set<string>();
+  /** `deviceId|bshKey` → the off value the appliance last reported itself — what switching off sends (H-02). */
+  private readonly reportedOff = new Map<string, string>();
   /** Appliances whose `history` folder was written in this run. */
   private readonly historyFolders = new Set<string>();
   /** Appliances whose setting cache has unsaved entries — persisted once per sync, not per setting. */
@@ -2747,6 +2749,11 @@ export class ApplianceSync {
     this.runningProgram.delete(deviceId);
     this.records.delete(deviceId);
     this.atRest.delete(deviceId);
+    for (const key of [...this.reportedOff.keys()]) {
+      if (key.startsWith(`${deviceId}|`)) {
+        this.reportedOff.delete(key);
+      }
+    }
     for (const key of [...this.unreadableRecords]) {
       if (key.startsWith(`${deviceId}|`)) {
         this.unreadableRecords.delete(key);
@@ -3057,6 +3064,9 @@ export class ApplianceSync {
     const staleRead =
       source === "sync" &&
       (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
+    if (typeof value === "string" && !staleRead && switchState(value) === false) {
+      this.reportedOff.set(`${deviceId}|${raw.key}`, value);
+    }
     if (isProgramRecordKey(raw.key)) {
       // An encoded record never becomes a datapoint of its own: it is decoded
       // into readable ones (decision 40).
@@ -4659,6 +4669,10 @@ export class ApplianceSync {
         bshValues: channel === "options" ? familyOf(meta?.bshValues, optionKey) : meta?.bshValues,
         collapseEnum: channel === "options",
         value,
+        reportedOff:
+          this.reportedOff.get(`${deviceId}|${optionKey ?? meta?.bshKey}`) ??
+          this.reportedOff.get(`${deviceId}|${meta?.bshKey}`),
+        applianceType: this.typeByDeviceId.get(deviceId),
       };
       if (channel === "programs" && stateId === "start") {
         ctx.selectedProgramKey = await this.resolveSelectedProgramKey(deviceId);
