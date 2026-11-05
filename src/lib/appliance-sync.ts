@@ -333,6 +333,8 @@ const TREE_READS = new Set([
 ]);
 /** A re-read after Home Connect's pause starts this long after the pause ends — a timer may fire on its edge. */
 const GAP_RETRY_MARGIN_MS = 1000;
+/** The stream events that say whether an appliance is there and online — the appliance list says the same, older. */
+const CONNECTION_EVENTS = new Set(["CONNECTED", "PAIRED", "DISCONNECTED", "DEPAIRED"]);
 
 /**
  * The static half of one setting's definition — everything the settings LIST does
@@ -671,6 +673,10 @@ export class ApplianceSync {
   private readonly readGaps = new Map<string, number>();
   /** device id → the armed re-read after Home Connect's pause (at most one per appliance). */
   private readonly gapTimers = new Map<string, unknown>();
+  /** How many appliance-list passes run right now ({@link syncAppliances}). */
+  private listing = 0;
+  /** The connection events that arrived while the appliance list was read and walked, in order. */
+  private readonly heldEvents: SseEvent[] = [];
   /**
    * device id → setting key → its static definition, persisted in the device
    * object's native. Fetched once per setting per appliance; every later start
@@ -2226,6 +2232,10 @@ export class ApplianceSync {
       if (!haId) {
         return;
       }
+      if (this.listing > 0 && CONNECTION_EVENTS.has(event.event)) {
+        this.heldEvents.push(event);
+        return;
+      }
       const deviceId = this.deviceIdByHaId.get(haId);
 
       // A device coming (back) online, or a newly paired one: (re)build its data tree.
@@ -2304,8 +2314,34 @@ export class ApplianceSync {
     }
   }
 
-  /** Fetch the paired appliances and build/update their object tree. */
+  /**
+   * Fetch the paired appliances and build/update their object tree. The event stream runs meanwhile (it opens first,
+   * like Home Assistant's): a connection event that arrives while the list is read and walked is newer than the list,
+   * so it applies after the walk — applied at once, the walk would put the list's older state back (an appliance
+   * online again after its DISCONNECTED) or set up an appliance the list is just creating a second time.
+   *
+   * @returns whether the cloud answered with a list
+   */
   async syncAppliances(): Promise<boolean> {
+    this.listing++;
+    try {
+      return await this.walkApplianceList();
+    } finally {
+      this.listing--;
+      if (this.listing === 0) {
+        for (const event of this.heldEvents.splice(0)) {
+          this.handleStreamEvent(event);
+        }
+      }
+    }
+  }
+
+  /**
+   * Read the appliance list and walk it (see {@link syncAppliances}).
+   *
+   * @returns whether the cloud answered with a list
+   */
+  private async walkApplianceList(): Promise<boolean> {
     const data = await this.port.apiGet("/api/homeappliances");
     // A failed or malformed fetch must not report "0 appliances" — nothing was learned.
     if (!isRecord(data) || !Array.isArray(data.homeappliances)) {

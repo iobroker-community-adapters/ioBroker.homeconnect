@@ -1496,20 +1496,21 @@ describe("Homeconnect onUnload", () => {
     expect(ctx.i.eventStream).toBeUndefined();
   });
 
-  it("does not subscribe to states when the stop lands during the start-up chain", async () => {
+  it("reads no appliance when the stop lands during the start-up chain", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     // The sign-in chain is fire-and-forget. Stop the adapter while it is between
     // two steps: nothing after the guard may run on a shutting-down instance.
-    // After the LAST step of the chain: the guard after the appliance read is the
-    // only one before the subscribe — which is exactly why it is not redundant.
-    ctx.syncs[0].syncAppliances.mockImplementation(() => {
+    // The guard after the subscription is the only one before the stream and the
+    // appliance read — which is exactly why it is not redundant.
+    ctx.i.subscribeStatesAsync.mockImplementation(() => {
       ctx.i.onUnload(() => undefined);
-      return Promise.resolve(true);
+      return Promise.resolve();
     });
     await ctx.auths[0].port.onSignedIn();
     await settle();
-    expect(ctx.i.subscribeStatesAsync).not.toHaveBeenCalled();
+    expect(ctx.syncs[0].syncAppliances).not.toHaveBeenCalled();
+    expect(ctx.streams).toHaveLength(0);
   });
 
   it("resets auth.signedIn — a stopped instance must not report itself signed in", async () => {
@@ -2180,6 +2181,30 @@ describe("findings of the 2026-09-04 audit", () => {
     expect(order.every(n => typeof n === "number")).toBe(true);
     expect(ctx.i.subscribed).toEqual(["*"]);
   });
+
+  it("opens the event stream before it reads the appliances", async () => {
+    // Forum 85641: the stream opened only after the whole read — 59.9 s without a live value. Home Assistant opens
+    // it first; a value it sends during the read wins over the older REST answer (ApplianceSync `lastStreamAt`).
+    const ctx = setup();
+    await ctx.i.onReady();
+    const sync = ctx.syncs[0];
+    await ctx.auths[0].port.onSignedIn();
+    const subscribed = ctx.i.subscribeStatesAsync.mock.invocationCallOrder[0];
+    const opened = ctx.streams[0].start.mock.invocationCallOrder[0];
+    const read = sync.syncAppliances.mock.invocationCallOrder[0];
+    expect(subscribed).toBeLessThan(opened);
+    expect(opened).toBeLessThan(read);
+  });
+
+  it("opens the event stream and reads the appliances when the subscription fails", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    ctx.i.subscribeStatesAsync.mockRejectedValueOnce(new Error("objects db down"));
+    await ctx.auths[0].port.onSignedIn();
+    expect(ctx.i.log.error).toHaveBeenCalledWith("Start-up failed at the state subscription: objects db down");
+    expect(ctx.streams[0].start).toHaveBeenCalled();
+    expect(ctx.syncs[0].syncAppliances).toHaveBeenCalled();
+  });
 });
 
 describe("Homeconnect event-stream outage", () => {
@@ -2700,7 +2725,7 @@ describe("Homeconnect findings of the 2026-09-24 audit", () => {
     ctx.syncs[0].syncAppliances.mockRejectedValue(new TypeError("terminated"));
     await expect(ctx.auths[0].port.onSignedIn()).resolves.toBeUndefined();
     expect(ctx.i.log.error).toHaveBeenCalledWith(
-      "Setting up the appliances failed: terminated — live updates start anyway.",
+      "Setting up the appliances failed: terminated — live updates run anyway.",
     );
     // Before: signed in, but no stream and no write path until a restart.
     expect(ctx.i.subscribed).toEqual(["*"]);

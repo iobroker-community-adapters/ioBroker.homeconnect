@@ -786,8 +786,11 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * After a successful sign-in (the first one, and every re-sign-in at runtime):
-   * read the appliances, subscribe, open the stream. The local steps (migrations,
-   * priming, the unreachable stamp) ran once in onReady.
+   * subscribe, open the stream, read the appliances — the stream first, like Home
+   * Assistant's: a read of every appliance takes up to a minute (forum 85641:
+   * 59.9 s without a live value), and a value the stream sends meanwhile wins over
+   * the older REST answer (`lastStreamAt`). The local steps (migrations, priming,
+   * the unreachable stamp) ran once in onReady.
    *
    * Every step is gated on `terminating`. The chain is fire-and-forget, each of
    * its steps takes a while, and a stop right after start would otherwise let
@@ -801,15 +804,30 @@ class Homeconnect extends utils.Adapter {
     // lands in the controller's catch, which can only read it as a failed
     // sign-in: at start-up "Stored login could not be refreshed … retrying"
     // (with a token request every retry). The chain reports its own failures.
-    let current = "appliance sync";
+    let current = "state subscription";
     try {
       if (this.terminating) {
         return;
       }
-      // The appliance read gets its own catch: a failure there must not cost the
-      // write path and the live updates. Before, a single broken response ended
-      // the chain right here — the instance stayed signed in, with no event
-      // stream and no state subscription, until the next restart.
+      // Each step gets its own catch: a failure in one must not cost the others.
+      // Before, a single broken appliance response ended the chain — the instance
+      // stayed signed in, with no event stream and no state subscription, until
+      // the next restart.
+      try {
+        await this.subscribeStatesAsync("*");
+      } catch (e) {
+        if (this.terminating) {
+          this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
+          return;
+        }
+        this.log.error(`Start-up failed at the ${current}: ${errText(e)}`);
+      }
+      if (this.terminating) {
+        return;
+      }
+      current = "event stream";
+      this.startEventStream();
+      current = "appliance sync";
       if (sync) {
         try {
           await sync.syncAppliances();
@@ -818,15 +836,9 @@ class Homeconnect extends utils.Adapter {
             this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
             return;
           }
-          this.log.error(`Setting up the appliances failed: ${errText(e)} — live updates start anyway.`);
-        }
-        if (this.terminating) {
-          return;
+          this.log.error(`Setting up the appliances failed: ${errText(e)} — live updates run anyway.`);
         }
       }
-      current = "state subscription";
-      await this.subscribeStatesAsync("*");
-      this.startEventStream();
     } catch (e) {
       if (this.terminating) {
         this.log.debug(`start-up chain stopped at the ${current}: ${errText(e)}`);
@@ -898,7 +910,7 @@ class Homeconnect extends utils.Adapter {
     const downSince = this.streamDownSince;
     this.streamDownSince = undefined;
     if (!this.streamEverUp) {
-      // The first connect of this run: the start-up chain already read everything.
+      // The first connect of this run: the start-up chain reads every appliance right after opening the stream.
       this.streamEverUp = true;
       return;
     }

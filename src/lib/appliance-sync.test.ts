@@ -5323,6 +5323,41 @@ describe("findings of the 2026-09-24 audit — re-reads", () => {
     expect(port.pendingTimers()).toEqual([]);
   });
 
+  it("applies a going-offline that arrives while the appliance list is on its way after the list", async () => {
+    // The event stream opens before the appliances are read (forum 85641: 59.9 s without live values) — the list
+    // answer is older than the event and must not put the appliance back online.
+    const { port, sync } = await ready();
+    const held = hold(port, "/api/homeappliances");
+    const pass = sync.syncAppliances();
+    await flush();
+    connected(sync, "DISCONNECTED");
+    await flush();
+    held.release();
+    await pass;
+    await flush();
+    expect(port.states.get("spueler-1.info.reachable")).toBe(false);
+  });
+
+  it("reads a new appliance whose CONNECTED arrives while the appliance list is on its way through the list", async () => {
+    const port = new FakePort();
+    const sync = new ApplianceSync(port);
+    port.sync = sync;
+    appliance(port, "HA-1", "Spueler", { status: [], settings: [], commands: [] });
+    const asked: string[] = [];
+    port.onGet = p => asked.push(p);
+    const held = hold(port, "/api/homeappliances");
+    const pass = sync.syncAppliances();
+    await flush();
+    connected(sync);
+    await flush();
+    held.release();
+    await pass;
+    await flush();
+    // No second set-up of the same appliance beside the list's.
+    expect(asked.filter(p => p === base)).toEqual([]);
+    expect(port.objects.get("spueler-1")?.type).toBe("device");
+  });
+
   it("A2: going offline while the read is on its way arms no re-read", async () => {
     const { port, sync } = await ready();
     port.notReadyPaths.add(`${base}/status`);
