@@ -9205,3 +9205,220 @@ describe("ApplianceSync: a re-read after an outage is routine", () => {
     expect(lines.map(l => l.split(":")[0])).toEqual(["info", "debug"]);
   });
 });
+
+describe("ApplianceSync: run values around a program start and change (forum 85641, Home Assistant PR #187016)", () => {
+  const OPERATION_STATE = "BSH.Common.Status.OperationState";
+  const ACTIVE = "BSH.Common.Root.ActiveProgram";
+  const REMAINING = "BSH.Common.Option.RemainingProgramTime";
+  const PROGRESS = "BSH.Common.Option.ProgramProgress";
+  const HOT_AIR = "Cooking.Oven.Program.HeatingMode.HotAir";
+  const TOP_BOTTOM = "Cooking.Oven.Program.HeatingMode.TopBottomHeating";
+  const RUN = "BSH.Common.EnumType.OperationState.Run";
+  const READY = "BSH.Common.EnumType.OperationState.Ready";
+  const BASE = "/api/homeappliances/HA-1";
+  const remaining = (seconds: number): unknown => ({ key: REMAINING, value: seconds, unit: "seconds" });
+  const progress = (percent: number): unknown => ({ key: PROGRESS, value: percent, unit: "%" });
+
+  /**
+   * An oven running hot air (Home Assistant's test appliance), its run values shown: 30 min left, 10 %.
+   *
+   * @returns the port, the sync, a stream sender and the two shown values
+   */
+  async function runningOven(): Promise<{
+    port: FakePort;
+    sync: ApplianceSync;
+    send: (event: string, items: unknown[]) => void;
+    shown: () => [ioBroker.StateValue | undefined, ioBroker.StateValue | undefined];
+  }> {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Oven", {
+      type: "Oven",
+      status: [{ key: OPERATION_STATE, value: RUN }],
+      available: [HOT_AIR, TOP_BOTTOM],
+    });
+    port.getResponses.set(`${BASE}/programs/active`, { key: HOT_AIR, options: [] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    const send = (event: string, items: unknown[]): void =>
+      sync.handleStreamEvent({ event, id: "HA-1", data: JSON.stringify({ items }) });
+    const shown = (): [ioBroker.StateValue | undefined, ioBroker.StateValue | undefined] => [
+      port.states.get("oven-1.run.remainingProgramTime"),
+      port.states.get("oven-1.run.programProgress"),
+    ];
+    send("NOTIFY", [remaining(1800), progress(10)]);
+    await flush();
+    expect(shown()).toEqual([30, 10]);
+    return { port, sync, send, shown };
+  }
+
+  const START: Array<[string, unknown[]]> = [
+    ["NOTIFY", [remaining(1200), progress(0)]],
+    ["NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }]],
+    ["STATUS", [{ key: OPERATION_STATE, value: RUN }]],
+  ];
+  const ORDERS = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ];
+  const ENDS: Array<[string, (oven: Awaited<ReturnType<typeof runningOven>>) => Promise<void>]> = [
+    [
+      "the active program cleared",
+      async ({ send }) => {
+        send("NOTIFY", [{ key: ACTIVE, value: null }]);
+        await flush();
+      },
+    ],
+    [
+      "ready",
+      async ({ send }) => {
+        send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
+        await flush();
+      },
+    ],
+    [
+      "a reconnection while ready",
+      async ({ port, sync }) => {
+        port.getResponses.set(`${BASE}/status`, { status: [{ key: OPERATION_STATE, value: READY }] });
+        port.getResponses.set(`${BASE}/programs/active`, null);
+        sync.handleStreamEvent({ event: "DISCONNECTED", id: "HA-1", data: "{}" });
+        sync.handleStreamEvent({ event: "CONNECTED", id: "HA-1", data: "{}" });
+        await flush();
+      },
+    ],
+  ];
+  const CASES = ENDS.flatMap(([end, finish]) => ORDERS.map(order => [end, order.join(","), finish, order] as const));
+
+  it.each(CASES)("shows the run values of a new run after %s, whatever the order of its frames (%s)", async (...c) => {
+    const [, , finish, order] = c;
+    const oven = await runningOven();
+    await finish(oven);
+    expect(oven.shown()).toEqual([null, null]);
+    for (const index of order) {
+      oven.send(...START[index]);
+    }
+    await flush();
+    expect(oven.shown()).toEqual([20, 0]);
+  });
+
+  it("applies the oven's start frame — program and progress in one message — once it runs (forum 85641)", async () => {
+    const { send, shown } = await runningOven();
+    send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
+    await flush();
+    // The frame of the report, 20:22:06.864, as it came.
+    send("NOTIFY", [
+      { key: ACTIVE, value: HOT_AIR },
+      { key: "BSH.Common.Option.Duration", value: 60, unit: "seconds" },
+      progress(100),
+    ]);
+    await flush();
+    expect(shown()).toEqual([null, null]);
+    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
+    await flush();
+    expect(shown()).toEqual([null, 100]);
+  });
+
+  it("drops the run values of a program another one replaces while running — unless the message brings new ones", async () => {
+    const cases: Array<[unknown[], [number | null, number | null]]> = [
+      [[{ key: ACTIVE, value: TOP_BOTTOM }], [null, null]],
+      [
+        [{ key: ACTIVE, value: TOP_BOTTOM }, remaining(600), progress(0)],
+        [10, 0],
+      ],
+      [
+        [remaining(600), progress(0), { key: ACTIVE, value: TOP_BOTTOM }],
+        [10, 0],
+      ],
+      [[{ key: ACTIVE, value: HOT_AIR }], [30, 10]],
+    ];
+    for (const [items, expected] of cases) {
+      const { send, shown } = await runningOven();
+      send("NOTIFY", items);
+      await flush();
+      expect(shown()).toEqual(expected);
+    }
+  });
+
+  it("writes no intermediate value on a program change that brings its run values", async () => {
+    const { port, send, shown } = await runningOven();
+    port.stateWrites.length = 0;
+    send("NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }, remaining(600), progress(0)]);
+    await flush();
+    expect(port.stateWrites.filter(w => w.id.startsWith("oven-1.run."))).toEqual([
+      { id: "oven-1.run.remainingProgramTime", val: 10 },
+      { id: "oven-1.run.programProgress", val: 0 },
+    ]);
+    // The program and its values in two messages right behind each other: the emptying never lands after them.
+    send("NOTIFY", [{ key: ACTIVE, value: HOT_AIR }]);
+    send("NOTIFY", [remaining(300), progress(50)]);
+    await flush();
+    expect(shown()).toEqual([5, 50]);
+  });
+
+  it("keeps the run values over a pause", async () => {
+    const { send, shown } = await runningOven();
+    send("STATUS", [{ key: OPERATION_STATE, value: "BSH.Common.EnumType.OperationState.Pause" }]);
+    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
+    await flush();
+    expect(shown()).toEqual([30, 10]);
+  });
+
+  it("takes the run values of a program that replaced the last one while the stream was away from the re-read", async () => {
+    const cases: Array<[unknown[], [number | null, number | null]]> = [
+      [[], [null, null]],
+      [
+        [remaining(600), progress(50)],
+        [10, 50],
+      ],
+    ];
+    for (const [options, expected] of cases) {
+      const { port, sync, shown } = await runningOven();
+      sync.handleStreamEvent({ event: "DISCONNECTED", id: "HA-1", data: "{}" });
+      port.getResponses.set(`${BASE}/programs/active`, { key: TOP_BOTTOM, options });
+      sync.handleStreamEvent({ event: "CONNECTED", id: "HA-1", data: "{}" });
+      await flush();
+      expect(shown()).toEqual(expected);
+    }
+  });
+
+  it("never holds a run value a read brings while no program is under way", async () => {
+    const port = new FakePort();
+    appliance(port, "HA-1", "Oven", {
+      type: "Oven",
+      status: [{ key: OPERATION_STATE, value: READY }],
+      available: [HOT_AIR, TOP_BOTTOM],
+    });
+    // Left over from the last run (a washer-dryer at rest reads 1 min, 100 %).
+    port.getResponses.set(`${BASE}/programs/selected`, { key: HOT_AIR, options: [remaining(60), progress(100)] });
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    sync.handleStreamEvent({
+      event: "STATUS",
+      id: "HA-1",
+      data: JSON.stringify({ items: [{ key: OPERATION_STATE, value: RUN }] }),
+    });
+    await flush();
+    expect(port.states.get("oven-1.run.remainingProgramTime") ?? null).toBeNull();
+    expect(port.states.get("oven-1.run.programProgress") ?? null).toBeNull();
+  });
+
+  it("shows a progress the stream sent after the run ended at the next start, until a fresh one comes (known limit, like Home Assistant)", async () => {
+    const { sync, send, shown } = await runningOven();
+    send("STATUS", [{ key: OPERATION_STATE, value: READY }]);
+    await flush();
+    send("NOTIFY", [progress(100)]);
+    await flush();
+    expect(shown()).toEqual([null, null]);
+    expect(sync.reportState("oven-1")).toMatchObject({ heldRunValues: [PROGRESS], runEnded: true });
+    send("NOTIFY", [{ key: ACTIVE, value: TOP_BOTTOM }]);
+    send("STATUS", [{ key: OPERATION_STATE, value: RUN }]);
+    await flush();
+    expect(shown()).toEqual([null, 100]);
+    send("NOTIFY", [progress(3)]);
+    await flush();
+    expect(shown()).toEqual([null, 3]);
+  });
+});

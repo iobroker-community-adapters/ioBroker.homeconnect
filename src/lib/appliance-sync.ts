@@ -363,6 +363,12 @@ const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
  */
 const PROGRAM_UNDER_WAY = new Set(["delayedstart", "run", "pause", "finished"]);
 /**
+ * The operation states that end a program run (Home Assistant PR #187016, `_update_program_run`): a run value the
+ * stream sent before them belongs to no later run. The other states outside a run (ActionRequired, Error, Aborting)
+ * can lead back into it.
+ */
+const RUN_OVER = new Set(["inactive", "ready"]);
+/**
  * A stand-in value of a stored value type — it gives a value-less datapoint its shape when it moves (decision 49).
  *
  * @param type the stored `common.type`
@@ -707,6 +713,16 @@ export class ApplianceSync {
   private readonly statisticsFolders = new Set<string>();
   /** Appliances whose last operation state says no program is under way (decision 48). */
   private readonly atRest = new Set<string>();
+  /**
+   * device id → BSH key → a run value the stream sent while no program was under way: an appliance may send the
+   * coming run's remaining time and progress before its Run frame. Applied once a program is under way, like Home
+   * Assistant (PR #187016); dropped when the run ends or another program replaces it.
+   */
+  private readonly heldRunValues = new Map<string, Map<string, Record<string, unknown>>>();
+  /** device id → the active program as last reported ("" for none) — tells a new program from the same one. */
+  private readonly activePrograms = new Map<string, string>();
+  /** Appliances whose program run is over (Inactive, Ready or no active program): the next active program starts a new run. */
+  private readonly runEnded = new Set<string>();
   /** `deviceId|bshKey` → the off value the appliance last reported itself — what switching off sends (H-02). */
   private readonly reportedOff = new Map<string, string>();
   /** Appliances whose `history` folder was written in this run. */
@@ -926,6 +942,8 @@ export class ApplianceSync {
       },
       runningProgram: this.runningProgram.get(deviceId),
       atRest: this.atRest.has(deviceId),
+      heldRunValues: [...(this.heldRunValues.get(deviceId)?.keys() ?? [])],
+      runEnded: this.runEnded.has(deviceId),
     };
   }
 
@@ -1199,17 +1217,106 @@ export class ApplianceSync {
   }
 
   /**
-   * Write "no value" to the options that only mean something while a program is under way.
+   * Write "no value" to the options that only mean something while a program is under way — every write goes out at
+   * once, so a stream message right behind lands after them.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param keep the BSH keys left as they are (the message or the read that brings their new value)
+   */
+  private async emptyRunValues(deviceId: string, keep: ReadonlySet<string> = new Set()): Promise<void> {
+    await Promise.all(
+      [...RUN_VALUE_KEYS]
+        .filter(([key, id]) => !keep.has(key) && this.knownStates.has(`${deviceId}.${id}`))
+        .map(([, id]) => this.port.setStateChanged(`${deviceId}.${id}`, { val: null, ack: true })),
+    );
+  }
+
+  /**
+   * Note whether a program run is over (Home Assistant PR #187016): Inactive and Ready end it, and what the stream
+   * held for it goes; any other state a sync reads says a run may be on.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the operation state as sent
+   * @param source where it came from — only a sync's reading clears the mark, like Home Assistant's refresh
+   */
+  private noteRunEnd(deviceId: string, value: string, source: "sync" | "values"): void {
+    if (RUN_OVER.has(shortEnum(value).toLowerCase())) {
+      this.runEnded.add(deviceId);
+      this.heldRunValues.delete(deviceId);
+    } else if (source === "sync") {
+      this.runEnded.delete(deviceId);
+    }
+  }
+
+  /**
+   * Note the active program the appliance reports and say whether the run values shown belong to an earlier run
+   * (Home Assistant PR #187016, `_update_program_run`): no program ends the run, another program replaces it —
+   * unless the run had ended already: then whatever arrived since belongs to the program starting now.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param value the full program key, "" for none
+   * @returns whether the run ended or was replaced (what was held for it is dropped)
+   */
+  private noteActiveProgram(deviceId: string, value: string): boolean {
+    const previous = this.activePrograms.get(deviceId);
+    this.activePrograms.set(deviceId, value);
+    if (value.length === 0) {
+      this.runEnded.add(deviceId);
+      this.heldRunValues.delete(deviceId);
+      return true;
+    }
+    const ended = this.runEnded.delete(deviceId);
+    if (ended || !previous || previous === value) {
+      return false;
+    }
+    this.heldRunValues.delete(deviceId);
+    return true;
+  }
+
+  /**
+   * Hold a run value the stream sends while no program is under way — it is the coming run's; one sent while a
+   * program is under way is shown at once and replaces what was held.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the item's BSH key
+   * @param raw the item as the stream sent it
+   */
+  private holdRunValue(deviceId: string, key: string, raw: Record<string, unknown>): void {
+    if (!RUN_VALUE_KEYS.has(key) || raw.value === undefined || raw.value === null) {
+      return;
+    }
+    if (!this.atRest.has(deviceId)) {
+      this.heldRunValues.get(deviceId)?.delete(key);
+      return;
+    }
+    const held = this.heldRunValues.get(deviceId) ?? new Map<string, Record<string, unknown>>();
+    held.set(key, raw);
+    this.heldRunValues.set(deviceId, held);
+  }
+
+  /**
+   * A program got under way: the run values the stream held take the whole value path (unit, rounding, metadata) as
+   * if they arrived now — started before any later message.
    *
    * @param deviceId the id-safe device path segment
    */
-  private async emptyRunValues(deviceId: string): Promise<void> {
-    for (const id of RUN_VALUE_KEYS.values()) {
-      const rel = `${deviceId}.${id}`;
-      if (this.knownStates.has(rel)) {
-        await this.port.setStateChanged(rel, { val: null, ack: true });
-      }
+  private releaseHeldRunValues(deviceId: string): void {
+    const held = this.heldRunValues.get(deviceId);
+    this.heldRunValues.delete(deviceId);
+    for (const raw of held?.values() ?? []) {
+      void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
     }
+  }
+
+  /**
+   * Whether the stream reported a key after the appliance's current pass began — its value is newer than the pass's.
+   *
+   * @param deviceId the id-safe device path segment
+   * @param key the BSH key
+   * @returns whether it did
+   */
+  private streamedDuringPass(deviceId: string, key: string): boolean {
+    return (this.lastStreamAt.get(`${deviceId}|${key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity);
   }
 
   /**
@@ -2286,15 +2393,23 @@ export class ApplianceSync {
         return;
       }
 
-      const items = Array.isArray(payload.items) ? payload.items : [];
+      const items = (Array.isArray(payload.items) ? payload.items : []).filter(isRecord);
+      // Before any item is applied: a message can carry the run values of the program that replaces the last one.
+      const program = items.find(raw => raw.key === ACTIVE_PROGRAM_KEY);
+      const programValue = program?.value === null ? "" : program?.value;
+      const runOver = typeof programValue === "string" && this.noteActiveProgram(deviceId, programValue);
       const now = Date.now();
       for (const raw of items) {
-        if (isRecord(raw)) {
-          if (typeof raw.key === "string") {
-            this.lastStreamAt.set(`${deviceId}|${raw.key}`, now);
-          }
-          void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
+        if (typeof raw.key === "string") {
+          this.lastStreamAt.set(`${deviceId}|${raw.key}`, now);
+          this.holdRunValue(deviceId, raw.key, raw);
         }
+        void this.guarded(() => this.applyBshItem(deviceId, raw, "values"));
+      }
+      if (runOver) {
+        // What the message does not bring belongs to the run that is over.
+        const carried = new Set(items.filter(raw => raw.value !== undefined && raw.value !== null).map(raw => raw.key));
+        void this.guarded(() => this.emptyRunValues(deviceId, carried as Set<string>));
       }
     } catch (e) {
       this.port.log.warn(`handling stream event failed: ${errText(e)}`);
@@ -2840,6 +2955,9 @@ export class ApplianceSync {
     this.runningProgram.delete(deviceId);
     this.records.delete(deviceId);
     this.atRest.delete(deviceId);
+    this.heldRunValues.delete(deviceId);
+    this.activePrograms.delete(deviceId);
+    this.runEnded.delete(deviceId);
     for (const key of [...this.reportedOff.keys()]) {
       if (key.startsWith(`${deviceId}|`)) {
         this.reportedOff.delete(key);
@@ -3225,10 +3343,7 @@ export class ApplianceSync {
     // A REST answer that was requested before the stream delivered a newer value
     // for the same key must not put the older one back (a CONNECTED runs both
     // side by side). Its metadata still counts; its value does not — like an item whose value is unknown.
-    const staleRead =
-      valueUnknown ||
-      (source === "sync" &&
-        (this.lastStreamAt.get(`${deviceId}|${raw.key}`) ?? -1) >= (this.passStartedAt.get(deviceId) ?? Infinity));
+    const staleRead = valueUnknown || (source === "sync" && this.streamedDuringPass(deviceId, raw.key));
     if (typeof value === "string" && !staleRead && switchState(value) === false) {
       this.reportedOff.set(`${deviceId}|${raw.key}`, value);
     }
@@ -3240,11 +3355,15 @@ export class ApplianceSync {
     }
     // The operation state decides at once whether a program is under way — before any await, so a run value
     // the stream sends right after it is judged by the new state (decision 48).
-    const restingNow =
-      raw.key === OPERATION_STATE_KEY &&
-      typeof value === "string" &&
-      !staleRead &&
-      this.noteOperationState(deviceId, value);
+    let restingNow = false;
+    if (raw.key === OPERATION_STATE_KEY && typeof value === "string" && !staleRead) {
+      const wasAtRest = this.atRest.has(deviceId);
+      restingNow = this.noteOperationState(deviceId, value);
+      this.noteRunEnd(deviceId, value, source);
+      if (wasAtRest && !restingNow) {
+        this.releaseHeldRunValues(deviceId);
+      }
+    }
     if (raw.key === ACTIVE_PROGRAM_KEY && typeof value === "string" && !staleRead) {
       this.noteRunningProgram(deviceId, value);
     }
@@ -4398,6 +4517,10 @@ export class ApplianceSync {
     const active = await this.port.apiGet(appliancePath(haId, "/programs/active"));
     if (active !== undefined) {
       const activeKey = isRecord(active) && typeof active.key === "string" ? active.key : "";
+      // A program that replaced the last one while the stream was away (Home Assistant PR #187016): the run values
+      // shown are the last run's — unless this read or the stream brings new ones.
+      const runOver =
+        !this.streamedDuringPass(deviceId, ACTIVE_PROGRAM_KEY) && this.noteActiveProgram(deviceId, activeKey);
       // Written when there is a value, when the appliance has programs — or when the
       // state already exists: then an "idle" ("") must still overwrite a stale name.
       if (activeKey.length > 0 || knownKeys.length > 0 || this.knownStates.has(`${deviceId}.programs.activeProgram`)) {
@@ -4405,6 +4528,21 @@ export class ApplianceSync {
       }
       if (isRecord(active)) {
         await this.applyProgramOptions(deviceId, active.options);
+      }
+      if (runOver) {
+        const carried = new Set(
+          [...RUN_VALUE_KEYS.keys()].filter(
+            key =>
+              this.streamedDuringPass(deviceId, key) ||
+              [selected, active].some(
+                answer =>
+                  isRecord(answer) &&
+                  Array.isArray(answer.options) &&
+                  answer.options.some(o => isRecord(o) && o.key === key && o.value !== undefined && o.value !== null),
+              ),
+          ),
+        );
+        await this.emptyRunValues(deviceId, carried);
       }
     }
 
