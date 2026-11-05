@@ -4276,6 +4276,27 @@ describe("ApplianceSync findings of the 2026-09-07 audit", () => {
     expect((start?.body?.options ?? []).map(o => o.key)).toEqual(["Dishcare.Dishwasher.Option.IntensivZone"]);
   });
 
+  it("reads a program chosen at the appliance from the offered list, without writing it into the list again", async () => {
+    const port = new FakePort();
+    const { deviceId, b } = twoProgramDishwasher(port);
+    const sync = new ApplianceSync(port);
+    await sync.syncAppliances();
+    port.extendCalls.length = 0;
+
+    // The stream carries the selection without a list — the program is in the offered one all the same.
+    sync.handleStreamEvent({
+      event: "NOTIFY",
+      data: JSON.stringify({ haId: "HA-1", items: [{ key: "BSH.Common.Root.SelectedProgram", value: b }] }),
+      id: undefined,
+    });
+    await flush();
+    expect(port.states.get(`${deviceId}.programs.selectedProgram`)).toBe("intensiv70");
+    expect(port.extendCalls.filter(id => id === `${deviceId}.programs.selectedProgram`)).toEqual([]);
+    expect(port.logs.filter(l => l.includes("to its list of values"))).toEqual([]);
+    const native = port.objects.get(`${deviceId}.programs.selectedProgram`)?.native as { seenValues?: string[] };
+    expect(native.seenValues ?? []).not.toContain(b);
+  });
+
   it("costs nothing when the same program is reported again", async () => {
     const port = new FakePort();
     const { a } = twoProgramDishwasher(port);
