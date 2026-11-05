@@ -55,7 +55,7 @@ Auf Instanzebene fassen `info.devicesTotal`, `info.devicesOnline` und `info.devi
 
 Woher die Datenpunkte kommen:
 
-- **Status, Einstellungen, Programme, Optionen und Befehle** meldet das Gerät selbst an Home Connect — genau diese legt der Adapter an. Unter `options` steht nur, was man für ein Programm wählt; Werte, die das Gerät während eines Programms meldet (Restzeit, Fortschritt, Prognosen, Programmphase), stehen unter `run`.
+- **Status, Einstellungen, Programme, Optionen und Befehle** meldet das Gerät selbst an Home Connect — genau diese legt der Adapter an. Unter `options` steht nur, was man für ein Programm wählt; Werte, die das Gerät während eines Programms meldet (Restzeit, Fortschritt, Prognosen, Programmphase), stehen unter `run`. Diese Werte schickt das Gerät selbst: Solange es keinen schickt, bleibt der Datenpunkt leer statt 0 — manche Geräte schicken den Fortschritt nur mit eingestellter Dauer.
 - **Ereignisse** sind die Ausnahme. Home Connect kann nicht beantworten, welche Ereignisse ein Gerät schicken kann — ein Ereignis kommt erst in dem Moment, in dem es eintritt. Deshalb legt der Adapter alle bekannten Ereignisse des Gerätetyps vorab aus seinem eigenen Katalog an: ein Skript auf „Salz leer“ lässt sich heute bauen, statt Monate zu warten, bis das Salz einmal ausgeht. Ein Gerät kann deshalb Ereignis-Datenpunkte haben, die es nie nutzt; ein Ereignis, das der Katalog nicht kennt, kommt dazu, sobald das Gerät es zum ersten Mal schickt.
 
 Zwei Eigenschaften sind wichtig zu wissen:

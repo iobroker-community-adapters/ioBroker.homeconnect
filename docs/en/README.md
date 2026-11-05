@@ -55,7 +55,7 @@ At instance level, `info.devicesTotal`, `info.devicesOnline` and `info.devicesAl
 
 Where the data points come from:
 
-- **Status, settings, programs, options and commands** are what the appliance itself reports to Home Connect — the adapter creates exactly those. `options` holds only what you choose for a program; values the appliance reports while a program runs (remaining time, progress, forecasts, process phase) are under `run`.
+- **Status, settings, programs, options and commands** are what the appliance itself reports to Home Connect — the adapter creates exactly those. `options` holds only what you choose for a program; values the appliance reports while a program runs (remaining time, progress, forecasts, process phase) are under `run`. The appliance sends these values itself: while it sends none, the data point stays empty instead of 0 — some appliances send the progress only with a set duration.
 - **Events** are the exception. Home Connect has no way to ask which events an appliance can send — an event only arrives at the moment it happens. So the adapter creates every known event of the appliance type in advance, from its own catalogue: you can build a script on "salt empty" today instead of waiting months for the salt to run out. An appliance may therefore have event data points it never uses; an event the catalogue does not know is added the first time the appliance sends it.
 
 Two properties are worth knowing:

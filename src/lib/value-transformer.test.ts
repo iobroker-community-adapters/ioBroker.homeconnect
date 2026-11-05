@@ -825,7 +825,9 @@ describe("display names and descriptions", () => {
     });
     expect(t.nameSource).toBe("i18n");
     const known = transformOptionDefinition({ key: "BSH.Common.Option.ProgramProgress", type: "Int" });
-    expect(known.common.desc).toMatchObject({ de: "Fortschritt in Prozent." });
+    expect(known.common.desc).toMatchObject({
+      de: "Fortschritt des laufenden Programms in Prozent, wie das Gerät ihn meldet — leer, solange es keinen meldet; manche Geräte melden ihn nur mit eingestellter Dauer.",
+    });
     // Same name with or without a cloud name in the definition — the table entry
     // decides, and it is stamped "i18n" so no later label replaces it.
     const bare = transformOptionDefinition({ key: "LaundryCare.Washer.Option.SpinSpeed", type: "Int" });
