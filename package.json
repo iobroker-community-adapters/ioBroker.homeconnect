@@ -97,6 +97,6 @@
   "readmeFilename": "README.md",
   "overrides": {
     "esbuild": ">=0.25.0",
-    "follow-redirects": ">=1.16.1"
+    "follow-redirects": ">=1.16.2"
   }
 }
