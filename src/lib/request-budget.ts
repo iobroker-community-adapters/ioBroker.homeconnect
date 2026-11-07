@@ -45,6 +45,18 @@ function countsFrom(place: RequestPlace): number {
 /** The places of the requests that still count, in hand-out order. */
 export class RequestBudget {
   private places: RequestPlace[] = [];
+  /** The longest window any caller holds, in seconds. */
+  private readonly keepSeconds: number;
+
+  /**
+   * @param keepSeconds the longest window any caller holds: a place is forgotten only once it is older than this,
+   *   whichever windows one call of {@link waitMs} passes — a call with the shorter windows alone (the sign-in requests,
+   *   which the day's own hold never stops) must not forget the places of the day. Without it, each call keeps what its
+   *   own longest window needs.
+   */
+  public constructor(keepSeconds = 0) {
+    this.keepSeconds = keepSeconds;
+  }
 
   /**
    * Hand out a place now; it holds until the request settles.
@@ -108,7 +120,7 @@ export class RequestBudget {
    * @returns ms to wait (0 = now), or undefined when only the end of an open request can free a place
    */
   public waitMs(now: number, windows: readonly PacedWindow[], gapMs: number): number | undefined {
-    const longest = Math.max(0, ...windows.map(w => w.seconds)) * 1000;
+    const longest = Math.max(this.keepSeconds, ...windows.map(w => w.seconds)) * 1000;
     this.places = this.places.filter(p => p.open || countsFrom(p) + longest > now);
     const last = this.places.at(-1);
     let wait = last ? Math.max(0, countsFrom(last) + gapMs - now) : 0;

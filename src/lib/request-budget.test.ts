@@ -115,6 +115,18 @@ describe("the places of the request budget (tooling round 170)", () => {
     expect(budget.waitMs(1_000, WINDOWS, 100)).toBe(20);
   });
 
+  it("keeps the places of the longest window although a call passes only the shorter ones", () => {
+    const DAY = 86_400;
+    const budget = new RequestBudget(DAY);
+    const place = budget.take(0);
+    budget.sent(place, 0);
+    budget.settle(place, 10);
+    // a sign-in request waits only for the second and the minute — the day's place must not be forgotten by it
+    expect(budget.waitMs(2 * MINUTE, WINDOWS, 100)).toBe(0);
+    expect(budget.held(2 * MINUTE, DAY)).toBe(1);
+    expect(budget.waitMs(2 * MINUTE, [...WINDOWS, { seconds: DAY, max: 1 }], 100)).toBe(DAY * 1000 + 10 - 2 * MINUTE);
+  });
+
   it("counts the gap from the previous answer, else from its send", () => {
     const budget = new RequestBudget();
     const first = budget.take(0);

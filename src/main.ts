@@ -73,11 +73,16 @@ const PACED_SECONDS = [1, MINUTE_SECONDS, DAY_SECONDS] as const;
 /** The longest window the transport holds — the one whose places outlive a restart. */
 const LONGEST_PACED_SECONDS = Math.max(...PACED_SECONDS);
 /**
- * A wait for the day's quota longer than this is not waited out: the requests waiting then are dropped and REST pauses
- * until a place of the day frees — a command that went out hours later would act at a moment nobody chose. A shorter
- * one is waited like any other window.
+ * The day's quota holds when its next place frees later than this: a command that cannot go out within it is dropped —
+ * one that went out hours later would act at a moment nobody chose —, a read waits for its place (nothing reads again
+ * what a dropped read missed), a shorter wait is waited like any other window.
  */
 const DAILY_HOLD_AFTER_MS = MINUTE_SECONDS * 1000;
+/**
+ * At most this long after a request ends its place reaches the request file — a kill, a crash or a power cut skips
+ * onUnload, and the day's places must still reach the next process.
+ */
+const HAND_OVER_EVERY_MS = MINUTE_SECONDS * 1000;
 /**
  * The windows with their strictest declared limit, read where a place is handed out (the inventory run's pacing hook
  * widens the declaration as the adapter loads it).
@@ -86,6 +91,34 @@ const DAILY_HOLD_AFTER_MS = MINUTE_SECONDS * 1000;
  */
 function pacedWindows(): PacedWindow[] {
   return PACED_SECONDS.map(seconds => ({ seconds, max: declaredLimit(seconds) }));
+}
+/**
+ * The windows a sign-in request waits for: every window but the day. Its place counts in the day like any other —
+ * api-docs (Rate Limiting): "Every HTTPS request to the Home Connect REST API counts toward the daily limit", and the
+ * page does not say whether the token endpoint, which has its own "10 token refresh per minute and 100 token refresh per
+ * day", is part of it —, but the day's own hold never stops one: without the token every other request stops too, and
+ * a sign-in link the user is confirming would lose its code. Should Home Connect itself refuse it, its 429 with
+ * Retry-After pauses like every other.
+ *
+ * @returns the windows shorter than a day
+ */
+function signInWindows(): PacedWindow[] {
+  return pacedWindows().filter(window => window.seconds < DAY_SECONDS);
+}
+/**
+ * What a request waiting for its place is: a sign-in request (never held by the day), a user's command or the
+ * connection test (dropped while the day holds), the event stream's connect and a read (both wait for their place).
+ */
+type SlotKind = "token" | "write" | "stream" | "read";
+/**
+ * The queue order: sign-in requests and commands first, then the stream's connect (one request for every live event),
+ * then the reads; in arrival order within each.
+ *
+ * @param kind the request's kind
+ * @returns its rank, lower first
+ */
+function slotRank(kind: SlotKind): number {
+  return kind === "read" ? 2 : kind === "stream" ? 1 : 0;
 }
 /**
  * Home Connect blocks for ten minutes after ten successive requests that end in an error. Definition reads are
@@ -212,15 +245,23 @@ class Homeconnect extends utils.Adapter {
   /** The start has read its own objects and states: from here on a marker write compares in memory. */
   private ownStatesRead = false;
   /** The places of the requests that still count in a window (see {@link pacedWindows}). */
-  private readonly budget = new RequestBudget();
+  private readonly budget = new RequestBudget(LONGEST_PACED_SECONDS);
   /** Where the places of the last day outlive a restart (request-budget.ts); empty until onReady knows it. */
   private budgetFile = "";
-  /** Until when the adapter holds REST because the day's quota is spent (see {@link holdDailyQuota}). */
+  /** The hand-over that follows a request's end within {@link HAND_OVER_EVERY_MS}, while one is due. */
+  private handOverTimer: ioBroker.Timeout | undefined;
+  /** When the day's next place frees, as the latest hold measured it (see {@link noteDailyHold}). */
   private dailyHoldUntil = 0;
-  /** Requests waiting for their place; a user's write stands before every waiting read. */
-  private readonly slotQueue: Array<{ write: boolean; resolve: (place: RequestPlace | undefined) => void }> = [];
+  /** Whether the day's quota is spent — from its first hold until the day has a minute's requests free again. */
+  private dayEpisode = false;
+  /** Requests waiting for their place, in {@link slotRank} order. */
+  private readonly slotQueue: Array<{ kind: SlotKind; resolve: (place: RequestPlace | undefined) => void }> = [];
   /** Whether {@link pumpSlots} is handing out places right now. */
   private pumping = false;
+  /** Ends the queue's current wait early — a request that now stands first is judged at once. */
+  private wakePump: (() => void) | undefined;
+  /** Sign-in requests waiting out a pause of Home Connect; the stop ends their wait. */
+  private readonly pauseWaits = new Set<() => void>();
   /** Whether this run already said that the request budget spreads the reads out. */
   private budgetNoted = false;
   /** Successive requests that ended in an error (see {@link ERROR_STREAK_LIMIT}). */
@@ -510,35 +551,27 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * One sign-in request (device code, token poll, refresh): it goes to the same host Home Connect counts per minute,
-   * so it takes a place in the request budget — ahead of waiting reads, like a user's write.
+   * One sign-in request (device code, token poll, refresh): it goes to the same host Home Connect counts, so it takes a
+   * place in the request budget — ahead of waiting reads, like a user's write, and never held by the day
+   * ({@link signInWindows}).
    *
    * @param path the OAuth endpoint path
    * @param form the form fields
    * @returns the answer, or a transport failure when the adapter shut down while it waited
    */
   private async sendForm(path: string, form: Record<string, string>): Promise<FormPostResult> {
-    // A rate pause holds the whole host — a token renewal waits for it like any request (fleet suite D21: after a 429
-    // with retry-after 60, no call before the minute is up).
+    // A rate pause of Home Connect holds the whole host — a token renewal waits for it like any request (fleet suite
+    // D21: after a 429 with retry-after 60, no call before the minute is up). The stop ends the wait.
     const paused = this.restBlockedUntil - Date.now();
     if (paused > 0 && !this.terminating) {
-      try {
-        await this.delay(paused);
-      } catch {
-        // the adapter's timer refuses during shutdown — nothing may go out then
-      }
+      await this.waitOutPause(paused);
     }
-    const place = this.terminating ? undefined : await this.spaceRequests(true);
+    const place = this.terminating ? undefined : await this.spaceRequests("token");
     if (!place) {
       return {
         status: 0,
         ok: false,
-        body: {
-          error: "network_error",
-          error_description: this.terminating
-            ? "the adapter is shutting down"
-            : "requests to Home Connect are paused (the day's request quota is spent)",
-        },
+        body: { error: "network_error", error_description: "the adapter is shutting down" },
       };
     }
     const res = await this.sent(place, postForm(DEFAULT_BASE_URL, path, form));
@@ -928,7 +961,7 @@ class Homeconnect extends utils.Adapter {
       onUnauthorized: () => this.authCtl?.refreshNow() ?? Promise.resolve(false),
       // One daily quota for the stream and REST: a 429 on the stream pauses REST too.
       onRateLimited: ms => this.armRatePause(ms),
-      takeSlot: () => this.streamSlot(),
+      takeSlot: () => this.spaceRequests("stream").then(place => (place ? this.streamPlace(place) : undefined)),
       log: (level, msg) => this.log[level](msg),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: handle => this.clearTimeout(handle as ioBroker.Timeout),
@@ -1124,16 +1157,17 @@ class Homeconnect extends utils.Adapter {
     }
     const sent = this.authCtl.accessToken;
     // The test request takes a slot like every other request and a 429 pauses REST like on every other path.
-    const place = await this.spaceRequests(true);
+    const place = await this.spaceRequests("write");
     if (!place) {
+      // refused while the day holds (pumpSlots) — the wait until its next place frees
       return this.terminating
         ? { error: tText("ctShuttingDown") }
-        : { error: tText("ctRatePaused", Math.ceil((this.restBlockedUntil - Date.now()) / 1000)) };
+        : { error: tText("ctRatePaused", Math.max(1, Math.ceil((this.dailyHoldUntil - Date.now()) / 1000))) };
     }
     let res = await this.sent(place, getJson(DEFAULT_BASE_URL, "/api/homeappliances", sent, this.acceptLanguage()));
     if (res.status === 401) {
       const fresh = await this.tokenAfter401(sent);
-      const again = fresh ? await this.spaceRequests(true) : undefined;
+      const again = fresh ? await this.spaceRequests("write") : undefined;
       if (fresh && again) {
         res = await this.sent(again, getJson(DEFAULT_BASE_URL, "/api/homeappliances", fresh, this.acceptLanguage()));
       }
@@ -1200,8 +1234,11 @@ class Homeconnect extends utils.Adapter {
    */
   private async readRaw(path: string): Promise<LiveAnswer> {
     const token = this.authCtl?.accessToken;
+    // Never queued behind a spent day: a read would wait hours for its place, the report must not (decision 50).
     const place =
-      this.terminating || !token || Date.now() < this.restBlockedUntil ? undefined : await this.spaceRequests();
+      this.terminating || !token || Date.now() < this.restBlockedUntil || this.daySpent(Date.now())
+        ? undefined
+        : await this.spaceRequests();
     if (!token || !place) {
       return { path, status: 0, error: "no request went out" };
     }
@@ -1277,6 +1314,8 @@ class Homeconnect extends utils.Adapter {
           restPausedForS: this.restBlockedUntil > now ? Math.ceil((this.restBlockedUntil - now) / 1000) : 0,
           requestsLastMinute: this.budget.held(now, MINUTE_SECONDS),
           requestsLastDay: this.budget.held(now, DAY_SECONDS),
+          dayQuotaSpent: this.daySpent(now),
+          dayPlaceFreesInS: this.dailyHoldUntil > now ? Math.ceil((this.dailyHoldUntil - now) / 1000) : 0,
           errorStreak: this.errorStreak,
           lastReconnectSync: this.lastReconnectSync > 0 ? new Date(this.lastReconnectSync).toISOString() : undefined,
           signInLastError: this.stateMirror.held("auth.lastError")?.val,
@@ -1303,7 +1342,10 @@ class Homeconnect extends utils.Adapter {
           return "not signed in to Home Connect";
         }
         if (this.restBlockedUntil > now) {
-          return `requests to Home Connect are paused for another ${Math.ceil((this.restBlockedUntil - now) / 1000)} s`;
+          return `Home Connect blocks requests for another ${Math.ceil((this.restBlockedUntil - now) / 1000)} s`;
+        }
+        if (this.daySpent(now)) {
+          return `the day's request quota is spent (limit: ${declaredLimit(DAY_SECONDS)} calls in 1 day) — reads wait for their place`;
         }
         if (this.errorStreak >= ERROR_STREAK_LIMIT) {
           return `${this.errorStreak} error answers in a row — requests wait (Home Connect blocks after 10)`;
@@ -1422,10 +1464,19 @@ class Homeconnect extends utils.Adapter {
     if (this.dropWhilePaused(source)) {
       return undefined;
     }
+    const place = await this.spaceRequests("write");
+    if (!place) {
+      // Refused while the day holds (pumpSlots): its one warn line covers every command it drops (decision H-14).
+      if (!this.terminating) {
+        this.log.debug(
+          `${source} dropped — the day's request quota is spent (limit: ${declaredLimit(DAY_SECONDS)} calls in 1 day).`,
+        );
+      }
+      return undefined;
+    }
     // Re-checked after the wait: a 429 that arrived while this write queued for
     // its slot pauses it too.
-    const place = await this.spaceRequests(true);
-    if (!place || this.dropWhilePaused(source)) {
+    if (this.dropWhilePaused(source)) {
       this.giveBack(place);
       return undefined;
     }
@@ -1433,7 +1484,7 @@ class Homeconnect extends utils.Adapter {
     if (res.status === 401) {
       // The retry is a request of its own: it takes a place like every other one.
       const fresh = await this.tokenAfter401(token);
-      const again = fresh ? await this.spaceRequests(true) : undefined;
+      const again = fresh ? await this.spaceRequests("write") : undefined;
       if (fresh && again) {
         res = await this.sent(again, this.sendWrite(req, fresh));
       }
@@ -1510,19 +1561,25 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * Take a place for one request: at least {@link requestGapMs} after the previous one and within each of the
-   * {@link pacedWindows}. Callers queue up; a user's write goes before every waiting read, so a button does not wait
-   * behind the first read of all appliances.
+   * {@link pacedWindows}. Callers queue up in {@link slotRank} order, so a button does not wait behind the first read
+   * of all appliances.
    *
-   * @param write whether the request carries a user action (a write or the connection test)
-   * @returns the request's place, or undefined when the adapter started shutting down — the request must not go out then
+   * @param kind what the request is (see {@link SlotKind})
+   * @returns the request's place, or undefined when the adapter started shutting down or — for a command — the day
+   *   holds: the request must not go out then
    */
-  private spaceRequests(write = false): Promise<RequestPlace | undefined> {
+  private spaceRequests(kind: SlotKind = "read"): Promise<RequestPlace | undefined> {
     if (this.terminating) {
       return Promise.resolve(undefined);
     }
     return new Promise<RequestPlace | undefined>(resolve => {
-      const firstRead = write ? this.slotQueue.findIndex(entry => !entry.write) : -1;
-      this.slotQueue.splice(firstRead === -1 ? this.slotQueue.length : firstRead, 0, { write, resolve });
+      const behind = this.slotQueue.findIndex(entry => slotRank(entry.kind) > slotRank(kind));
+      const at = behind === -1 ? this.slotQueue.length : behind;
+      this.slotQueue.splice(at, 0, { kind, resolve });
+      if (at === 0) {
+        // it stands first now: a wait the queue began for the request before it says nothing about this one
+        this.wakePump?.();
+      }
       void this.pumpSlots();
     });
   }
@@ -1550,7 +1607,8 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * The request of a place is over: the place now frees on its own, so the queue looks again. During the stop the
-   * next process gets the place anew, counted from this answer.
+   * next process gets the place anew, counted from this answer; while the adapter runs it reaches the request file
+   * within {@link HAND_OVER_EVERY_MS}, so a kill or a crash costs the next process at most that much of the day.
    *
    * @param place the request's place
    * @param answeredAt when Home Connect answered, undefined when no answer came
@@ -1559,6 +1617,11 @@ class Homeconnect extends utils.Adapter {
     this.budget.settle(place, answeredAt);
     if (this.terminating) {
       this.handOverRequestBudget();
+    } else if (this.budgetFile && this.handOverTimer === undefined) {
+      this.handOverTimer = this.setTimeout(() => {
+        this.handOverTimer = undefined;
+        this.handOverRequestBudget();
+      }, HAND_OVER_EVERY_MS);
     }
     void this.pumpSlots();
   }
@@ -1597,7 +1660,8 @@ class Homeconnect extends utils.Adapter {
   /**
    * Hand out the places in queue order, waiting out the gap and every window between them. A place holds while its
    * request is on its way; when only such places fill a window, nothing can be timed — the queue rests until a request
-   * settles ({@link settlePlace}) and looks again.
+   * settles ({@link settlePlace}) and looks again. While the day holds, the commands at the head are dropped and the
+   * reads wait; a request that comes to stand first during a wait is judged at once ({@link spaceRequests}).
    */
   private async pumpSlots(): Promise<void> {
     if (this.pumping) {
@@ -1607,18 +1671,25 @@ class Homeconnect extends utils.Adapter {
     try {
       while (this.slotQueue.length > 0 && !this.terminating) {
         const now = Date.now();
-        const wait = this.budget.waitMs(now, pacedWindows(), requestGapMs());
+        const head = this.slotQueue[0];
+        const wait = this.budget.waitMs(now, head.kind === "token" ? signInWindows() : pacedWindows(), requestGapMs());
+        this.daySpent(now);
         if (wait === 0) {
-          this.slotQueue.shift()?.resolve(this.budget.take(now));
+          this.slotQueue.shift();
+          head.resolve(this.budget.take(now));
           continue;
         }
+        // Only the day makes a wait longer than a minute: the minute's window frees a minute after an answer at most.
         if (
           wait !== undefined &&
           wait > DAILY_HOLD_AFTER_MS &&
           this.budget.held(now, DAY_SECONDS) >= declaredLimit(DAY_SECONDS)
         ) {
-          this.holdDailyQuota(wait);
-          return;
+          this.noteDailyHold(now, wait);
+          if (head.kind === "write") {
+            this.dropWaitingWrites();
+            continue;
+          }
         }
         if (!this.budgetNoted && this.budget.held(now, MINUTE_SECONDS) >= requestsPerMinute()) {
           this.budgetNoted = true;
@@ -1629,7 +1700,7 @@ class Homeconnect extends utils.Adapter {
         if (wait === undefined) {
           return;
         }
-        await this.delay(wait);
+        await this.sleepPump(wait);
       }
       this.refuseWaiting();
     } catch (e) {
@@ -1642,53 +1713,111 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * The day's quota is spent and its next place frees later than a minute from now: pause REST until then, drop every
-   * request that waits (a command that went out hours later would act at a moment nobody chose) and say so once per
-   * hold, in one line with the limit and the wait (decision H-14).
+   * The queue's wait for the next place. Unlike `delay` it can end early — a request that comes to stand first is
+   * judged at once ({@link wakePump}), and the stop ends it ({@link refuseWaiting}).
    *
-   * @param waitMs until a place of the day frees
+   * @param ms the wait
+   * @returns a promise that settles when the wait is over; rejected when the adapter's timer refuses (shutdown)
    */
-  private holdDailyQuota(waitMs: number): void {
-    const now = Date.now();
-    if (now >= this.dailyHoldUntil) {
-      this.log.warn(
-        `The adapter holds its requests to Home Connect for ${spokenDuration(Math.ceil(waitMs / 1000))} (limit: ${declaredLimit(DAY_SECONDS)} calls in 1 day) — they all went out within the last 24 hours.`,
-      );
-    }
-    this.dailyHoldUntil = now + waitMs;
-    this.armRatePause(waitMs);
-    this.refuseWaiting();
+  private sleepPump(ms: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = this.setTimeout(() => {
+        this.wakePump = undefined;
+        resolve();
+      }, ms);
+      if (timer === undefined) {
+        reject(new Error("the adapter is shutting down"));
+        return;
+      }
+      this.wakePump = () => {
+        this.wakePump = undefined;
+        this.clearTimeout(timer);
+        resolve();
+      };
+    });
   }
 
   /**
-   * A place for the event stream's connect. While the day's quota holds REST, the connect waits for the end of the
-   * hold instead of asking again every few seconds.
+   * Whether the day's quota is spent: from its first hold until the day has a minute's requests free again — a single
+   * freed place, taken at once, ends no episode, so a spent day says so once (decision H-14).
    *
-   * @returns the connect's place, or undefined when the adapter is shutting down
+   * @param now the current time (epoch ms)
+   * @returns whether the day is spent
    */
-  private async streamSlot(): Promise<StreamPlace | undefined> {
-    for (;;) {
-      const place = await this.spaceRequests();
-      if (place) {
-        return this.streamPlace(place);
-      }
-      const paused = this.restBlockedUntil - Date.now();
-      if (this.terminating || paused <= 0) {
-        return undefined;
-      }
-      try {
-        await this.delay(paused);
-      } catch {
-        // the adapter's timer refuses during shutdown — the connect must not go out then
-        return undefined;
+  private daySpent(now: number): boolean {
+    if (this.dayEpisode && this.budget.held(now, DAY_SECONDS) <= declaredLimit(DAY_SECONDS) - requestsPerMinute()) {
+      this.dayEpisode = false;
+    }
+    return this.dayEpisode;
+  }
+
+  /**
+   * The day holds: its next place frees `waitMs` from now. One line names the limit and the wait — on warn at the
+   * first hold of a spent day, on debug for every later one until the day has room again (decision H-14).
+   *
+   * @param now the current time (epoch ms)
+   * @param waitMs until the day's next place frees
+   */
+  private noteDailyHold(now: number, waitMs: number): void {
+    const fresh = now >= this.dailyHoldUntil;
+    this.dailyHoldUntil = now + waitMs;
+    if (!fresh) {
+      return;
+    }
+    const line = `The adapter holds its requests to Home Connect for ${spokenDuration(Math.ceil(waitMs / 1000))} (limit: ${declaredLimit(DAY_SECONDS)} calls in 1 day) — commands in that time are dropped, reads wait for their place.`;
+    if (this.dayEpisode) {
+      this.log.debug(line);
+      return;
+    }
+    this.dayEpisode = true;
+    this.log.warn(line);
+  }
+
+  /** Answer every waiting command and connection test with "no" — the day holds, they would act hours late. */
+  private dropWaitingWrites(): void {
+    for (let k = this.slotQueue.length - 1; k >= 0; k--) {
+      if (this.slotQueue[k].kind === "write") {
+        this.slotQueue.splice(k, 1)[0].resolve(undefined);
       }
     }
   }
 
-  /** Answer every request still waiting for its place with "no" — the adapter is shutting down or holds the day. */
+  /** Answer every request still waiting for its place with "no" — the adapter is shutting down. */
   private refuseWaiting(): void {
     for (const entry of this.slotQueue.splice(0)) {
       entry.resolve(undefined);
+    }
+    this.wakePump?.();
+  }
+
+  /**
+   * Wait out a pause of Home Connect; the stop ends the wait ({@link releasePauseWaits}) — js-controller resolves no
+   * `delay` during a stop, and a token request still waiting would hold `authCtl.settle()` and with it the callback.
+   *
+   * @param ms the pause left
+   * @returns a promise that settles when the pause is over or the adapter stops
+   */
+  private waitOutPause(ms: number): Promise<void> {
+    return new Promise<void>(resolve => {
+      const wait: { timer?: ioBroker.Timeout } = {};
+      const done = (): void => {
+        this.pauseWaits.delete(done);
+        this.clearTimeout(wait.timer);
+        resolve();
+      };
+      wait.timer = this.setTimeout(done, ms);
+      if (wait.timer === undefined) {
+        resolve();
+        return;
+      }
+      this.pauseWaits.add(done);
+    });
+  }
+
+  /** End every wait for a pause of Home Connect — the adapter is shutting down. */
+  private releasePauseWaits(): void {
+    for (const done of [...this.pauseWaits]) {
+      done();
     }
   }
 
@@ -1805,11 +1934,16 @@ class Homeconnect extends utils.Adapter {
     try {
       this.terminating = true;
       // No request goes out from here on. The adapter's wait never ends during a stop (js-controller resolves no
-      // `delay` then), so the requests waiting for a place hear "no" now — a token request among them would hold
-      // `authCtl.settle()` below, and with it the callback. The minute spent so far goes to the next process — now, in
-      // case the host ends this process before the callback; again for every request that ends after this
-      // (`settlePlace`) and once more right before the callback.
+      // `delay` then), so the requests waiting for a place hear "no" now and a token request waiting out a pause of
+      // Home Connect stops waiting — either would hold `authCtl.settle()` below, and with it the callback. The day
+      // spent so far goes to the next process — now, in case the host ends this process before the callback; again for
+      // every request that ends after this (`settlePlace`) and once more right before the callback.
       this.refuseWaiting();
+      this.releasePauseWaits();
+      if (this.handOverTimer !== undefined) {
+        this.clearTimeout(this.handOverTimer);
+        this.handOverTimer = undefined;
+      }
       this.handOverRequestBudget();
       // A report still being made ends after its current step, and no message starts a new one (round 165).
       this.diagnostics.stop();
