@@ -74,6 +74,17 @@ function isLoginOver(code: string | undefined): boolean {
   return code === "invalid_grant" || (code !== undefined && CONFIG_ERRORS.has(code));
 }
 
+/**
+ * Whether a failed OAuth call got no answer from Home Connect: a transport failure or a timeout (status 0, the HTTP
+ * layer's pseudo-code `network_error`) or a server error (5xx).
+ *
+ * @param e the failure
+ * @returns whether it is an outage rather than a refusal
+ */
+function isOutage(e: OAuthError): boolean {
+  return e.status !== undefined && (e.status === 0 || e.status >= 500);
+}
+
 /** The slice of the adapter the auth lifecycle needs — injected so it can be faked in tests. */
 export interface AuthPort {
   /** The adapter logger. */
@@ -264,7 +275,8 @@ export class AuthController {
    * Start (or restart) the device flow: publish the verification URL, announce
    * the sign-in once per episode (notification + info; later cycles only renew
    * the link on debug), then poll until approved. A failed start (network,
-   * rejected credentials) retries after a pause instead of giving up.
+   * rejected credentials) retries after a pause instead of giving up; only a
+   * refusal is published and warned about, an outage stays on debug.
    */
   private async runDeviceFlow(): Promise<void> {
     if (this.stopped) {
@@ -279,13 +291,16 @@ export class AuthController {
     try {
       dev = await this.auth.startDeviceFlow();
     } catch (e) {
-      if (e instanceof OAuthError && e.oauthError !== undefined) {
-        await this.reportRefusal(e);
+      // A transport failure, a timeout or a 5xx is no answer from Home Connect: no refusal and no hint (decision 39),
+      // and an outage is a state, logged on debug only — it does not use up the episode's one warning.
+      const outage = e instanceof OAuthError && isOutage(e);
+      const refusal = e instanceof OAuthError && e.oauthError !== undefined && !outage ? e : undefined;
+      if (refusal) {
+        await this.reportRefusal(refusal);
       }
-      const level = this.startWarned ? "debug" : "warn";
-      this.startWarned = true;
-      const hint =
-        e instanceof OAuthError && e.oauthError !== undefined ? ` ${signInHint(e.oauthError, e.description)}` : "";
+      const level = outage || this.startWarned ? "debug" : "warn";
+      this.startWarned ||= !outage;
+      const hint = refusal ? ` ${signInHint(refusal.oauthError, refusal.description)}` : "";
       this.port.log[level](
         `Could not start the Home Connect sign-in (${errText(e)}).${hint} Next attempt in 5 minutes.`,
       );

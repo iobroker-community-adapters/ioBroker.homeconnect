@@ -531,6 +531,53 @@ describe("AuthController device-flow start failure", () => {
     await flush();
     expect(h.port.urls).toContain("https://verify?code=1234");
   });
+
+  it.each([
+    [
+      "a timeout",
+      {
+        status: 0,
+        ok: false,
+        body: { error: "network_error", error_description: "The operation was aborted due to timeout" },
+      },
+    ],
+    ["a 503", { status: 503, ok: false, body: {} }],
+  ])(
+    "takes %s for no answer: no refusal, no Client ID hint, debug only, retry in 5 min",
+    async (_kind, outage: FormPostResult) => {
+      const h = harness([outage, ok(DEVICE_BODY)]);
+      await h.ctl.start();
+      // Home Connect said nothing — `auth.lastError` carries only its words (decision 39), and an outage is a state,
+      // logged on debug (fleet rule: offline is a state, not a log line).
+      expect(h.port.problems).toEqual([]);
+      expect(h.logs.filter(l => l.level === "warn")).toEqual([]);
+      const line = h.logs.find(l => l.msg.includes("Could not start the Home Connect sign-in"));
+      expect(line?.level).toBe("debug");
+      expect(line?.msg).not.toContain("Client ID");
+      const retry = [...h.timers].reverse().find(t => !t.interval);
+      expect(retry?.ms).toBe(300_000);
+      firePending(h);
+      await flush();
+      expect(h.port.urls).toContain("https://verify?code=1234");
+    },
+  );
+
+  it("still warns about a refusal that follows an outage", async () => {
+    const refused = { error: "unauthorized_client", error_description: "Invalid client id" };
+    const h = harness([
+      { status: 0, ok: false, body: { error: "network_error", error_description: "fetch failed" } },
+      fail(400, refused),
+    ]);
+    await h.ctl.start();
+    firePending(h);
+    await flush();
+    expect(h.port.problems).toEqual(["unauthorized_client: Invalid client id"]);
+    expect(h.logs.filter(l => l.level === "warn").map(l => l.msg)).toEqual([
+      "Could not start the Home Connect sign-in (Device authorization failed: unauthorized_client (Invalid client id))." +
+        " Home Connect does not know this Client ID — copy it again from the developer portal (64 hexadecimal characters)." +
+        " Next attempt in 5 minutes.",
+    ]);
+  });
 });
 
 describe("AuthController connection flag", () => {
