@@ -132,6 +132,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: a refused start with a delayed start set is no longer retried without the options, which would start the program at once
 - (krobipd) Fixed: live updates start right after the appliance list, so no event is lost while the appliances are read
 - (krobipd) Fixed: an appliance that connects, disconnects or is removed while the appliances are being read is read and shown by that newer state
+- (krobipd) Fixed: a request now holds its place in the Home Connect quota until a minute after its answer, so the 51st request of a minute no longer draws a 429
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

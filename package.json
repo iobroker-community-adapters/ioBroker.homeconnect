@@ -74,7 +74,7 @@
     "build": "build-adapter ts",
     "build:admin": "node tasks",
     "watch": "build-adapter ts --watch",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
     "check:admin": "node src-admin/node_modules/typescript/bin/tsc --noEmit -p src-admin/tsconfig.json",
     "test:admin": "npm run check:admin && npm --prefix src-admin run lint && npm --prefix src-admin run test",
     "test:ts": "vitest run",

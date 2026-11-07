@@ -7,7 +7,7 @@ import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
 import { AuthController, type AuthPort } from "./lib/auth-controller";
 import { moveAllWithEnums } from "./lib/enum-carry";
 import type { WriteRequest } from "./lib/command-dispatch";
-import { EventStream } from "./lib/event-stream";
+import { EventStream, type StreamPlace } from "./lib/event-stream";
 import { errText } from "./lib/err-text";
 import { isRecord } from "./lib/pure-helpers";
 import { looksLikeClientId } from "./lib/sign-in-help";
@@ -16,7 +16,13 @@ import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { categorize, restLogKey } from "./lib/log-dedup";
 import { LogOnce } from "./lib/log-once";
 import { declaredLimit, minimumGapMs } from "./lib/api-limits";
-import { readSentTimes, writeSentTimes } from "./lib/request-budget";
+import {
+  readHeldTimes,
+  RequestBudget,
+  writeHeldTimes,
+  type PacedWindow,
+  type RequestPlace,
+} from "./lib/request-budget";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import { tText, type I18nKey } from "./lib/i18n";
 import { LogRing } from "./lib/diagnostics/log-ring";
@@ -29,14 +35,13 @@ const DEFAULT_BASE_URL = "https://api.home-connect.com";
 /** Pause REST this long after a 429 that carries no Retry-After header. */
 const RATE_PAUSE_FALLBACK_MS = 60_000;
 /**
- * Minimum spacing between two REST requests. Home Connect allows 10 requests
- * per second on average (leaky bucket, 20 burst) and answers a breach with a 429 that
- * carries NO Retry-After — the adapter then pauses REST for a whole minute.
- * Decision 27 keeps the single-setting reads strictly sequential, but
- * "sequential" only stays under 10/s while the cloud answers slower than
- * 100 ms; this makes the limit mechanically true on every path. Derived from src/lib/api-limits.json (100 ms) and read
- * where a place is handed out — the declaration is the adapter's only source of its pace (tooling round 140: never the
- * environment, which compact mode shares between the adapters of a host).
+ * Minimum spacing between two REST requests, counted from the previous request's answer — from its send while it has
+ * none (tooling round 170). Home Connect allows 10 requests per second on average (leaky bucket, 20 burst) and answers
+ * a breach with a 429 that carries NO Retry-After — the adapter then pauses REST for a whole minute. Decision 27 keeps
+ * the single-setting reads strictly sequential; the gap spreads them, the second's window in {@link pacedWindows}
+ * holds the limit when requests overlap. Derived from src/lib/api-limits.json (100 ms) and read where a place is
+ * handed out — the declaration is the adapter's only source of its pace (tooling round 140: never the environment,
+ * which compact mode shares between the adapters of a host).
  *
  * @returns milliseconds between two requests
  */
@@ -54,6 +59,22 @@ function requestGapMs(): number {
  */
 function requestsPerMinute(): number {
   return declaredLimit(60);
+}
+/**
+ * The windows the transport holds every request to, in seconds: the second (the 10 per second on average) and the
+ * minute (the 50 per minute). The day's 1000 are declared too and not held here.
+ */
+const PACED_SECONDS = [1, 60] as const;
+/** The longest window the transport holds — the one whose places outlive a restart. */
+const LONGEST_PACED_SECONDS = Math.max(...PACED_SECONDS);
+/**
+ * The windows with their strictest declared limit, read where a place is handed out (the inventory run's pacing hook
+ * widens the declaration as the adapter loads it).
+ *
+ * @returns each window with the requests it allows
+ */
+function pacedWindows(): PacedWindow[] {
+  return PACED_SECONDS.map(seconds => ({ seconds, max: declaredLimit(seconds) }));
 }
 /**
  * Home Connect blocks for ten minutes after ten successive requests that end in an error. Definition reads are
@@ -179,14 +200,12 @@ class Homeconnect extends utils.Adapter {
   private readonly stateMirror = new StateMirror();
   /** The start has read its own objects and states: from here on a marker write compares in memory. */
   private ownStatesRead = false;
-  /** Send times of the requests within the last minute (see {@link requestsPerMinute}). */
-  private sentAt: number[] = [];
-  /** Where the send times of the last minute outlive a restart (request-budget.ts); empty until onReady knows it. */
+  /** The places of the requests that still count in a window (see {@link pacedWindows}). */
+  private readonly budget = new RequestBudget();
+  /** Where the places of the last minute outlive a restart (request-budget.ts); empty until onReady knows it. */
   private budgetFile = "";
-  /** Epoch-ms of the last request sent (see {@link requestGapMs}). */
-  private lastSentAt = 0;
   /** Requests waiting for their place; a user's write stands before every waiting read. */
-  private readonly slotQueue: Array<{ write: boolean; resolve: (go: boolean) => void }> = [];
+  private readonly slotQueue: Array<{ write: boolean; resolve: (place: RequestPlace | undefined) => void }> = [];
   /** Whether {@link pumpSlots} is handing out places right now. */
   private pumping = false;
   /** Whether this run already said that the request budget spreads the reads out. */
@@ -496,14 +515,15 @@ class Homeconnect extends utils.Adapter {
         // the adapter's timer refuses during shutdown — nothing may go out then
       }
     }
-    if (this.terminating || !(await this.spaceRequests(true))) {
+    const place = this.terminating ? undefined : await this.spaceRequests(true);
+    if (!place) {
       return {
         status: 0,
         ok: false,
         body: { error: "network_error", error_description: "the adapter is shutting down" },
       };
     }
-    const res = await this.sent(postForm(DEFAULT_BASE_URL, path, form));
+    const res = await this.sent(place, postForm(DEFAULT_BASE_URL, path, form));
     // the body carries the tokens — the report gets the status and the OAuth code only
     const code = isRecord(res.body) && typeof res.body.error === "string" ? res.body.error : undefined;
     this.recorder.token(path, res.status, code);
@@ -514,22 +534,36 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Take over the send times of the last minute a previous process of this instance left in its data folder.
+   * Take over the places of the last minute a previous process of this instance left in its data folder.
    */
   private takeOverRequestBudget(): void {
     try {
       this.budgetFile = join(utils.getAbsoluteInstanceDataDir(this), "request-times.json");
-      this.sentAt = readSentTimes(this.budgetFile, Date.now());
-      this.lastSentAt = this.sentAt.at(-1) ?? 0;
+      this.budget.restore(readHeldTimes(this.budgetFile, Date.now(), LONGEST_PACED_SECONDS * 1000));
     } catch (e) {
       this.log.debug(`Could not read the request budget of the previous run: ${errText(e)}`);
     }
   }
 
-  /** Leave the send times of the last minute for the next process of this instance. */
+  /**
+   * Leave the places of the last minute for the next process of this instance: each counts from its answer, else its
+   * send, and a request still on its way from now. The stop hands over at its start, again whenever a request ends
+   * after that ({@link settlePlace}) — Home Connect counts a request at the latest when it answers, and an answer that
+   * reaches this process after the stop would otherwise count from the stop, up to its delay too early for the next
+   * process — and once more right before it reports done.
+   */
   private handOverRequestBudget(): void {
+    if (!this.budgetFile) {
+      return;
+    }
     try {
-      writeSentTimes(this.budgetFile, this.sentAt, Date.now());
+      const now = Date.now();
+      writeHeldTimes(
+        this.budgetFile,
+        this.budget.heldFrom(now, LONGEST_PACED_SECONDS),
+        now,
+        LONGEST_PACED_SECONDS * 1000,
+      );
     } catch (e) {
       this.log.debug(`Could not keep the request budget for the next run: ${errText(e)}`);
     }
@@ -876,8 +910,7 @@ class Homeconnect extends utils.Adapter {
       onUnauthorized: () => this.authCtl?.refreshNow() ?? Promise.resolve(false),
       // One daily quota for the stream and REST: a 429 on the stream pauses REST too.
       onRateLimited: ms => this.armRatePause(ms),
-      takeSlot: () => this.spaceRequests(),
-      markSent: () => this.markSent(),
+      takeSlot: () => this.spaceRequests().then(place => (place ? this.streamPlace(place) : undefined)),
       log: (level, msg) => this.log[level](msg),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
       clearTimer: handle => this.clearTimeout(handle as ioBroker.Timeout),
@@ -1073,14 +1106,16 @@ class Homeconnect extends utils.Adapter {
     }
     const sent = this.authCtl.accessToken;
     // The test request takes a slot like every other request and a 429 pauses REST like on every other path.
-    if (!(await this.spaceRequests(true))) {
+    const place = await this.spaceRequests(true);
+    if (!place) {
       return { error: tText("ctShuttingDown") };
     }
-    let res = await this.sent(getJson(DEFAULT_BASE_URL, "/api/homeappliances", sent, this.acceptLanguage()));
+    let res = await this.sent(place, getJson(DEFAULT_BASE_URL, "/api/homeappliances", sent, this.acceptLanguage()));
     if (res.status === 401) {
       const fresh = await this.tokenAfter401(sent);
-      if (fresh && (await this.spaceRequests(true))) {
-        res = await this.sent(getJson(DEFAULT_BASE_URL, "/api/homeappliances", fresh, this.acceptLanguage()));
+      const again = fresh ? await this.spaceRequests(true) : undefined;
+      if (fresh && again) {
+        res = await this.sent(again, getJson(DEFAULT_BASE_URL, "/api/homeappliances", fresh, this.acceptLanguage()));
       }
     }
     this.countAnswer(res);
@@ -1145,14 +1180,17 @@ class Homeconnect extends utils.Adapter {
    */
   private async readRaw(path: string): Promise<LiveAnswer> {
     const token = this.authCtl?.accessToken;
-    if (this.terminating || !token || Date.now() < this.restBlockedUntil || !(await this.spaceRequests())) {
+    const place =
+      this.terminating || !token || Date.now() < this.restBlockedUntil ? undefined : await this.spaceRequests();
+    if (!token || !place) {
       return { path, status: 0, error: "no request went out" };
     }
-    let res = await this.sent(getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
+    let res = await this.sent(place, getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
     if (res.status === 401) {
       const fresh = await this.tokenAfter401(token);
-      if (fresh && (await this.spaceRequests())) {
-        res = await this.sent(getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage()));
+      const again = fresh ? await this.spaceRequests() : undefined;
+      if (fresh && again) {
+        res = await this.sent(again, getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage()));
       }
     }
     this.countAnswer(res);
@@ -1217,7 +1255,7 @@ class Homeconnect extends utils.Adapter {
             this.streamDownSince !== undefined ? new Date(this.streamDownSince).toISOString() : undefined,
           streamLastError: this.eventStream?.lastError,
           restPausedForS: this.restBlockedUntil > now ? Math.ceil((this.restBlockedUntil - now) / 1000) : 0,
-          requestsLastMinute: this.sentAt.filter(t => now - t < 60_000).length,
+          requestsLastMinute: this.budget.held(now, LONGEST_PACED_SECONDS),
           errorStreak: this.errorStreak,
           lastReconnectSync: this.lastReconnectSync > 0 ? new Date(this.lastReconnectSync).toISOString() : undefined,
           signInLastError: this.stateMirror.held("auth.lastError")?.val,
@@ -1276,15 +1314,18 @@ class Homeconnect extends utils.Adapter {
     const source = `GET ${path}`;
     // Re-checked after the wait: a 429 that arrived while this request queued
     // for its slot pauses it too.
-    if (!(await this.spaceRequests()) || this.restPaused(path)) {
+    const place = await this.spaceRequests();
+    if (!place || this.restPaused(path)) {
+      this.giveBack(place);
       return undefined;
     }
-    let res = await this.sent(getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
+    let res = await this.sent(place, getJson(DEFAULT_BASE_URL, path, token, this.acceptLanguage()));
     if (res.status === 401) {
       // The retry is a request of its own: it takes a place like every other one.
       const fresh = await this.tokenAfter401(token);
-      if (fresh && (await this.spaceRequests())) {
-        res = await this.sent(getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage()));
+      const again = fresh ? await this.spaceRequests() : undefined;
+      if (fresh && again) {
+        res = await this.sent(again, getJson(DEFAULT_BASE_URL, path, fresh, this.acceptLanguage()));
       }
     }
     this.countAnswer(res);
@@ -1362,15 +1403,18 @@ class Homeconnect extends utils.Adapter {
     }
     // Re-checked after the wait: a 429 that arrived while this write queued for
     // its slot pauses it too.
-    if (!(await this.spaceRequests(true)) || this.dropWhilePaused(source)) {
+    const place = await this.spaceRequests(true);
+    if (!place || this.dropWhilePaused(source)) {
+      this.giveBack(place);
       return undefined;
     }
-    let res = await this.sent(this.sendWrite(req, token));
+    let res = await this.sent(place, this.sendWrite(req, token));
     if (res.status === 401) {
       // The retry is a request of its own: it takes a place like every other one.
       const fresh = await this.tokenAfter401(token);
-      if (fresh && (await this.spaceRequests(true))) {
-        res = await this.sent(this.sendWrite(req, fresh));
+      const again = fresh ? await this.spaceRequests(true) : undefined;
+      if (fresh && again) {
+        res = await this.sent(again, this.sendWrite(req, fresh));
       }
     }
     this.countAnswer(res);
@@ -1444,15 +1488,18 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Take a place for one request: at least {@link requestGapMs} after the previous one and at most
-   * {@link requestsPerMinute} in any minute. Callers queue up; a user's write goes before every waiting read, so a
-   * button does not wait behind the first read of all appliances.
+   * Take a place for one request: at least {@link requestGapMs} after the previous one and within each of the
+   * {@link pacedWindows}. Callers queue up; a user's write goes before every waiting read, so a button does not wait
+   * behind the first read of all appliances.
    *
    * @param write whether the request carries a user action (a write or the connection test)
-   * @returns false when the adapter started shutting down during the wait — the request must not go out then
+   * @returns the request's place, or undefined when the adapter started shutting down — the request must not go out then
    */
-  private spaceRequests(write = false): Promise<boolean> {
-    return new Promise<boolean>(resolve => {
+  private spaceRequests(write = false): Promise<RequestPlace | undefined> {
+    if (this.terminating) {
+      return Promise.resolve(undefined);
+    }
+    return new Promise<RequestPlace | undefined>(resolve => {
       const firstRead = write ? this.slotQueue.findIndex(entry => !entry.write) : -1;
       this.slotQueue.splice(firstRead === -1 ? this.slotQueue.length : firstRead, 0, { write, resolve });
       void this.pumpSlots();
@@ -1460,29 +1507,76 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Stamp a request that just went out: called with the transport call as its argument, so the call has started — and
-   * reached fetch, which every transport calls before its first await — when the stamp is taken, in the same synchronous
-   * step (tooling round 140). The counted time then never lies before the moment the request left, and every declared
-   * window holds without a reserve. Raises the stamp {@link pumpSlots} reserved when it handed out the place: the pump
-   * waits at least one gap after a hand-out, so the last send time is this request's.
+   * Stamp a request that just went out and follow it to its end: called with the transport call as its argument, so
+   * the call has started — and reached fetch, which every transport calls before its first await — when the send stamp
+   * is taken, in the same synchronous step (tooling round 140). The place holds until the call settles; with an answer
+   * (`answeredAt`, taken by the transport as the headers came) it frees a window's length after it, without one a
+   * window's length after this stamp (tooling round 170). Every stamp then lies at or after the network's own, and
+   * every declared window holds without a reserve.
    *
+   * @param place the request's place
    * @param call the transport call that was just started
    * @returns the same call
    */
-  private sent<T>(call: Promise<T>): Promise<T> {
-    this.markSent();
+  private sent<T extends { answeredAt?: number }>(place: RequestPlace, call: Promise<T>): Promise<T> {
+    this.budget.sent(place, Date.now());
+    void call.then(
+      res => this.settlePlace(place, res.answeredAt),
+      () => this.settlePlace(place, undefined),
+    );
     return call;
   }
 
-  /** Raise the reserved send time to now — {@link sent} for a transport that calls fetch itself (the event stream). */
-  private markSent(): void {
-    this.lastSentAt = Date.now();
-    this.sentAt.splice(-1, 1, this.lastSentAt);
+  /**
+   * The request of a place is over: the place now frees on its own, so the queue looks again. During the stop the
+   * next process gets the place anew, counted from this answer.
+   *
+   * @param place the request's place
+   * @param answeredAt when Home Connect answered, undefined when no answer came
+   */
+  private settlePlace(place: RequestPlace, answeredAt: number | undefined): void {
+    this.budget.settle(place, answeredAt);
+    if (this.terminating) {
+      this.handOverRequestBudget();
+    }
+    void this.pumpSlots();
   }
 
   /**
-   * Hand out the places in queue order, waiting out the gap and the minute budget between them. A hand-out reserves the
-   * place with its own time; the caller raises it to the moment its request went out ({@link sent}).
+   * Give back a place whose request did not go out (a rate pause came while it waited).
+   *
+   * @param place the place, if one was handed out
+   */
+  private giveBack(place: RequestPlace | undefined): void {
+    if (place) {
+      this.budget.drop(place);
+      void this.pumpSlots();
+    }
+  }
+
+  /**
+   * The event stream's view of a place: it stamps the connect's send and answer itself ({@link sent} for a transport
+   * that calls fetch on its own).
+   *
+   * @param place the connect's place
+   * @returns the handle the stream reports to
+   */
+  private streamPlace(place: RequestPlace): StreamPlace {
+    let went = false;
+    return {
+      sent: () => {
+        went = true;
+        this.budget.sent(place, Date.now());
+      },
+      answered: () => this.settlePlace(place, Date.now()),
+      ended: () => (went ? this.settlePlace(place, undefined) : this.giveBack(place)),
+    };
+  }
+
+  /**
+   * Hand out the places in queue order, waiting out the gap and every window between them. A place holds while its
+   * request is on its way; when only such places fill a window, nothing can be timed — the queue rests until a request
+   * settles ({@link settlePlace}) and looks again.
    */
   private async pumpSlots(): Promise<void> {
     if (this.pumping) {
@@ -1490,38 +1584,38 @@ class Homeconnect extends utils.Adapter {
     }
     this.pumping = true;
     try {
-      while (this.slotQueue.length > 0) {
+      while (this.slotQueue.length > 0 && !this.terminating) {
         const now = Date.now();
-        this.sentAt = this.sentAt.filter(at => now - at < 60_000);
-        const budgetWait = this.sentAt.length >= requestsPerMinute() ? this.sentAt[0] + 60_000 - now : 0;
-        const pause = Math.max(this.lastSentAt + requestGapMs() - now, budgetWait);
-        if (budgetWait > 0 && !this.budgetNoted) {
+        const wait = this.budget.waitMs(now, pacedWindows(), requestGapMs());
+        if (wait === 0) {
+          this.slotQueue.shift()?.resolve(this.budget.take(now));
+          continue;
+        }
+        if (!this.budgetNoted && this.budget.held(now, LONGEST_PACED_SECONDS) >= requestsPerMinute()) {
           this.budgetNoted = true;
           this.log.info(
             `Home Connect allows ${requestsPerMinute()} requests per minute — reading the appliances is spread over the next minutes; the datapoints fill in as they arrive.`,
           );
         }
-        if (pause > 0 && !this.terminating) {
-          await this.delay(pause);
-          continue;
+        if (wait === undefined) {
+          return;
         }
-        const next = this.slotQueue.shift();
-        if (this.terminating) {
-          next?.resolve(false);
-          continue;
-        }
-        this.lastSentAt = Date.now();
-        this.sentAt.push(this.lastSentAt);
-        next?.resolve(true);
+        await this.delay(wait);
       }
+      this.refuseWaiting();
     } catch (e) {
       // The wait itself failed (the adapter's timer refused during shutdown): nothing that waits may go out.
       this.log.debug(`request queue stopped: ${errText(e)}`);
-      for (const entry of this.slotQueue.splice(0)) {
-        entry.resolve(false);
-      }
+      this.refuseWaiting();
     } finally {
       this.pumping = false;
+    }
+  }
+
+  /** Answer every request still waiting for its place with "no" — the adapter is shutting down. */
+  private refuseWaiting(): void {
+    for (const entry of this.slotQueue.splice(0)) {
+      entry.resolve(undefined);
     }
   }
 
@@ -1637,8 +1731,15 @@ class Homeconnect extends utils.Adapter {
   private onUnload(callback: () => void): void {
     try {
       this.terminating = true;
-      // No request goes out from here on: the minute spent so far goes to the next process.
+      // No request goes out from here on. The adapter's wait never ends during a stop (js-controller resolves no
+      // `delay` then), so the requests waiting for a place hear "no" now — a token request among them would hold
+      // `authCtl.settle()` below, and with it the callback. The minute spent so far goes to the next process — now, in
+      // case the host ends this process before the callback; again for every request that ends after this
+      // (`settlePlace`) and once more right before the callback.
+      this.refuseWaiting();
       this.handOverRequestBudget();
+      // A report still being made ends after its current step, and no message starts a new one (round 165).
+      this.diagnostics.stop();
       this.signedIn = false;
       this.streamUp = false;
       const authCtl = this.authCtl;
@@ -1698,7 +1799,11 @@ class Homeconnect extends utils.Adapter {
             }
           }
         })
-        .finally(() => callback());
+        .finally(() => {
+          // a request still on its way counts from now; one that ends later hands over again (`settlePlace`)
+          this.handOverRequestBudget();
+          callback();
+        });
       return;
     } catch {
       callback();

@@ -31,6 +31,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert");
 const { tests } = require("@iobroker/testing");
+// Round 165: every wait of this file through the master's one helper — each is its own line in the D06 protocol
+const { waitWindow } = require("./fleet-suites.js");
+// Round 165: the hook waitForAdapterWork through the master's measurement — every call, this file's suites' and the
+// master's, is one "work-wait" line of the D06 protocol with its seconds
+const { workWaitOf } = require("./fleet-suites.js");
+// Round 165: the run's records through the master's one reader (readCalls) — D06 per suite sees which suite reads an
+// earlier one's
+const { recordLines } = require("./fleet-suites.js");
 
 const ADAPTER_DIR = path.join(__dirname, "..");
 const ADAPTER = require(path.join(ADAPTER_DIR, "io-package.json")).common.name;
@@ -71,7 +79,11 @@ const INSTANCE_OBJECTS = new Set(
 // Round 62: every adapter start loads test/resource-probe.js (fleet master) FIRST; at its exit it records what the
 // adapter or one of its libraries left open after onUnload, and the run fails on any of it (the after() at the end).
 const RESOURCE_PROBE = path.join(__dirname, "resource-probe.js");
-const RESOURCE_DIR = fs.mkdtempSync(path.join(require("node:os").tmpdir(), `${ADAPTER}-resources-`));
+// Round 165: inside the run folder of werkbank-run.py, cleared with the run — a run ended from outside never reaches the
+// after() below (measured 2026-10-31: 33 probe folders of four adapters in the temp); the CI throws its runner away
+const RESOURCE_DIR = fs.mkdtempSync(
+  path.join(process.env.KROBI_RUN_DIR || require("node:os").tmpdir(), `${ADAPTER}-resources-`),
+);
 // Round 62: the adapter's read-only states (`common.write: false`) — only the adapter writes them, so it compares them
 // in memory; a database read of one in the quiet window after the verdict is a finding, and so is a single read of one at
 // any time (Round 77) — the start fills the memory with one bulk getStatesAsync.
@@ -153,8 +165,8 @@ const ADDRESS_KEY = (() => {
   return fs.existsSync(file) ? find(JSON.parse(fs.readFileSync(file, "utf8"))) : undefined;
 })();
 const CHOSEN_ADDRESS = Object.values(require("node:os").networkInterfaces())
-  .flat()
-  .find(i => (i.family === "IPv4" || i.family === 4) && !i.internal)?.address;
+  .flatMap(list => list ?? [])
+  .find(i => i.family === "IPv4" && !i.internal)?.address;
 const MISSING_ADDRESS = "192.0.2.1";
 // Round 97 (krobi 2026-10-06 19:07–19:14, page "Diagnosebericht — Flottenstandard"): an adapter with a diagnostics
 // report carries the fleet master src/lib/diagnostics/report-jobs.ts; the card asks every REPORT_POLL_MS whether a
@@ -162,6 +174,17 @@ const MISSING_ADDRESS = "192.0.2.1";
 const DIAGNOSTICS_REPORT = fs.existsSync(path.join(ADAPTER_DIR, "src", "lib", "diagnostics", "report-jobs.ts"));
 const REPORT_POLL_MS = 2000;
 const REPORT_DEADLINE_MS = 180000;
+
+/**
+ * @typedef {object} WriteWatch what watchObjectWrites returns
+ * @property {Map<string, number>} writes the adapter's object writes per id in this start
+ * @property {Map<string, number>} peak the most writes of one id in one start
+ * @property {string[]} unchanged the ids the adapter rewrote without a change
+ * @property {string[]} deleted the ids deleted
+ * @property {Array<[string, number]>} times every object write of the adapter with its time
+ * @property {string[]} unchangedStates the states the adapter rewrote without a change
+ * @property {() => void} newStart begins the per-start counts again (playControllerRestarts)
+ */
 
 /**
  * Every object write of the adapter in this suite, and which of them changed nothing (round 61). An unchanged
@@ -173,7 +196,21 @@ const REPORT_DEADLINE_MS = 180000;
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  */
 async function watchObjectWrites(harness) {
-  const watch = { writes: new Map(), peak: new Map(), unchanged: [], deleted: [], times: [], unchangedStates: [] };
+  /** @type {WriteWatch} */
+  const watch = {
+    writes: new Map(),
+    peak: new Map(),
+    unchanged: [],
+    deleted: [],
+    times: [],
+    unchangedStates: [],
+    // Round 64: a restart the harness plays (playControllerRestarts) is a new start — the per-start counts begin again,
+    // the known object content stays (it is the database's).
+    newStart: () => {
+      watch.writes.clear();
+      states.clear();
+    },
+  };
   const known = new Map();
   const roles = new Map();
   const states = new Map();
@@ -224,12 +261,6 @@ async function watchObjectWrites(harness) {
     }
     states.set(id, now);
   });
-  // Round 64: a restart the harness plays (playControllerRestarts) is a new start — the per-start counts begin again,
-  // the known object content stays (it is the database's).
-  watch.newStart = () => {
-    watch.writes.clear();
-    states.clear();
-  };
   const list = await harness.objects.getObjectListAsync({ startkey: NS, endkey: `${NS}香` });
   for (const row of list.rows) {
     if (row.value) {
@@ -292,27 +323,26 @@ const RESERVED_FLAG = path.join(RESOURCE_DIR, "reserved-names");
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  */
 async function waitForEveryAppliance(harness) {
-  const deadline = Date.now() + 300000;
-  for (;;) {
+  // the last count read, for the failure message
+  let shown = 0;
+  const everyOnline = async () => {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
-    if (online && online.val >= onlineTarget()) {
-      break;
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`only ${online ? online.val : 0} of ${onlineTarget()} appliances came online in this run`);
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
+    shown = online ? online.val : 0;
+    return Boolean(online && online.val >= onlineTarget());
+  };
+  if (!(await waitWindow("every appliance online", 300000, everyOnline, 250))) {
+    throw new Error(`only ${shown} of ${onlineTarget()} appliances came online in this run`);
   }
-  // Every appliance is known; now let the per-appliance resources settle.
+  // Every appliance is known; now let the per-appliance resources settle: the tree counts the same twice a second apart.
+  // No cap of its own, as before — the suite's timeout bounds it.
   let previous = -1;
-  for (;;) {
+  const settled = async () => {
     const count = Object.keys(await dumpObjects(harness)).length;
-    if (count === previous) {
-      return;
-    }
+    const same = count === previous;
     previous = count;
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
+    return same;
+  };
+  await waitWindow("the appliance trees settle", Infinity, settled, 1000);
 }
 
 /**
@@ -351,28 +381,29 @@ async function waitForEveryAppliance(harness) {
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  */
-async function waitForAdapterWork(harness) {
+const waitForAdapterWork = workWaitOf(async function (harness) {
   // homeconnect: `info.devicesOnline` is flushed once at the end of the whole appliance pass (the start stamps every
   // appliance offline first) — the last value the start chain writes; only the state subscription follows, which writes
   // nothing. `info.connection` turns true once signed in and the event stream is up, which opens right after the
-  // appliance list, before the appliances are read (decision 32), so it is no end marker on its own. The fixture stream
-  // sends one keep-alive and nothing else, so nothing is written after the pass.
-  const deadline = Date.now() + 300000;
-  for (;;) {
+  // appliance list, before the appliances are read (decision 32, krobi 2026-11-05 18:50 „Strom zuerst“), so it is no end
+  // marker on its own. The fixture stream sends one keep-alive and nothing else, so nothing is written after the pass.
+  // the last values read, for the failure message
+  let shownOnline = 0;
+  let shownConnection = "unset";
+  const chainDone = async () => {
     const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
     const connection = await harness.states.getStateAsync(`${NS}info.connection`);
-    if (online && online.val >= onlineTarget() && connection && connection.val === true) {
-      return;
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `no completed start chain — ${online ? online.val : 0} of ${onlineTarget()} appliances online, ` +
-          `connection ${connection ? connection.val : "unset"}`,
-      );
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
+    shownOnline = online ? online.val : 0;
+    shownConnection = connection ? connection.val : "unset";
+    return Boolean(online && online.val >= onlineTarget() && connection && connection.val === true);
+  };
+  if (!(await waitWindow("a completed start chain", 300000, chainDone, 250))) {
+    throw new Error(
+      `no completed start chain — ${shownOnline} of ${onlineTarget()} appliances online, ` +
+        `connection ${shownConnection}`,
+    );
   }
-}
+});
 
 /**
  * Adapter-specific config the fixtures need. The values only ever reach the fake endpoint; the Client ID has the
@@ -442,6 +473,7 @@ function previousMoves(previousFile) {
   const { runValueChannel } = require("../build/lib/run-values.js");
   const { layoutChannel } = require("../build/lib/tree-layout.js");
   const previous = JSON.parse(fs.readFileSync(previousFile, "utf8"));
+  /** @type {Record<string, string>} */
   const moves = {};
   for (const [id, obj] of Object.entries(previous)) {
     const parts = id.split(".");
@@ -451,6 +483,7 @@ function previousMoves(previousFile) {
     const [, , device, channel, leaf] = parts;
     const at = (to, toLeaf = leaf) => `${parts[0]}.${parts[1]}.${device}.${to}.${toLeaf}`;
     const key = obj.native && typeof obj.native.bshKey === "string" ? obj.native.bshKey : undefined;
+    const runChannel = channel === "options" && key ? runValueChannel(key) : undefined;
     let to;
     if (channel === "lastRun") {
       to = at("history.latest");
@@ -462,8 +495,8 @@ function previousMoves(previousFile) {
     } else if (channel === "status" && /^door[A-Z]\w*Open$/.test(leaf)) {
       const compartment = leaf.slice(4, -4);
       to = at("doors", compartment.charAt(0).toLowerCase() + compartment.slice(1));
-    } else if (channel === "options" && key && runValueChannel(key)) {
-      to = at(layoutChannel(runValueChannel(key), leaf));
+    } else if (runChannel) {
+      to = at(layoutChannel(runChannel, leaf));
     } else if (channel === "status") {
       to = at(layoutChannel("status", leaf));
     }
@@ -481,6 +514,7 @@ function previousMoves(previousFile) {
  * the counterpart is gone — every state that shows the outage belongs here (each device's reachability, a rollup such as
  * `devicesOnline`, a cloud flag); every other value stays as it was.
  */
+/** @type {Record<string, unknown>} */
 const OUTAGE_SHOWN = { "info.connection": false };
 
 /**
@@ -533,21 +567,22 @@ async function feedReservedNames(harness) {
   // as for any newly paired appliance.
   fs.writeFileSync(RESERVED_FLAG, "");
   try {
-    const deadline = Date.now() + 120000;
-    for (;;) {
+    // the last values read, for the failure message
+    let shownDevices = 0;
+    let shownOnline;
+    const setUp = async () => {
       const devices = Object.values(await dumpObjects(harness)).filter(
         o => o.type === "device" && o.native?.haId === "--",
       );
       const online = await harness.states.getStateAsync(`${NS}info.devicesOnline`);
-      if (devices.length === 1 && online?.val === APPLIANCE_COUNT + 1) {
-        return;
-      }
-      if (Date.now() > deadline) {
-        throw new Error(
-          `the appliance named info was not set up (${devices.length} device object(s), ${online?.val} online)`,
-        );
-      }
-      await new Promise(resolve => setTimeout(resolve, 250));
+      shownDevices = devices.length;
+      shownOnline = online?.val;
+      return devices.length === 1 && online?.val === APPLIANCE_COUNT + 1;
+    };
+    if (!(await waitWindow("the appliance named info set up", 120000, setUp, 250))) {
+      throw new Error(
+        `the appliance named info was not set up (${shownDevices} device object(s), ${shownOnline} online)`,
+      );
     }
   } finally {
     fs.rmSync(RESERVED_FLAG, { force: true });
@@ -623,6 +658,15 @@ async function resetInstanceNative(harness, native) {
 }
 
 /**
+ * The harness fields `@iobroker/testing` keeps private: the test installation folder and the exit marker. Every use
+ * fails loudly when a version drops one (clearInstanceData, restartAsTheHost).
+ *
+ * @param {import("@iobroker/testing").IntegrationTestHarness} harness
+ * @returns {{ testDir: string, _adapterExit: unknown }} the same harness
+ */
+const internals = harness => /** @type {any} */ (harness);
+
+/**
  * Round 71 (reported by dl-manager): @iobroker/testing clears only the database and the log directory before a suite;
  * the instance's data folder (`utils.getAbsoluteInstanceDataDir`, `iobroker-data/<adapter>.0` under the test directory)
  * survives every suite and every run. A file the fresh-install suite wrote was still there when the upgrade suite
@@ -634,10 +678,10 @@ async function resetInstanceNative(harness, native) {
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  */
 function clearInstanceData(harness) {
-  if (typeof harness.testDir !== "string") {
+  if (typeof internals(harness).testDir !== "string") {
     throw new Error("the harness no longer carries testDir — clearInstanceData cannot find the instance data folder");
   }
-  fs.rmSync(path.join(harness.testDir, "iobroker-data", `${ADAPTER}.0`), { recursive: true, force: true });
+  fs.rmSync(path.join(internals(harness).testDir, "iobroker-data", `${ADAPTER}.0`), { recursive: true, force: true });
   fs.writeFileSync(path.join(RESOURCE_DIR, `${Date.now()}.install`), "");
 }
 
@@ -653,11 +697,11 @@ function clearInstanceData(harness) {
  * and fails the suite in its own words where `await restarts.done` is the open wait (the upgrade suite's order).
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
- * @param {object | null} watch the suite's write watcher (watchObjectWrites), null in a suite without one
+ * @param {WriteWatch | null} watch the suite's write watcher (watchObjectWrites), null in a suite without one
  * @param {...string} hooks the test hooks the suite starts the adapter with (as for adapterEnv)
  */
 function playControllerRestarts(harness, watch, ...hooks) {
-  const restarts = { count: 0, again: [], done: Promise.resolve() };
+  const restarts = { count: 0, again: /** @type {number[]} */ ([]), done: Promise.resolve() };
   harness.on("objectChange", (id, obj) => {
     if (
       id !== `system.adapter.${ADAPTER}.0` ||
@@ -704,7 +748,7 @@ async function withinDeadline(promise, ms, what) {
  * on the adapter's own write; the suite "a restart right after the start" plays it on purpose.
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
- * @param {{ newStart(): void } | undefined} watch what watchObjectWrites returned
+ * @param {WriteWatch | null} watch what watchObjectWrites returned, null in a suite without one (the form B02 demands)
  * @param {string} why when the restart comes, in the stop's failure message
  * @param {...string} hooks the test hooks of the start (as for adapterEnv)
  */
@@ -718,10 +762,10 @@ async function restartAsTheHost(harness, watch, why, ...hooks) {
     ack: true,
     from: "system.host.testing",
   });
-  await new Promise(resolve => setTimeout(resolve, RESTART_DELAY_MS));
+  await waitWindow("the host's restart delay", RESTART_DELAY_MS);
   // @iobroker/testing refuses a second start of one harness ("already been used"); the host starts the same
   // instance again — reset the exit marker, and fail loudly should the harness no longer keep it there.
-  harness._adapterExit = undefined;
+  internals(harness)._adapterExit = undefined;
   assert.ok(!harness.didAdapterStop(), "@iobroker/testing changed its exit marker — the restart play needs a new form");
   await withinDeadline(
     harness.startAdapterAndWait(false, adapterEnv(...hooks)),
@@ -738,17 +782,8 @@ async function restartAsTheHost(harness, watch, why, ...hooks) {
  * @param {number} since the moment of the restart
  */
 async function waitForQuietCalls(since) {
-  const deadline = Date.now() + RESTART_QUIET_DEADLINE_MS;
-  for (;;) {
-    const last =
-      readCalls()
-        .filter(c => c.t >= since)
-        .at(-1)?.t ?? since;
-    if (Date.now() - last >= SETTLE_MS || Date.now() > deadline) {
-      return;
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
-  }
+  const quiet = () => Date.now() - (readCalls(since).at(-1)?.t ?? since) >= SETTLE_MS;
+  await waitWindow("the calls fall quiet", RESTART_QUIET_DEADLINE_MS, quiet, 250);
 }
 
 /** Round 64: the host's wait before it starts a stopped instance again (controller main.ts, `stopTimeout || 500` + 2.5 s). */
@@ -772,13 +807,16 @@ const RECORDING = "inventory-recording.0";
  * @param {Record<string, ioBroker.Object>} previous the previous release's inventory
  */
 async function seedPrevious(harness, previous) {
-  for (const [id, obj] of Object.entries(previous)) {
-    const common =
-      obj.type === "state"
-        ? { ...obj.common, custom: { ...obj.common?.custom, [RECORDING]: { enabled: true, origin: id } } }
-        : obj.common;
-    await harness.objects.setObjectAsync(id, { ...obj, common });
-  }
+  // round 157 (inventory-template audit V31): the objects are independent — written together, not one after the other
+  await Promise.all(
+    Object.entries(previous).map(([id, obj]) => {
+      const common =
+        obj.type === "state"
+          ? { ...obj.common, custom: { ...obj.common?.custom, [RECORDING]: { enabled: true, origin: id } } }
+          : obj.common;
+      return harness.objects.setObjectAsync(id, { ...obj, common });
+    }),
+  );
 }
 
 /** Round 67: the text a dump puts where the adapter stored a secret encrypted with its installation's secret. */
@@ -803,11 +841,24 @@ async function restoreMaskedSecrets(harness) {}
  * directory (the same folder clearInstanceData empties), so the upgrade starts where a real installation stands.
  * Empty only where the adapter declares no common.dataFolder (it writes nothing there); with the declaration B02
  * requires a body.
+ * homeconnect: 2.0.0-alpha.0 keeps one file there, `request-times.json` — `takeOverRequestBudget` names it
+ * (`git show v2.0.0-alpha.0:src/main.ts`, the one `getAbsoluteInstanceDataDir` of that tag), and `onUnload` writes it
+ * through `handOverRequestBudget` → `writeSentTimes` (`src/lib/request-budget.ts` of the tag), which keeps only the send
+ * times within the minute before the stop: unindented `{"sentAt":[<epoch ms>, …]}`. No other file of that tag writes
+ * into the data folder. An update stops the old process and starts the new one, so the file holds the last requests of
+ * the stopped process — a few seconds old here, so they still fall inside the minute the old reader counted and every
+ * longer window the adapter declares — in the old form exactly.
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
  * @param {object} previous the previous release's dump
  */
-async function seedInstanceData(harness, previous) {}
+async function seedInstanceData(harness, previous) {
+  const dataDir = path.join(internals(harness).testDir, "iobroker-data", `${ADAPTER}.0`);
+  fs.mkdirSync(dataDir, { recursive: true });
+  const now = Date.now();
+  const sentAt = [5000, 4000, 3000, 2000, 1000].map(ago => now - ago);
+  fs.writeFileSync(path.join(dataDir, "request-times.json"), JSON.stringify({ sentAt }));
+}
 
 /**
  * Round 67: the objects of the namespace that still carry ENCRYPTED_MARKER — read raw from the database, never through
@@ -829,22 +880,19 @@ async function maskedSecretsLeft(harness) {
  * @param {string} what what did not happen, in the failure message
  */
 async function waitForStates(harness, wanted, what) {
-  const deadline = Date.now() + OUTAGE_DEADLINE_MS;
-  for (;;) {
-    const wrong = [];
+  let wrong = [];
+  const held = async () => {
+    wrong = [];
     for (const [id, val] of Object.entries(wanted)) {
       const state = await harness.states.getStateAsync(`${NS}${id}`);
       if (state?.val !== val) {
         wrong.push(`${id} = ${JSON.stringify(state?.val)}, want ${JSON.stringify(val)}`);
       }
     }
-    if (wrong.length === 0) {
-      return;
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`${what} (deadline ${OUTAGE_DEADLINE_MS} ms):\n${wrong.join("\n")}`);
-    }
-    await new Promise(resolve => setTimeout(resolve, 250));
+    return wrong.length === 0;
+  };
+  if (!(await waitWindow(`the wanted states, else ${what}`, OUTAGE_DEADLINE_MS, held, 250))) {
+    throw new Error(`${what} (deadline ${OUTAGE_DEADLINE_MS} ms):\n${wrong.join("\n")}`);
   }
 }
 
@@ -861,6 +909,7 @@ async function waitForStates(harness, wanted, what) {
  */
 async function playOutage(harness, watch) {
   assert.ok(Object.keys(OUTAGE_SHOWN).length > 0, "OUTAGE_SHOWN names no state — nothing would show the outage");
+  /** @type {Record<string, unknown>} */
   const before = {};
   for (const [id, val] of Object.entries(OUTAGE_SHOWN)) {
     before[id] = (await harness.states.getStateAsync(`${NS}${id}`))?.val;
@@ -895,7 +944,10 @@ async function playOutage(harness, watch) {
   try {
     await waitForStates(harness, OUTAGE_SHOWN, "the adapter did not show the outage");
     const shown = Date.now();
-    await new Promise(resolve => setTimeout(resolve, Math.max(OUTAGE_HOLD_MS, shown - outage.cut)));
+    // round 157 (inventory-template audit V33): each phase says how long it took — the suite's minutes were not to be told
+    // apart in a log before
+    console.log(`      outage shown after ${Math.round((shown - outage.cut) / 1000)} s`);
+    await waitWindow("the outage holds", Math.max(OUTAGE_HOLD_MS, shown - outage.cut));
   } finally {
     // A cut that stays on after a failed wait would cut every later suite of the run too.
     outage.back = Date.now();
@@ -903,7 +955,8 @@ async function playOutage(harness, watch) {
   }
   try {
     await waitForStates(harness, before, "the adapter did not show the return");
-    await new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+    console.log(`      return shown after ${Math.round((Date.now() - outage.back) / 1000)} s`);
+    await waitWindow("settles after the return", SETTLE_MS);
   } finally {
     harness.removeListener("stateChange", record);
   }
@@ -914,18 +967,19 @@ async function playOutage(harness, watch) {
   return outage;
 }
 
-/** Round 100: every call the network hook counted so far (`<pid>.calls`), oldest first. */
-function readCalls() {
-  return fs
-    .readdirSync(RESOURCE_DIR)
-    .filter(f => f.endsWith(".calls"))
-    .flatMap(f =>
-      fs
-        .readFileSync(path.join(RESOURCE_DIR, f), "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map(l => ({ ...JSON.parse(l), pid: f.slice(0, -".calls".length) })),
-    )
+/**
+ * Round 100: every call the network hook counted (`<pid>.calls`) at or after `from` (ms; 0: the whole run), oldest
+ * first. Round 165: through the master's recordLines — a read of what an earlier suite left is noted there, and D06 runs
+ * the suites before this one with it; one that reads only its own calls runs alone. Round 170: an HTTP call carries
+ * `answered`, the time its answer reached the adapter (`<pid>.answered`, paired by the call's number `n`).
+ *
+ * @param {number} [from] the earliest call of interest (ms)
+ */
+function readCalls(from = 0) {
+  const answered = new Map(recordLines(RESOURCE_DIR, ".answered", from).map(a => [`${a.pid} ${a.n}`, a.t]));
+  return recordLines(RESOURCE_DIR, ".calls", from)
+    .filter(c => c.t >= from)
+    .map(c => (answered.has(`${c.pid} ${c.n}`) ? { ...c, answered: answered.get(`${c.pid} ${c.n}`) } : c))
     .sort((a, b) => a.t - b.t);
 }
 
@@ -950,6 +1004,7 @@ function channel(c) {
 function startHang() {
   const calls = readCalls().filter(c => !c.kind.startsWith("hang-"));
   const opened = new Map();
+  /** @type {Record<string, number>} */
   const usual = {};
   for (const c of calls) {
     opened.set(c.pid, opened.get(c.pid) ?? c.t);
@@ -979,35 +1034,38 @@ function startHang() {
  * @param {{ hung: string | null, others: string[], usual: Record<string, number>, since: number }} hang what startHang chose
  */
 async function playHang(harness, hang, restarts) {
+  let fed = Promise.resolve();
+  let played;
   try {
     if (hang.hung === null) {
       return { ...hang, calls: [] };
     }
-    const fed = feedFixtures(harness).then(
+    fed = feedFixtures(harness).then(
       () => undefined,
       err => err,
     );
     let calls = [];
-    for (;;) {
+    const reached = async () => {
       // A restart the host plays ends the process, and its hung connections close as if it gave up: only the process
       // started last is judged, its deadline counting from its own first call (a restart costs it nothing).
       await restarts.done;
-      const all = readCalls().filter(c => c.t >= hang.since);
+      const all = readCalls(hang.since);
       const pid = [...new Set(all.map(c => c.pid))].at(-1);
       calls = all.filter(c => c.pid === pid);
-      if (hang.others.every(k => calls.some(c => !c.kind.startsWith("hang-") && channel(c) === k))) {
-        break;
-      }
-      if (Date.now() > (calls[0]?.t ?? hang.since) + HANG_DEADLINE_MS) {
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    void fed;
-    return { ...hang, calls };
+      return (
+        hang.others.every(k => calls.some(c => !c.kind.startsWith("hang-") && channel(c) === k)) ||
+        Date.now() > (calls[0]?.t ?? hang.since) + HANG_DEADLINE_MS
+      );
+    };
+    await waitWindow("every other counterpart reached while one hangs", Infinity, reached, 500);
+    played = { ...hang, calls };
   } finally {
     fs.rmSync(HANG_FLAG, { force: true });
   }
+  // Round 157 (inventory-template audit V18): feedFixtures may wait on the hung counterpart — released, it ends before the
+  // next suite starts (at most START_DEADLINE_MS); left running it fed into the next suite's fresh database
+  await waitWindow("the feed ends", START_DEADLINE_MS, fed);
+  return played;
 }
 
 /**
@@ -1051,20 +1109,19 @@ async function playHangMidRun(harness, restarts) {
   );
   let pid;
   let warm = since;
-  for (;;) {
+  const warmedUp = async () => {
     await restarts.done;
-    const calls = readCalls().filter(c => c.t >= since);
+    const calls = readCalls(since);
     const last = [...new Set(calls.map(c => c.pid))].at(-1);
     if (last !== pid) {
       pid = last;
       warm = calls.find(c => c.pid === pid)?.t ?? Date.now();
     }
-    if (Date.now() >= warm + HANG_WARMUP_MS) {
-      break;
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  const seen = readCalls().filter(c => c.pid === pid && c.t >= warm && !c.kind.startsWith("hang-"));
+    return Date.now() >= warm + HANG_WARMUP_MS;
+  };
+  // the warm-up counts from the first call of the process started last — the cap moves with it, so it is warmedUp's
+  await waitWindow("the warm-up before the hang", Infinity, warmedUp, 500);
+  const seen = readCalls(warm).filter(c => c.pid === pid && !c.kind.startsWith("hang-"));
   const { word, others } = midRunHang(seen);
   if (word === null) {
     console.log(
@@ -1075,15 +1132,18 @@ async function playHangMidRun(harness, restarts) {
   if (hang.hung !== null) {
     fs.writeFileSync(HANG_FLAG, hang.hung);
   }
+  let played;
   try {
-    while (hang.hung !== null && Date.now() < hang.since + HANG_DEADLINE_MS) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    if (hang.hung !== null) {
+      await waitWindow("one counterpart hangs mid-run", hang.since + HANG_DEADLINE_MS - Date.now());
     }
-    void fed;
-    return { ...hang, pid, end: Date.now(), calls: readCalls().filter(c => c.pid === pid && c.t >= warm) };
+    played = { ...hang, pid, end: Date.now(), calls: readCalls(warm).filter(c => c.pid === pid) };
   } finally {
     fs.rmSync(HANG_FLAG, { force: true });
   }
+  // Round 157 (V18): as in playHang — the feed ends before the next suite, at most START_DEADLINE_MS
+  await waitWindow("the feed ends", START_DEADLINE_MS, fed);
+  return played;
 }
 
 /**
@@ -1204,10 +1264,31 @@ function commandValue(common, now) {
 }
 
 /**
+ * Round 157 (inventory-template audit V21): the moment the adapter gave up the last hung attempt a command opened (its
+ * `hang-start` carries the command as its cause, network hook) — 0 when no command hung, null while one is still open.
+ *
+ * @param {number} since the first command
+ */
+function commandGaveUp(since) {
+  const open = new Map();
+  let last = 0;
+  for (const c of readCalls(since)) {
+    const key = `${c.host} ${c.port}`;
+    if (c.kind === "hang-start") {
+      open.set(key, [...(open.get(key) ?? []), c.cause !== undefined]);
+    } else if (c.kind === "hang-end" && open.get(key)?.length && open.get(key).shift()) {
+      last = c.t;
+    }
+  }
+  return [...open.values()].some(list => list.includes(true)) ? null : last;
+}
+
+/**
  * Round 101 (krobi 2026-10-07 15:54, GV-13 as the fleet rule for every adapter that talks to devices: never set ack true
  * unless the device confirmed it): every counterpart hangs and nothing reaches the adapter any more (the
  * network hook with `*` in HANG_FLAG), then every writable state of the adapter gets one command (commandValue), and the
- * suite waits COMMAND_WINDOW_MS. Returns the commands, every `ack: true` the adapter wrote on them, and every call the
+ * suite waits COMMAND_WINDOW_MS — since round 157 at least, and until every hung attempt of a command was given up plus
+ * SETTLE_MS (commandGaveUp). Returns the commands, every `ack: true` the adapter wrote on them, and every call the
  * hook counted with a command as its cause — the calls a command made, awaited or not.
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
@@ -1215,7 +1296,13 @@ function commandValue(common, now) {
 async function playCommands(harness) {
   const list = await harness.objects.getObjectListAsync({ startkey: NS, endkey: `${NS}香` });
   const writable = list.rows.map(r => r.value).filter(o => o?.type === "state" && o.common?.write !== false);
-  const run = { writes: [], acks: [], since: Date.now() };
+  const run = {
+    /** @type {Array<{ id: string, val: unknown, t: number, sole: boolean }>} */
+    writes: [],
+    /** @type {Array<[string, number]>} */
+    acks: [],
+    since: Date.now(),
+  };
   const acknowledged = (id, state) => {
     if (id.startsWith(NS) && state?.ack === true && state.from === `system.adapter.${ADAPTER}.0`) {
       run.acks.push([id, state.ts]);
@@ -1237,12 +1324,26 @@ async function playCommands(harness) {
         await harness.states.setStateAsync(obj._id, { val, ack: false });
       }
     }
-    await new Promise(resolve => setTimeout(resolve, COMMAND_WINDOW_MS));
+    await waitWindow("commands nobody answers", COMMAND_WINDOW_MS);
+    // Round 157 (inventory-template audit V21): an adapter that confirms a command once its own timeout ran out did it
+    // unseen whenever that timeout is longer than the window — it stays open until every hung attempt of a command was
+    // given up and SETTLE_MS after it, at most HANG_DEADLINE_MS from the first command (a call that never ends is D21's)
+    const settledAfterGivingUp = () => {
+      const gaveUp = commandGaveUp(run.since);
+      return gaveUp !== null && Date.now() >= gaveUp + SETTLE_MS;
+    };
+    await waitWindow(
+      "every hung command given up",
+      run.since + HANG_DEADLINE_MS - Date.now(),
+      settledAfterGivingUp,
+      500,
+    );
+    console.log(`      commands watched ${Math.round((Date.now() - run.since) / 1000)} s`);
   } finally {
     harness.removeListener("stateChange", acknowledged);
     fs.rmSync(HANG_FLAG, { force: true });
   }
-  run.calls = readCalls().filter(c => c.t >= run.since && c.cause !== undefined && !c.kind.startsWith("hang-"));
+  run.calls = readCalls(run.since).filter(c => c.cause !== undefined && !c.kind.startsWith("hang-"));
   return run;
 }
 
@@ -1274,7 +1375,7 @@ function networkFiles() {
  * Round 97: one `diagnostics` message to the adapter and its answer, as the admin card sends it.
  *
  * @param {import("@iobroker/testing").IntegrationTestHarness} harness
- * @param {{ action: string }} message the message
+ * @param {{ action: string, [key: string]: unknown }} message the message
  */
 function askDiagnostics(harness, message) {
   const answer = new Promise(resolve => harness.sendTo(`${ADAPTER}.0`, "diagnostics", message, resolve));
@@ -1296,11 +1397,11 @@ function instanceFiles(harness) {
         walk(file);
       } else {
         const stat = fs.statSync(file);
-        files[path.relative(harness.testDir, file)] = `${stat.size} ${stat.mtimeMs}`;
+        files[path.relative(internals(harness).testDir, file)] = `${stat.size} ${stat.mtimeMs}`;
       }
     }
   };
-  const data = path.join(harness.testDir, "iobroker-data");
+  const data = path.join(internals(harness).testDir, "iobroker-data");
   walk(path.join(data, `${ADAPTER}.0`));
   walk(path.join(data, "files", `${ADAPTER}.0`));
   return files;
@@ -1335,8 +1436,7 @@ async function playReports(harness, watch) {
       jobs.push({ device, job: started.job, deadline: Date.now() + REPORT_DEADLINE_MS });
     }
     const done = [];
-    while (jobs.length > 0) {
-      await new Promise(resolve => setTimeout(resolve, REPORT_POLL_MS));
+    const finished = async () => {
       for (const job of [...jobs]) {
         const answer = await askDiagnostics(harness, { action: "result", job: job.job });
         if (!answer?.pending) {
@@ -1349,7 +1449,15 @@ async function playReports(harness, watch) {
           );
         }
       }
-    }
+      return jobs.length === 0;
+    };
+    // past the last deadline every job still pending fails its assert — the cap itself never ends the wait
+    await waitWindow(
+      "every report done",
+      Math.max(0, ...jobs.map(job => job.deadline)) - Date.now() + REPORT_POLL_MS,
+      finished,
+      REPORT_POLL_MS,
+    );
     return done;
   };
   const run = {
@@ -1358,7 +1466,9 @@ async function playReports(harness, watch) {
     values: await dumpStates(harness),
     deleted: watch.deleted.length,
     start: Date.now(),
+    /** @type {string[]} */
     writes: [],
+    /** @type {string[]} */
     onlineWrites: [],
   };
   const recordInto = list => (id, state) => {
@@ -1376,7 +1486,7 @@ async function playReports(harness, watch) {
   }
   run.valuesAfterOnline = await dumpStates(harness);
   // past the gap a finished report keeps before the same device's next one
-  await new Promise(resolve => setTimeout(resolve, REPORT_POLL_MS));
+  await waitWindow("the gap before the next report", REPORT_POLL_MS);
   fs.writeFileSync(HANG_FLAG, "*");
   try {
     run.silent = await fetchReports(run.devices.filter(d => d.connected).map(device => device.value));
@@ -1391,7 +1501,7 @@ async function playReports(harness, watch) {
   try {
     await waitForStates(harness, OUTAGE_SHOWN, "the adapter did not show the outage");
     // past the gap a finished report keeps before the same device's next one
-    await new Promise(resolve => setTimeout(resolve, REPORT_POLL_MS));
+    await waitWindow("the gap before the next report", REPORT_POLL_MS);
     harness.on("stateChange", record);
     run.offlineDevices = (await askDiagnostics(harness, { action: "list" }))?.devices ?? [];
     run.offline = await fetchReports(run.offlineDevices.map(device => device.value));
@@ -1464,29 +1574,49 @@ function listenPortPlan() {
 
 /**
  * Round 104: hold each port the way another program would — a TCP server, an exclusive UDP socket — on the address the
- * adapter binds.
+ * adapter binds. Round 148 (fakeroku, measured on macOS): a holder on 0.0.0.0 leaves `::` free, and an adapter that binds
+ * "all addresses" without a host listens dual-stack there — so "all" is held dual-stack on `::`; a connection to the holder
+ * is dropped at once, so closing it never waits on a client.
  *
  * @param {{ protocol: string, port: number }[]} ports the ports
  * @param {string} address the address
  */
 async function takePorts(ports, address) {
   const held = [];
+  const all = address === "0.0.0.0";
   for (const { protocol, port } of ports) {
     const holder =
       protocol === "udp"
-        ? require("node:dgram").createSocket({ type: "udp4", reuseAddr: false })
-        : require("node:net").createServer();
+        ? require("node:dgram").createSocket({ type: all ? "udp6" : "udp4", reuseAddr: false })
+        : require("node:net").createServer(socket => socket.destroy());
     await new Promise((resolve, reject) => {
       holder.once("error", reject);
       if (protocol === "udp") {
-        holder.bind({ port, address, exclusive: true }, resolve);
+        /** @type {import("node:dgram").Socket} */ (holder).bind(
+          { port, address: all ? "::" : address, exclusive: true },
+          () => resolve(undefined),
+        );
       } else {
-        holder.listen(port, address, resolve);
+        /** @type {import("node:net").Server} */ (holder).listen(port, all ? "::" : address, () => resolve(undefined));
       }
     });
     held.push(holder);
   }
   return held;
+}
+
+/**
+ * Round 148 (fakeroku; measured with mocha 2026-10-27): release the held ports within a second at most — a suite's after()
+ * that fails or hangs makes mocha skip the harness's own teardown registered behind it, and the adapter process outlives
+ * the run with its ports and the database lock.
+ *
+ * @param {Array<{ close: (cb: () => void) => void }>} held the holders of takePorts
+ */
+function releasePorts(held) {
+  const closed = Promise.all(
+    held.map(h => /** @type {Promise<void>} */ (new Promise(resolve => h.close(() => resolve())))),
+  );
+  return waitWindow("the held ports close", 1000, closed);
 }
 
 /** Round 104 (DB-01): every file the adapter process wrote (`<pid>.files`, test/network-hook.js), with its time. */
@@ -1634,7 +1764,22 @@ async function askFromAnotherNetwork(use, address) {
 
 tests.integration(ADAPTER_DIR, {
   controllerVersion: "stable",
-  defineAdditionalTests({ suite }) {
+  defineAdditionalTests({ suite: harnessSuite }) {
+    // Round 165: the template's own suites write their suites, tests, starts and stops into d06-events.jsonl like the
+    // fleet suites (lab run 2026-10-31: without it 103 s of a 222 s D06 left events); B02 audit_inventory_suites_keyed.
+    // The contract of D06 per suite (pre-release.py runs only the suites whose key moved): suiteState names every
+    // binding of this file a function writes, as plain values; restoreState sets each of them again — the master hands
+    // a suite after a left-out one the state the whole run gives it (READ_ONLY gathers over every suite, the root
+    // after() judges with it). scripts/inventory-suites.mjs refuses a binding neither names: D06 then runs whole.
+    const suite = require("./fleet-suites.js").withProtocol(harnessSuite, {
+      RESOURCE_DIR,
+      suiteState: () => ({ counting, READ_ONLY: [...READ_ONLY] }),
+      restoreState: state => {
+        counting = state.counting;
+        READ_ONLY.clear();
+        state.READ_ONLY.forEach(id => READ_ONLY.add(id));
+      },
+    });
     suite("object inventory", getHarness => {
       let harness;
       let watch;
@@ -1747,7 +1892,9 @@ tests.integration(ADAPTER_DIR, {
       let restarts;
       let outage;
       before(async function () {
-        this.timeout(3 * OUTAGE_DEADLINE_MS + 120000);
+        // round 157 (inventory-template audit V28): show + hold + return (each up to OUTAGE_DEADLINE_MS), SETTLE_MS and
+        // the start before them — with 120 s the mocha timeout could take the place of the suite's own message
+        this.timeout(3 * OUTAGE_DEADLINE_MS + SETTLE_MS + 240000);
         harness = getHarness();
         clearInstanceData(harness);
         watch = await watchObjectWrites(harness);
@@ -1792,7 +1939,7 @@ tests.integration(ADAPTER_DIR, {
           const role = String(obj?.common?.role ?? "");
           if (
             !roles.some(r => role === r || role.startsWith(`${r}.`)) &&
-            !/(online|connect|reach|alive)/i.test(id.split(".").at(-1))
+            !/(online|connect|reach|alive)/i.test(id.split(".").at(-1) ?? "")
           ) {
             other.push(`${id} (role ${role || "none"})`);
           }
@@ -1875,11 +2022,7 @@ tests.integration(ADAPTER_DIR, {
         await restartAsTheHost(harness, watch, "right after the start", NETWORK_HOOK);
         await feedFixtures(harness);
         await waitForQuietCalls(again);
-        pids = new Set(
-          readCalls()
-            .filter(c => c.t >= since)
-            .map(c => c.pid),
-        );
+        pids = new Set(readCalls(since).map(c => c.pid));
       });
       after(() => {
         counting = false;
@@ -1974,7 +2117,8 @@ tests.integration(ADAPTER_DIR, {
       it("stays within every limit it declares", function () {
         // round 113 (govee inv4): each installation counts on its own — a suite begins one in clearInstanceData; a
         // process belongs to the installation its first call falls in, with the restarts the host plays in it;
-        // round 123: only the installations judgedCalls() keeps
+        // round 123: only the installations judgedCalls() keeps; round 170 (homeconnect 2026-11-05): a call holds its
+        // place until `seconds · 1000` after its answer — the server counts it at the latest when it answers
         const calls = judgedCalls();
         const over = [];
         for (const d of apiLimits()) {
@@ -1982,16 +2126,19 @@ tests.integration(ADAPTER_DIR, {
             const lanes = new Map();
             for (const c of calls.filter(c => fits(c, d.match))) {
               const lane = `${limit.per === "host" ? c.host : "account"}, installation ${c.install}`;
-              lanes.set(lane, [...(lanes.get(lane) ?? []), c.t]);
+              lanes.set(lane, [...(lanes.get(lane) ?? []), c]);
             }
-            for (const [lane, times] of lanes) {
-              for (let i = 0, j = 0; j < times.length; j++) {
-                while (times[j] - times[i] >= limit.seconds * 1000) {
-                  i++;
+            for (const [lane, sent] of lanes) {
+              for (let j = 0; j < sent.length; j++) {
+                let held = 1;
+                for (let i = 0; i < j; i++) {
+                  if (sent[j].t - (sent[i].answered ?? sent[i].t) < limit.seconds * 1000) {
+                    held++;
+                  }
                 }
-                if (j - i + 1 > limit.max) {
+                if (held > limit.max) {
                   over.push(
-                    `${d.name} (${lane}): ${j - i + 1} calls within ${limit.seconds} s, at most ${limit.max} (${limit.source})`,
+                    `${d.name} (${lane}): ${held} calls within ${limit.seconds} s, at most ${limit.max} (${limit.source})`,
                   );
                   break;
                 }
@@ -2123,10 +2270,9 @@ tests.integration(ADAPTER_DIR, {
             () => undefined,
             err => err,
           );
-          while (!harness.didAdapterStop() && Date.now() < since + TAKEN_WINDOW_MS) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-          await Promise.race([fed, new Promise(resolve => setTimeout(resolve, 1000))]);
+          // it stops — or the whole window shows it runs on
+          await waitWindow("a taken port", since + TAKEN_WINDOW_MS - Date.now(), () => harness.didAdapterStop(), 500);
+          await waitWindow("the feed ends", 1000, fed);
           const taken = new Set(plan.taken.map(p => p.port));
           const via = answers => [
             ...new Set(answers.filter(a => !taken.has(a.local)).map(a => `${a.kind} ${a.host}:${a.port} answers`)),
@@ -2145,7 +2291,7 @@ tests.integration(ADAPTER_DIR, {
             errors: harness.getLogs().filter(l => l.level === "error" && l.from === `${ADAPTER}.0`),
           };
         });
-        after(() => Promise.all(held.map(h => new Promise(resolve => h.close(() => resolve())))));
+        after(() => releasePorts(held));
 
         it("stops with an error when it can talk to nothing, and runs on when it can", function () {
           const ports = verdict.plan.taken.map(p => `${p.protocol} ${p.port}`).join(", ");
@@ -2184,7 +2330,13 @@ tests.integration(ADAPTER_DIR, {
       let command;
       before(async function () {
         this.timeout(
-          COMMAND_WINDOW_MS + OUTAGE_DEADLINE_MS + STOP_DEADLINE_MS + RESTART_DELAY_MS + START_DEADLINE_MS + 120000,
+          HANG_DEADLINE_MS +
+            SETTLE_MS +
+            OUTAGE_DEADLINE_MS +
+            STOP_DEADLINE_MS +
+            RESTART_DELAY_MS +
+            START_DEADLINE_MS +
+            120000,
         );
         harness = getHarness();
         clearInstanceData(harness);
@@ -2321,7 +2473,7 @@ tests.integration(ADAPTER_DIR, {
           await restarts.done;
           await waitForAdapterWork(harness);
           use = networkUse(seen);
-          strangers = await askFromAnotherNetwork(use, CHOSEN_ADDRESS);
+          strangers = await askFromAnotherNetwork(use, /** @type {string} */ (CHOSEN_ADDRESS));
         });
 
         it("uses only the chosen address", function () {
@@ -2329,7 +2481,7 @@ tests.integration(ADAPTER_DIR, {
             use.length > 0,
             "the network hook recorded nothing — a start without NETWORK_HOOK as its last hook",
           );
-          const wrong = offTheAddress(use, CHOSEN_ADDRESS);
+          const wrong = offTheAddress(use, /** @type {string} */ (CHOSEN_ADDRESS));
           assert.deepStrictEqual(wrong, [], `network use off ${CHOSEN_ADDRESS}:\n${wrong.join("\n")}`);
         });
 
@@ -2359,7 +2511,14 @@ tests.integration(ADAPTER_DIR, {
           // missing address may keep the adapter's state short of green (fakeroku F-06: yellow until changed).
           await feedFixtures(harness);
           await restarts.done;
-          lines = harness.getLogs().filter(l => l.from === `${ADAPTER}.0` && l.message.includes(MISSING_ADDRESS));
+          // Round 157 (inventory-template audit V24): the warning may come after the fixtures — wait for it (at most
+          // START_DEADLINE_MS), then SETTLE_MS for a second one; read at once, a warning a moment later turned it red
+          const naming = () =>
+            harness.getLogs().filter(l => l.from === `${ADAPTER}.0` && l.message.includes(MISSING_ADDRESS));
+          const warned = () => naming().some(l => l.level === "warn" || l.level === "error");
+          await waitWindow("the warning of a missing address", START_DEADLINE_MS, warned, 250);
+          await waitWindow("a second warning", SETTLE_MS);
+          lines = naming();
         });
 
         it("falls back to every address and warns once", function () {
@@ -2389,7 +2548,9 @@ tests.integration(ADAPTER_DIR, {
         let restarts;
         let reports;
         before(async function () {
-          this.timeout(3 * OUTAGE_DEADLINE_MS + 120000);
+          // round 157 (V28): three report rounds (each up to REPORT_DEADLINE_MS), the return after the silence and the
+          // outage shown again (each up to OUTAGE_DEADLINE_MS), and the start before them
+          this.timeout(3 * REPORT_DEADLINE_MS + 2 * OUTAGE_DEADLINE_MS + 240000);
           harness = getHarness();
           clearInstanceData(harness);
           watch = await watchObjectWrites(harness);
@@ -2875,7 +3036,7 @@ tests.integration(ADAPTER_DIR, {
         // Last in the suite: a write after the verdict means waitForAdapterWork ended before the adapter did.
         it("writes nothing after the verdict", async function () {
           this.timeout(SETTLE_MS + 5000);
-          await new Promise(resolve => setTimeout(resolve, Math.max(0, verdictAt + SETTLE_MS - Date.now())));
+          await waitWindow("writes after the verdict", verdictAt + SETTLE_MS - Date.now());
           const late = [...new Set(watch.times.filter(([, t]) => t > verdictAt).map(([id]) => id))];
           assert.deepStrictEqual(late, [], `objects written after the verdict:\n${late.join("\n")}`);
         });
@@ -2943,7 +3104,24 @@ after(function () {
         .map(c => `${c.kind} ${c.host}:${c.port}`),
     ),
   ];
-  fs.rmSync(RESOURCE_DIR, { recursive: true, force: true });
+  // Round 157 (inventory-template audit V13): `calls only counterparts it declares` reads the calls up to its own suite —
+  // every call after it (the commands, the reports, the fleet suites) is judged here, over the whole run; a copy without a
+  // counterpart (its sealed register) carries no apiLimits
+  const undeclared =
+    typeof apiLimits === "function" && fs.existsSync(API_LIMITS)
+      ? [
+          ...new Set(
+            readCalls()
+              .filter(c => !c.kind.startsWith("hang-") && !apiLimits().some(d => fits(c, d.match)))
+              .map(channel),
+          ),
+        ]
+      : [];
+  // Round 170 (R170-64): in a run folder the probe stays with the run (its retention removes it) — the lab run of
+  // round 170 had to run again to read its answer stamps; elsewhere (CI, the tmpdir) it goes
+  if (!process.env.KROBI_RUN_DIR) {
+    fs.rmSync(RESOURCE_DIR, { recursive: true, force: true });
+  }
   assert.ok(starts.length > 0, "no adapter start loaded the resource probe — a start without adapterEnv()");
   assert.deepStrictEqual(silent, [], "adapter processes that never reached their exit (killed or crashed)");
   assert.deepStrictEqual(left, [], `left open after onUnload:\n${left.join("\n")}`);
@@ -2956,6 +3134,11 @@ after(function () {
     single,
     [],
     `read-only states read one by one from the database (one bulk getStatesAsync at the start, then compare in memory):\n${single.join("\n")}`,
+  );
+  assert.deepStrictEqual(
+    undeclared,
+    [],
+    `calls in the run to counterparts src/lib/api-limits.json does not declare:\n${undeclared.join("\n")}`,
   );
   assert.deepStrictEqual(
     away,

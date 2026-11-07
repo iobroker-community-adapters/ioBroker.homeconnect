@@ -22,7 +22,8 @@ export function declaredLimit(seconds: number): number {
 
 /**
  * The least spacing between two calls: the shortest declared window divided by its strictest limit — 10 calls per
- * second are 100 ms. Exact, without a reserve: the transport stamps a call after it went out, never before.
+ * second are 100 ms. Exact, without a reserve: the transport counts it from the previous call's answer, else from its
+ * send, both stamped after the network's own (tooling round 170).
  *
  * @returns milliseconds between two calls
  */

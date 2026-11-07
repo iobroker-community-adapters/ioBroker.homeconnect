@@ -1346,6 +1346,317 @@ describe("Homeconnect rate limiting", () => {
   });
 });
 
+describe("Homeconnect request budget counted to the answer (tooling round 170)", () => {
+  const NOW = 1_700_000_000_000;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** One call as the network hook stamps it: when it went out, and when its answer reached the adapter. */
+  interface Call {
+    t: number;
+    answered?: number;
+  }
+
+  /**
+   * The judge of the fleet's limit suite (test/inventory.js, tooling round 170): a call holds its place in a window
+   * until `seconds · 1000` after its answer — a call without one from its send —, and each call finds the places of
+   * the calls before it that still hold.
+   *
+   * @param calls the calls in the order they went out
+   * @param seconds the window
+   * @returns the most places held at any call, the call's own included
+   */
+  const mostHeld = (calls: readonly Call[], seconds: number): number => {
+    let most = 0;
+    for (let j = 0; j < calls.length; j++) {
+      const held = 1 + calls.slice(0, j).filter(i => calls[j].t - (i.answered ?? i.t) < seconds * 1000).length;
+      most = Math.max(most, held);
+    }
+    return most;
+  };
+
+  /**
+   * The transport answers every read `ms` after it went out — the counted installations of the limit suite hand every
+   * answer over 20 ms late — and stamps the answer like http.ts does.
+   *
+   * @param ms from the send to the answer, per call (by its index)
+   * @returns the calls as they go out
+   */
+  const answerAfter = (ms: (n: number) => number): Call[] => {
+    const calls: Call[] = [];
+    httpMock.getJson.mockImplementation(() => {
+      const call: Call = { t: Date.now() };
+      const wait = ms(calls.length);
+      calls.push(call);
+      return new Promise<JsonResult>(resolve =>
+        globalThis.setTimeout(() => {
+          call.answered = Date.now();
+          resolve({ ...okResult(), answeredAt: call.answered });
+        }, wait),
+      );
+    });
+    return calls;
+  };
+
+  /**
+   * The transport holds every read until the test answers it.
+   *
+   * @returns the calls and their answers
+   */
+  const answerByHand = (): { calls: Call[]; answer: Array<(res: JsonResult) => void> } => {
+    const calls: Call[] = [];
+    const answer: Array<(res: JsonResult) => void> = [];
+    httpMock.getJson.mockImplementation(() => {
+      calls.push({ t: Date.now() });
+      return new Promise<JsonResult>(resolve => answer.push(resolve));
+    });
+    return { calls, answer };
+  };
+
+  it("holds the second to ten calls when every answer comes 20 ms after its send", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const calls = answerAfter(() => 20);
+    const reads = Array.from({ length: 12 }, (_, n) => ctx.i.apiGet(`/api/s${n}`));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await Promise.all(reads);
+    expect(calls).toHaveLength(12);
+    // A gap of 100 ms from each send held 11 places at the 11th call: the first answer came 20 ms after its send.
+    expect(mostHeld(calls, 1)).toBeLessThanOrEqual(10);
+  });
+
+  it("holds the second to ten calls when the answers take longer than the gap", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const calls = answerAfter(() => 500);
+    const reads = Array.from({ length: 15 }, (_, n) => ctx.i.apiGet(`/api/l${n}`));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.all(reads);
+    expect(calls).toHaveLength(15);
+    expect(mostHeld(calls, 1)).toBeLessThanOrEqual(10);
+    // the 11th waits for a second after the first answer
+    expect(calls[10].t - (calls[0].answered ?? 0)).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it("counts the 51st call of a minute from the first call's answer, not from its send", async () => {
+    // The tester's report (2.0.0-alpha.0): the list call's answer came at most 68 ms after its send, the next call
+    // went out a minute after the send and drew 429 "50 calls in 1 minute".
+    const ctx = setup();
+    await ctx.i.onReady();
+    const calls = answerAfter(() => 68);
+    const reads = Array.from({ length: 51 }, (_, n) => ctx.i.apiGet(`/api/m${n}`));
+    await vi.advanceTimersByTimeAsync(70_000);
+    await Promise.all(reads);
+    expect(calls).toHaveLength(51);
+    expect(calls[50].t - (calls[0].answered ?? 0)).toBeGreaterThanOrEqual(60_000);
+    expect(mostHeld(calls, 60)).toBeLessThanOrEqual(50);
+  });
+
+  it("lets a call that is still on its way hold its place in the minute", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    // the first call hangs for 70 s, every other one is answered at once
+    const calls = answerAfter(n => (n === 0 ? 70_000 : 0));
+    const reads = Array.from({ length: 51 }, (_, n) => ctx.i.apiGet(`/api/o${n}`));
+    await vi.advanceTimersByTimeAsync(75_000);
+    await Promise.all(reads);
+    expect(calls).toHaveLength(51);
+    // a minute after the first call's send it was still open — its place was not free
+    expect(calls[50].t - calls[0].t).toBeGreaterThan(60_000);
+    expect(mostHeld(calls, 60)).toBeLessThanOrEqual(50);
+  });
+
+  it("wakes the queue when an answer comes and holds the next call a second after it", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const { calls, answer } = answerByHand();
+    const reads = Array.from({ length: 11 }, (_, n) => ctx.i.apiGet(`/api/w${n}`));
+    await vi.advanceTimersByTimeAsync(5_000);
+    // ten calls on their way fill the second — nothing frees on its own
+    expect(calls).toHaveLength(10);
+    const answeredAt = Date.now();
+    answer[0]({ ...okResult(), answeredAt });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(calls).toHaveLength(10);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toHaveLength(11);
+    expect(calls[10].t - answeredAt).toBe(1_000);
+    for (const give of answer) {
+      give(okResult());
+    }
+    await Promise.all(reads);
+  });
+
+  it("frees the place of a call without an answer a window after its send — at once when that is past", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    const { calls, answer } = answerByHand();
+    const reads = Array.from({ length: 11 }, (_, n) => ctx.i.apiGet(`/api/n${n}`));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(calls).toHaveLength(10);
+    // the first call ends without an answer (a timeout): it counts from its send, five seconds ago
+    answer[0](failResult(0));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(11);
+    expect(calls[10].t).toBe(NOW + 5_000);
+    for (const give of answer) {
+      give(okResult());
+    }
+    await Promise.all(reads);
+  });
+
+  it("answers a request waiting for its place at the stop, although the adapter's wait never ends then", async () => {
+    const ctx = setup();
+    await ctx.i.onReady();
+    answerAfter(() => 0);
+    const first = ctx.i.apiGet("/api/first");
+    await vi.advanceTimersByTimeAsync(0);
+    await first;
+    // js-controller resolves no `delay` once the stop began (adapter.ts, `_stopInProgress`)
+    const delay = (ctx.i as unknown as { delay: ReturnType<typeof vi.fn> }).delay;
+    delay.mockImplementation(() => new Promise<void>(() => {}));
+    let done = false;
+    const waiting = ctx.i.apiGet("/api/second").then(v => ((done = true), v));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    await new Promise<void>(resolve => ctx.i.onUnload(resolve));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(true);
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  describe("across a restart", () => {
+    beforeEach(async () => {
+      const { mkdtempSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      dataFolder.path = mkdtempSync(join(tmpdir(), "hc-main-held-"));
+    });
+    afterEach(async () => {
+      const { rmSync } = await import("node:fs");
+      rmSync(dataFolder.path, { recursive: true, force: true });
+      dataFolder.path = "";
+    });
+
+    it("hands the next process the minute counted from the answers", async () => {
+      const first = setup();
+      await first.i.onReady();
+      const calls = answerAfter(n => (n < 50 ? 500 : 0));
+      const spent = Array.from({ length: 50 }, (_, n) => first.i.apiGet(`/api/a${n}`));
+      await vi.advanceTimersByTimeAsync(20_000);
+      await Promise.all(spent);
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      await vi.advanceTimersByTimeAsync(3_000);
+      const second = setup();
+      await second.i.onReady();
+      const next = second.i.apiGet("/api/b");
+      await vi.advanceTimersByTimeAsync(45_000);
+      await next;
+      expect(calls).toHaveLength(51);
+      // Home Connect counted the old process's first call when it answered, 500 ms after its send.
+      expect(calls[50].t - (calls[0].answered ?? 0)).toBe(60_000);
+    });
+
+    it("counts a request still on its way at the stop from the stop", async () => {
+      const first = setup();
+      await first.i.onReady();
+      const { calls } = answerByHand();
+      // ten reads that are still on their way at the stop
+      for (let n = 0; n < 10; n++) {
+        void first.i.apiGet(`/api/h${n}`);
+      }
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(10);
+      const stop = Date.now();
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      // the host starts the instance again at once
+      await vi.advanceTimersByTimeAsync(300);
+      const second = setup();
+      await second.i.onReady();
+      const sentAt: number[] = [];
+      httpMock.getJson.mockImplementation(() => {
+        sentAt.push(Date.now());
+        return Promise.resolve(okResult());
+      });
+      const next = second.i.apiGet("/api/after");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await next;
+      // ten places that were on their way at the stop fill the second after it
+      expect(sentAt).toEqual([stop + 1_000]);
+    });
+
+    it("hands over a request answered after the stop from its answer, so the next minute stays within 50", async () => {
+      // The first call is still on its way at the stop and answered 440 ms after it — the old process still lives
+      // then (the token request onUnload waits for, the host's grace after the callback). Every other call is
+      // answered 20 ms after its send.
+      const calls = answerAfter(n => (n === 0 ? 6_300 : 20));
+      const first = setup();
+      await first.i.onReady();
+      const spent = Array.from({ length: 50 }, (_, n) => first.i.apiGet(`/api/a${n}`));
+      await vi.advanceTimersByTimeAsync(5_860);
+      expect(calls).toHaveLength(50);
+      const stop = Date.now();
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      expect(calls[0].answered).toBeUndefined();
+      // the host starts the instance again two seconds later
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.all(spent);
+      expect(calls[0].answered).toBe(stop + 440);
+      const second = setup();
+      await second.i.onReady();
+      const next = Array.from({ length: 50 }, (_, n) => second.i.apiGet(`/api/b${n}`));
+      await vi.advanceTimersByTimeAsync(80_000);
+      await Promise.all(next);
+      expect(calls).toHaveLength(100);
+      // Home Connect counts the first call until a minute after its answer: the next process's 50th call waits for it
+      expect(mostHeld(calls, 60)).toBeLessThanOrEqual(50);
+      expect(calls[99].t - (calls[0].answered ?? 0)).toBe(60_000);
+    });
+
+    it("hands over a request still on its way when the stop reports done from that moment", async () => {
+      const first = setup();
+      await first.i.onReady();
+      const { calls } = answerByHand();
+      // ten reads that are still on their way when the stop reports done
+      for (let n = 0; n < 10; n++) {
+        void first.i.apiGet(`/api/d${n}`);
+      }
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(10);
+      const stop = Date.now();
+      // the stop waits a second for a token request before it reports done
+      first.auths[0].settle.mockImplementation(
+        () => new Promise<void>(resolve => globalThis.setTimeout(resolve, 1_000)),
+      );
+      let doneAt = 0;
+      const done = new Promise<void>(resolve =>
+        first.i.onUnload(() => {
+          doneAt = Date.now();
+          resolve();
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      await done;
+      expect(doneAt).toBe(stop + 1_000);
+      await vi.advanceTimersByTimeAsync(300);
+      const second = setup();
+      await second.i.onReady();
+      const sentAt: number[] = [];
+      httpMock.getJson.mockImplementation(() => {
+        sentAt.push(Date.now());
+        return Promise.resolve(okResult());
+      });
+      const next = second.i.apiGet("/api/after");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await next;
+      // still on their way when the stop reported done, they fill the second after that moment
+      expect(sentAt).toEqual([doneAt + 1_000]);
+    });
+  });
+});
+
 describe("Homeconnect REST writes", () => {
   it("routes PUT and DELETE to their transports", async () => {
     const ctx = setup();
@@ -1575,6 +1886,16 @@ describe("Homeconnect onUnload", () => {
 
     await ctx.auths[0].port.onSignedIn();
     expect(ctx.streams).toHaveLength(0);
+  });
+  it("stops the diagnostics report jobs before reporting done", async () => {
+    // B02: a report still being made ends after its current step, and no message starts a new one (round 165).
+    const ctx = setup();
+    await ctx.i.onReady();
+    const order: string[] = [];
+    const jobs = (ctx.i as unknown as { diagnostics: { stop: () => void } }).diagnostics;
+    jobs.stop = () => order.push("diagnostics stopped");
+    await new Promise<void>(resolve => ctx.i.onUnload(() => (order.push("callback"), resolve())));
+    expect(order).toEqual(["diagnostics stopped", "callback"]);
   });
 });
 
@@ -2644,9 +2965,9 @@ describe("Homeconnect §7 improvements (2026-09-15)", () => {
       delay.mockClear();
       // The gap after /api/a is still open — the adapter's timer refuses during shutdown and its promise would
       // never settle, so the queue must not wait at all.
-      const place = (ctx.i as unknown as { spaceRequests(write?: boolean): Promise<boolean> }).spaceRequests(true);
+      const place = (ctx.i as unknown as { spaceRequests(write?: boolean): Promise<unknown> }).spaceRequests(true);
       await vi.advanceTimersByTimeAsync(0);
-      await expect(place).resolves.toBe(false);
+      await expect(place).resolves.toBeUndefined();
       expect(delay).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

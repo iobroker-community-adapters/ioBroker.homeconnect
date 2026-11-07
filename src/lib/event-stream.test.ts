@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { EventStream, type EventStreamDeps } from "./event-stream";
+import { EventStream, type EventStreamDeps, type StreamPlace } from "./event-stream";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -53,6 +53,23 @@ function harness(overrides: Partial<EventStreamDeps> = {}): {
 
 /** Let the async connect/pump chain settle. */
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
+
+/**
+ * A place in the adapter's request budget that notes what the stream reports to it.
+ *
+ * @returns the place and the order of its reports
+ */
+function spyPlace(): { place: StreamPlace; order: string[] } {
+  const order: string[] = [];
+  return {
+    order,
+    place: {
+      sent: () => order.push("sent"),
+      answered: () => order.push("answered"),
+      ended: () => order.push("ended"),
+    },
+  };
+}
 
 /**
  * A response body whose single read bumps the clock by `ms` then ends (a connection that lasted `ms`).
@@ -314,39 +331,133 @@ describe("EventStream lifecycle guards", () => {
   });
 
   it("opens the stream only once the adapter's request budget gives it a place", async () => {
-    let give: (go: boolean) => void = () => {};
-    const h = harness({ takeSlot: () => new Promise<boolean>(resolve => (give = resolve)) });
+    let give: (place: StreamPlace | undefined) => void = () => {};
+    const h = harness({ takeSlot: () => new Promise<StreamPlace | undefined>(resolve => (give = resolve)) });
     const fetchMock = vi.fn().mockImplementation(() => new Promise(() => {}));
     vi.stubGlobal("fetch", fetchMock);
     const es = new EventStream(h.deps);
     es.start();
     await flush();
     expect(fetchMock).not.toHaveBeenCalled();
-    give(true);
+    give(spyPlace().place);
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     es.stop();
   });
 
   it("reports its send time after fetch was invoked, in the same step (tooling round 140)", async () => {
-    const markSent = vi.fn();
-    const h = harness({ takeSlot: () => Promise.resolve(true), markSent });
-    const stampedBefore: number[] = [];
+    const { place, order } = spyPlace();
+    const h = harness({ takeSlot: () => Promise.resolve(place) });
     const fetchMock = vi.fn().mockImplementation(() => {
-      stampedBefore.push(markSent.mock.calls.length);
+      order.push("fetch");
       return new Promise(() => {});
     });
     vi.stubGlobal("fetch", fetchMock);
     const es = new EventStream(h.deps);
     es.start();
     await flush();
-    expect(stampedBefore).toEqual([0]);
-    expect(markSent).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["fetch", "sent"]);
     es.stop();
   });
 
+  it("marks its answer once the headers arrived, before the stream is read (tooling round 170)", async () => {
+    const { place, order } = spyPlace();
+    const h = harness({ takeSlot: () => Promise.resolve(place) });
+    const body = {
+      getReader: () => ({
+        read: () => {
+          order.push("read");
+          return new Promise(() => {});
+        },
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        order.push("fetch");
+        return Promise.resolve({ ok: true, status: 200, body });
+      }),
+    );
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    // Home Connect counted the connect when it answered — the place frees a window after that, not after the send.
+    expect(order).toEqual(["fetch", "sent", "answered", "read"]);
+    es.stop();
+  });
+
+  it("marks the answer of a refused connect too — Home Connect counts that request as well", async () => {
+    const { place, order } = spyPlace();
+    const h = harness({ takeSlot: () => Promise.resolve(place) });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503, body: null, headers: new Headers() }));
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(order).toEqual(["sent", "answered", "ended"]);
+    es.stop();
+  });
+
+  it("ends its place without an answer when the connect fails or the watchdog gives up", async () => {
+    const failed = spyPlace();
+    const h = harness({ takeSlot: () => Promise.resolve(failed.place) });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    // No answer: the place counts from its send.
+    expect(failed.order).toEqual(["sent", "ended"]);
+    es.stop();
+
+    const hung = spyPlace();
+    const h2 = harness({ takeSlot: () => Promise.resolve(hung.place) });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(
+          (_url: unknown, init: { signal: AbortSignal }) =>
+            new Promise((_resolve, reject) =>
+              init.signal.addEventListener("abort", () => reject(new Error("aborted"))),
+            ),
+        ),
+    );
+    const es2 = new EventStream(h2.deps);
+    es2.start();
+    await flush();
+    // still on its way: the place holds
+    expect(hung.order).toEqual(["sent"]);
+    h2.timers.find(t => t.ms === 30_000)?.cb();
+    await flush();
+    expect(hung.order).toEqual(["sent", "ended"]);
+    es2.stop();
+  });
+
+  it("gives back a place it did not use — no token, or stopped while it waited", async () => {
+    const noToken = spyPlace();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const h = harness({ takeSlot: () => Promise.resolve(noToken.place), getAccessToken: () => undefined });
+    const es = new EventStream(h.deps);
+    es.start();
+    await flush();
+    expect(noToken.order).toEqual(["ended"]);
+    es.stop();
+
+    const late = spyPlace();
+    let give: (place: StreamPlace | undefined) => void = () => {};
+    const h2 = harness({ takeSlot: () => new Promise<StreamPlace | undefined>(resolve => (give = resolve)) });
+    const es2 = new EventStream(h2.deps);
+    es2.start();
+    await flush();
+    es2.stop();
+    give(late.place);
+    await flush();
+    expect(late.order).toEqual(["ended"]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not open the stream when the budget says the adapter is shutting down", async () => {
-    const h = harness({ takeSlot: () => Promise.resolve(false) });
+    const h = harness({ takeSlot: () => Promise.resolve(undefined) });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const es = new EventStream(h.deps);

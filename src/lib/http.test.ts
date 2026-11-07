@@ -99,7 +99,7 @@ describe("postForm", () => {
       refresh_token: "RT",
     });
 
-    expect(res).toEqual({ status: 200, ok: true, body: { access_token: "x" } });
+    expect(res).toEqual({ status: 200, ok: true, body: { access_token: "x" }, answeredAt: expect.any(Number) });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("https://api.home-connect.com/security/oauth/token");
     expect(init.method).toBe("POST");
@@ -130,7 +130,7 @@ describe("postForm", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })),
     );
     const res = await postForm("https://api.home-connect.com", "/x", {});
-    expect(res).toEqual({ status: 400, ok: false, body: { error: "invalid_grant" } });
+    expect(res).toEqual({ status: 400, ok: false, body: { error: "invalid_grant" }, answeredAt: expect.any(Number) });
   });
 
   it("passes on how long a 429 of the token endpoint blocks", async () => {
@@ -159,7 +159,13 @@ describe("getJson", () => {
 
     const res = await getJson("https://api.home-connect.com", "/api/homeappliances", "TOKEN", "de-DE");
 
-    expect(res).toEqual({ status: 200, ok: true, data: { homeappliances: [{ haId: "X" }] }, error: undefined });
+    expect(res).toEqual({
+      status: 200,
+      ok: true,
+      data: { homeappliances: [{ haId: "X" }] },
+      error: undefined,
+      answeredAt: expect.any(Number),
+    });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("https://api.home-connect.com/api/homeappliances");
     expect(init.headers.authorization).toBe("Bearer TOKEN");
@@ -382,7 +388,12 @@ describe("response body cap", () => {
   it("applies the cap to the OAuth transport as well", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(big(6 * 1024 * 1024), { status: 200 })));
     const res = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
-    expect(res).toEqual({ status: 0, ok: false, body: { error: "response_too_large" } });
+    expect(res).toEqual({
+      status: 0,
+      ok: false,
+      body: { error: "response_too_large" },
+      answeredAt: expect.any(Number),
+    });
   });
 });
 
@@ -418,5 +429,98 @@ describe("a body that breaks off after the headers", () => {
     expect(res.status).toBe(0);
     expect(res.ok).toBe(false);
     expect((res.body as { error?: string }).error).toBe("network_error");
+  });
+});
+
+describe("the answer stamp (tooling round 170)", () => {
+  // The request budget frees a place a window's length after Home Connect's answer. The stamp is the moment fetch
+  // resolved with the headers — never the end of the body, which may come much later or break off — and a request that
+  // got no answer carries none (its place counts from its send).
+  const HEADERS_AT = 1_800_000_000_000;
+  const BODY_DONE_AT = HEADERS_AT + 1_500;
+  afterEach(() => vi.useRealTimers());
+
+  /**
+   * A body that takes its time: the clock moves on while it is read, then it ends — or breaks off.
+   *
+   * @param text what the body carries
+   * @param breaks whether the body breaks off instead of ending
+   * @returns the body stream
+   */
+  const slowBody = (text: string, breaks = false): ReadableStream<Uint8Array> =>
+    new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          vi.setSystemTime(BODY_DONE_AT);
+          controller.enqueue(new TextEncoder().encode(text));
+          if (breaks) {
+            controller.error(new TypeError("terminated"));
+          } else {
+            controller.close();
+          }
+        },
+      },
+      // nothing is pulled before the adapter reads
+      { highWaterMark: 0 },
+    );
+
+  /**
+   * A fetch whose headers arrive at HEADERS_AT.
+   *
+   * @param body the body that follows the headers
+   * @param status the HTTP status
+   * @returns the fetch double
+   */
+  const headersAt = (body: ReadableStream<Uint8Array>, status = 200): ReturnType<typeof vi.fn> =>
+    vi.fn(() => {
+      vi.setSystemTime(HEADERS_AT);
+      return Promise.resolve(new Response(body, { status }));
+    });
+
+  it("stamps a REST answer when its headers came, before its body was read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(HEADERS_AT - 50);
+    vi.stubGlobal("fetch", headersAt(slowBody('{"data":{"x":1}}')));
+    const res = await getJson("https://api.home-connect.com", "/x", "T");
+    expect(res).toMatchObject({ status: 200, ok: true, data: { x: 1 } });
+    // the body really took its time
+    expect(Date.now()).toBe(BODY_DONE_AT);
+    expect(res.answeredAt).toBe(HEADERS_AT);
+  });
+
+  it("stamps a sign-in answer the same way", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(HEADERS_AT - 50);
+    vi.stubGlobal("fetch", headersAt(slowBody('{"access_token":"x"}')));
+    const res = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
+    expect(res).toMatchObject({ status: 200, ok: true, body: { access_token: "x" } });
+    expect(Date.now()).toBe(BODY_DONE_AT);
+    expect(res.answeredAt).toBe(HEADERS_AT);
+  });
+
+  it("keeps the stamp on a body that breaks off after the headers (status 0)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.stubGlobal("fetch", headersAt(slowBody('{"data":', true)));
+    const read = await getJson("https://api.home-connect.com", "/x", "T");
+    expect(read).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
+    vi.stubGlobal("fetch", headersAt(slowBody('{"error":', true), 409));
+    const write = await putJson("https://api.home-connect.com", "/x", "T", { key: "k", value: 1 });
+    expect(write).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
+    vi.stubGlobal("fetch", headersAt(slowBody('{"access', true)));
+    const token = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
+    expect(token).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
+  });
+
+  it("carries no stamp when no answer came — a transport error, a timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    const read = await getJson("https://api.home-connect.com", "/x", "T");
+    expect(read.status).toBe(0);
+    expect(read).not.toHaveProperty("answeredAt");
+    const write = await deleteJson("https://api.home-connect.com", "/x", "T");
+    expect(write).not.toHaveProperty("answeredAt");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("The operation was aborted.", "TimeoutError")));
+    const token = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
+    expect(token.status).toBe(0);
+    expect(token).not.toHaveProperty("answeredAt");
   });
 });

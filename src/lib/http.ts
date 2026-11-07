@@ -1,7 +1,10 @@
 // Thin fetch-based HTTP for the Home Connect API. Node 22 global `fetch` +
 // `AbortSignal.timeout` — no extra dependency, no manual timer to leak.
 // `postForm` for the OAuth endpoints, `getJson`/`putJson`/`deleteJson` over one
-// `requestJson` core for the REST calls.
+// `requestJson` core for the REST calls. Every result that got an answer carries
+// the moment it came (`answeredAt`, taken as fetch resolves with the headers,
+// before the body is read): the request budget frees a place a window's length
+// after it (tooling round 170).
 
 import type { FormPostResult } from "./oauth";
 import { errText } from "./err-text";
@@ -33,7 +36,7 @@ export async function postForm(
   path: string,
   form: Record<string, string>,
   timeoutMs = REQUEST_TIMEOUT_MS,
-): Promise<FormPostResult> {
+): Promise<FormAnswer> {
   let res: Response;
   try {
     res = await fetch(new URL(path, baseUrl), {
@@ -48,16 +51,18 @@ export async function postForm(
   } catch (e) {
     return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) } };
   }
+  // Home Connect answered: the headers are here, whatever the body does next.
+  const answeredAt = Date.now();
   // fetch resolves with the headers; the body can still break off (socket reset,
   // the timeout firing mid-stream). That is a transport failure like any other.
   let parsed: { json: unknown; tooLarge: boolean };
   try {
     parsed = await parseJsonBody(res);
   } catch (e) {
-    return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) } };
+    return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) }, answeredAt };
   }
   if (parsed.tooLarge) {
-    return { status: 0, ok: false, body: { error: "response_too_large" } };
+    return { status: 0, ok: false, body: { error: "response_too_large" }, answeredAt };
   }
   // A 429 says how long Home Connect blocks — the whole account, the token endpoint included.
   const retryAfter = res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
@@ -66,8 +71,15 @@ export async function postForm(
     ok: res.ok,
     body: parsed.json,
     ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
+    answeredAt,
   };
 }
+
+/** The answer of {@link postForm}: the OAuth layer's result plus when Home Connect answered. */
+export type FormAnswer = FormPostResult & {
+  /** When the headers arrived (epoch ms) — undefined when no answer came (transport error, timeout). */
+  answeredAt?: number;
+};
 
 /** Result of a bearer-token JSON request (GET/PUT/DELETE): status, ok, the unwrapped `data`, and an error key on failure. */
 export interface JsonResult {
@@ -87,6 +99,12 @@ export interface JsonResult {
    * blocks. Undefined when the body carries none.
    */
   description?: string;
+  /**
+   * When Home Connect answered (epoch ms): taken as fetch resolved with the headers, before the body was read — so a
+   * body that broke off afterwards (status 0) carries it too. Undefined when no answer came (transport error, timeout,
+   * abort).
+   */
+  answeredAt?: number;
 }
 
 /**
@@ -202,14 +220,16 @@ async function requestJson(
   } catch (e) {
     return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}` };
   }
+  // Home Connect answered: the headers are here, whatever the body does next.
+  const answeredAt = Date.now();
   // fetch resolves with the headers; the body can still break off (socket reset,
   // the timeout firing mid-stream). A rejection here travelled up through the
   // appliance sync and ended the whole start-up chain — it is a transport
   // failure like any other.
   try {
-    return await toJsonResult(res);
+    return { ...(await toJsonResult(res)), answeredAt };
   } catch (e) {
-    return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}` };
+    return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}`, answeredAt };
   }
 }
 

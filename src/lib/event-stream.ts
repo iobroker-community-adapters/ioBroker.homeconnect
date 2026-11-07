@@ -100,6 +100,19 @@ async function refusedKey(res: Response): Promise<{ key?: string; description?: 
   }
 }
 
+/**
+ * The place a connect holds in the adapter's request budget (Home Connect counts opening the stream as a request): held
+ * while the connect is on its way, then a window's length after the answer — or after the send, when none came.
+ */
+export interface StreamPlace {
+  /** The connect just went out — called right after fetch was invoked, in the same synchronous step (tooling round 140). */
+  sent(): void;
+  /** Home Connect answered the connect — the headers arrived (tooling round 170). */
+  answered(): void;
+  /** The attempt is over: without an answer the place counts from its send; one that never went out is given back. */
+  ended(): void;
+}
+
 /** Everything the stream needs from the adapter, injected for testability + managed timers. */
 export interface EventStreamDeps {
   /** Region base URL. */
@@ -128,14 +141,9 @@ export interface EventStreamDeps {
   onRateLimited?: (ms: number) => void;
   /**
    * Wait for a place in the adapter's request budget (Home Connect counts opening the stream as a request);
-   * resolves false when the adapter is shutting down.
+   * resolves undefined when the adapter is shutting down.
    */
-  takeSlot?: () => Promise<boolean>;
-  /**
-   * The stream's request just went out — called right after fetch was invoked, in the same synchronous step, so the
-   * adapter's budget counts its send time from that moment (tooling round 140).
-   */
-  markSent?: () => void;
+  takeSlot?: () => Promise<StreamPlace | undefined>;
   /** Log sink. */
   log: (level: "debug" | "info" | "warn", msg: string) => void;
   /** Schedule a callback (the adapter's managed setTimeout). */
@@ -258,12 +266,17 @@ export class EventStream {
   /** One connection: stream frames to the parser until it closes or errors. */
   private async streamOnce(): Promise<void> {
     // Opening the stream is a request like any other: it takes its place in the adapter's request budget.
-    if ((this.deps.takeSlot && !(await this.deps.takeSlot())) || this.stopped) {
+    const place = this.deps.takeSlot ? await this.deps.takeSlot() : undefined;
+    if (this.deps.takeSlot && !place) {
       return;
     }
-    const token = this.deps.getAccessToken();
+    const token = this.stopped ? undefined : this.deps.getAccessToken();
     if (!token) {
-      this.failures++;
+      // nothing went out: the place goes back
+      place?.ended();
+      if (!this.stopped) {
+        this.failures++;
+      }
       return;
     }
     const abort = new AbortController();
@@ -281,8 +294,10 @@ export class EventStream {
         headers: { authorization: `Bearer ${token}`, accept: "text/event-stream" },
         signal: abort.signal,
       });
-      this.deps.markSent?.();
+      place?.sent();
       const res = await opening;
+      // The headers are here: Home Connect counted the connect, its place frees a window's length after now.
+      place?.answered();
       this.clearConnectTimer();
       if (!res.ok) {
         // Reading the (small, capped) body frees the connection too — undici
@@ -345,6 +360,8 @@ export class EventStream {
       this.clearKeepAlive();
       this.clearConnectTimer();
       this.abort = undefined;
+      // A connect without an answer (transport error, watchdog, stop) frees its place a window after its send.
+      place?.ended();
     }
   }
 
