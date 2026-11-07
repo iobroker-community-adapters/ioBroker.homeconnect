@@ -1,5 +1,5 @@
 // Fleet master (.consistency-master/src/lib/log-once.test.ts) — never edit the copy in an adapter.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LogOnce, type LogOnceLogger } from "./log-once";
 
 function logger(): LogOnceLogger & { lines: string[] } {
@@ -54,15 +54,22 @@ describe("LogOnce", () => {
     once.report("c", "x");
     once.report("b", "x");
     once.report("a", "y");
-    expect(log.lines).toEqual(["warn x", "warn x", "warn y", "warn x", "warn x", "warn y"]);
+    // round 157 (master audit M11): a key still remembered stays quiet — forgetting everything at the limit is red here
+    once.report("b", "x");
+    expect(log.lines).toEqual(["warn x", "warn x", "warn y", "warn x", "warn x", "warn y", "debug x"]);
   });
 
   it("reads the real clock when given none", () => {
+    // round 157 (master audit M12): the clock is steered — a wrong default clock (a constant) stayed inside the window
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
     const log = logger();
     const once = new LogOnce(log, { windowMs: 3_600_000 });
     once.report("p", "down");
     once.report("p", "down");
-    expect(log.lines).toEqual(["warn down", "debug down"]);
+    now.mockReturnValue(1_000 + 3_600_000);
+    once.report("p", "down");
+    now.mockRestore();
+    expect(log.lines).toEqual(["warn down", "debug down", "warn down"]);
   });
 
   it("says a recovery once after a loud line, debug otherwise, and starts the key anew", () => {

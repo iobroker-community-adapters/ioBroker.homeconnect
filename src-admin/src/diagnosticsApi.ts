@@ -5,8 +5,8 @@
 // socket's `sendTo` and its state subscription. The answer shapes come from the adapter side as types only — nothing of
 // it reaches the browser bundle.
 
-import { errText } from "../../src/lib/err-text";
-import type { Report, ReportDevice } from "../../src/lib/diagnostics/report-jobs";
+import { errText } from "../../src/lib/err-text.js";
+import type { Report, ReportDevice } from "../../src/lib/diagnostics/report-jobs.js";
 
 /** What the start-and-fetch round answers. */
 export type DiagnosticsExportResult = Report | { error: string };

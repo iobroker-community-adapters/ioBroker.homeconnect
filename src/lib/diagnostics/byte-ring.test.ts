@@ -28,11 +28,26 @@ describe("ByteRing", () => {
       content: "x".repeat(50),
     });
     const ring = new ByteRing<string>(one * 2, 1_000, () => 0);
-    ring.add("a", "x".repeat(50));
-    ring.add("b", "x".repeat(50));
-    ring.add("c", "x".repeat(50));
-    expect(ring.snapshot().map(e => e.content?.length)).toEqual([50, 50]);
-    expect(ring.snapshot()).toHaveLength(2);
+    // round 157 (master audit M13): three contents of one length — the oldest goes, which one equal contents never told
+    ring.add("a", "a".repeat(50));
+    ring.add("b", "b".repeat(50));
+    ring.add("c", "c".repeat(50));
+    expect(ring.snapshot().map(e => e.content)).toEqual(["b".repeat(50), "c".repeat(50)]);
+  });
+
+  it("counts a repeat's bytes once, so a repeat crowds out nothing", () => {
+    const one = sizeOf({
+      first: new Date(0).toISOString(),
+      last: new Date(0).toISOString(),
+      count: 1,
+      content: "x".repeat(50),
+    });
+    const ring = new ByteRing<string>(one * 2 + 10, 1_000, () => 0);
+    ring.add("a", "a".repeat(50));
+    ring.add("b", "b".repeat(50));
+    ring.add("a", "a".repeat(50));
+    ring.add("a", "a".repeat(50));
+    expect(ring.snapshot().map(e => e.content)).toEqual(["b".repeat(50), "a".repeat(50)]);
   });
 
   it("keeps an entry over the entry limit with its size only (R3)", () => {

@@ -1,14 +1,33 @@
 import React from "react";
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterAll, afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+// Round 157 (master audit M28): the stand-in hands the key back, so a key the card uses that DIAGNOSTICS_TEXTS lacks
+// passed every test while the admin showed the raw key — every key asked for is collected and checked after the file.
+const { used } = vi.hoisted(() => ({ used: new Set<string>() }));
 vi.mock("@iobroker/gui-components", () => ({
-  I18n: { t: (key: string, ...args: unknown[]) => [key, ...args].join(" "), extendTranslations: vi.fn() },
+  I18n: {
+    t: (key: string, ...args: unknown[]) => {
+      used.add(key);
+      return [key, ...args].join(" ");
+    },
+    extendTranslations: vi.fn(),
+  },
 }));
 
 import { InstanceUnavailableError } from "./diagnosticsApi";
 import { DiagnosticsPanel, failureText, issueFormUrl } from "./DiagnosticsPanel";
+import { DIAGNOSTICS_TEXTS } from "./diagnosticsTexts";
+
+afterAll(() => {
+  expect(used.size).toBeGreaterThan(0);
+  expect([...used].filter(key => !(key in DIAGNOSTICS_TEXTS.en)).sort()).toEqual([]);
+});
+// Round 157 (master audit M29): a spy (the download click) went on into every later test of the file
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** What every card here is mounted with besides its socket. */
 const MOUNT = {
@@ -92,13 +111,20 @@ describe("DiagnosticsPanel", () => {
     );
     const button = await screen.findByTestId("diag-export");
     await waitFor(() => expect(button).not.toBeDisabled());
-    fireEvent.click(button);
-    expect(await screen.findByTestId("diag-generating")).toHaveTextContent("diag_generating");
-    expect(screen.getByTestId("diag-export")).toBeDisabled();
-    // The count is wall-clock seconds: a busy runner showed 2 at its first look — any second counts.
-    await waitFor(() => expect(screen.getByTestId("diag-elapsed")).toHaveTextContent(/^diag_elapsed [1-9]\d*$/), {
-      timeout: 2500,
-    });
+    // Round 157 (master audit M26): the card's count runs on a steered clock (its interval and Date) — before, the test
+    // waited the real second, up to 2.5 s, and a busy runner showed 2 at its first look
+    vi.useFakeTimers({ toFake: ["setInterval", "Date"] });
+    try {
+      fireEvent.click(button);
+      expect(await screen.findByTestId("diag-generating")).toHaveTextContent("diag_generating");
+      expect(screen.getByTestId("diag-export")).toBeDisabled();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.getByTestId("diag-elapsed")).toHaveTextContent(/^diag_elapsed 1$/);
+    } finally {
+      vi.useRealTimers();
+    }
     done = true;
     await waitFor(() => expect(screen.queryByTestId("diag-generating")).toBeNull());
   });
@@ -296,9 +322,14 @@ describe("DiagnosticsPanel with a new socket", () => {
       />,
     );
     await screen.findByTestId("diag-export");
-    answer({ devices: [] });
-    await new Promise(resolve => setTimeout(resolve, 0));
+    // Round 157 (master audit M27): the late answer is delivered inside act, and the new socket's list is proven still
+    // there — after a bare setTimeout(0) a state change coming later went unseen
+    await act(async () => {
+      answer({ devices: [] });
+      await Promise.resolve();
+    });
     expect(screen.queryByTestId("diag-no-devices")).toBeNull();
+    expect(screen.getByTestId("diag-export")).toBeInTheDocument();
     view.rerender(
       <DiagnosticsPanel
         socket={lateFail}
@@ -312,9 +343,12 @@ describe("DiagnosticsPanel with a new socket", () => {
       />,
     );
     await screen.findByTestId("diag-export");
-    fail(new Error("too late"));
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await act(async () => {
+      fail(new Error("too late"));
+      await Promise.resolve();
+    });
     expect(screen.queryByTestId("diag-list-failed")).toBeNull();
+    expect(screen.getByTestId("diag-export")).toBeInTheDocument();
   });
 });
 

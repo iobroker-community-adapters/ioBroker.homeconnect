@@ -2,6 +2,7 @@
 // Entwicklung/.consistency-master, never in an adapter.
 import {
   coveredBy,
+  extendedWith,
   KnownObjects,
   type KnownObjectsAdapter,
   mergedWith,
@@ -40,6 +41,46 @@ describe("mergedWith — the merge of extendObject (node.extend, deep)", () => {
     expect(mergedWith([1, 2], [undefined, 3])).toEqual([1, 3]);
     const bare = Object.assign(Object.create(null) as Record<string, unknown>, { a: 1 });
     expect(mergedWith(bare, { b: 2 })).toEqual({ a: 1, b: 2 });
+  });
+});
+
+describe("extendedWith — what extendObject leaves of the whole object (js-controller 7.2.2)", () => {
+  it("replaces the four lists the adapter layer empties first, and merges every other list index by index", () => {
+    const stored = {
+      native: { devices: [1, 2, 3], repositories: ["a", "b"], certificates: [{ c: 1 }, { c: 2 }], other: [1, 2, 3] },
+      common: { members: ["x", "y"], name: "n" },
+    };
+    const patch = {
+      native: { devices: [9], repositories: ["z"], certificates: [{ d: 1 }], other: [9] },
+      common: { members: ["w"] },
+    };
+    expect(extendedWith(stored, patch)).toEqual({
+      native: { devices: [9], repositories: ["z"], certificates: [{ d: 1 }], other: [9, 2, 3] },
+      common: { members: ["w"], name: "n" },
+    });
+    expect(stored.native.devices).toEqual([1, 2, 3]);
+  });
+
+  it("empties a named list even when the patch holds undefined there, and leaves a list the patch does not name", () => {
+    expect(extendedWith({ native: { devices: [1, 2] } }, { native: { devices: undefined } })).toEqual({
+      native: { devices: [] },
+    });
+    expect(extendedWith({ native: { devices: [1, 2] } }, { native: { other: 1 } })).toEqual({
+      native: { devices: [1, 2], other: 1 },
+    });
+    expect(extendedWith({ native: { devices: null } }, { native: { devices: [1] } })).toEqual({
+      native: { devices: [1] },
+    });
+    // only a stored list is emptied — a stored null stays when the patch holds undefined there
+    expect(extendedWith({ native: { devices: null } }, { native: { devices: undefined } })).toEqual({
+      native: { devices: null },
+    });
+  });
+
+  it("merges like mergedWith where nothing or no object is stored", () => {
+    expect(extendedWith(undefined, { native: { devices: [1] } })).toEqual({ native: { devices: [1] } });
+    expect(extendedWith({ native: [1, 2] }, { native: { devices: [3] } })).toEqual({ native: { devices: [3] } });
+    expect(extendedWith({ a: 1 }, "x")).toBe("x");
   });
 });
 
@@ -126,6 +167,12 @@ describe("coveredBy — the write would change nothing", () => {
     expect(coveredBy({ common: { min: 0 } }, undefined)).toBe(false);
   });
 
+  it("is not covered by a shorter list the adapter layer replaces, and covered by the same one", () => {
+    expect(coveredBy({ native: { devices: [1] } }, { native: { devices: [1, 2] } })).toBe(false);
+    expect(coveredBy({ common: { members: ["a"] } }, { common: { members: ["a", "b"] } })).toBe(false);
+    expect(coveredBy({ native: { devices: [1, 2] } }, { native: { devices: [1, 2] } })).toBe(true);
+  });
+
   it("compares structures, not their text", () => {
     expect(sameStructure({ a: 1, b: [1, { c: 2 }] }, { b: [1, { c: 2 }], a: 1 })).toBe(true);
     expect(sameStructure([1, 2], { 0: 1, 1: 2 })).toBe(false);
@@ -185,6 +232,15 @@ describe("KnownObjects — read once, write only on a difference", () => {
     expect(writes.map(c => c[2])).toEqual([{ common: { name: "New" } }]);
   });
 
+  it("writes a shorter device list and holds it whole, as the adapter layer replaces it", async () => {
+    const { adapter, calls } = fakeAdapter([{ id: "demo.0.hub", value: { native: { devices: ["a", "b"], x: 1 } } }]);
+    const known = new KnownObjects(adapter);
+    await known.load();
+    expect(await known.extend("hub", { native: { devices: ["a"] } })).toBe(true);
+    expect(known.get("hub")).toEqual({ native: { devices: ["a"], x: 1 } });
+    expect(calls.filter(c => c[0] === "extend")).toHaveLength(1);
+  });
+
   it("replaces a whole object only when it differs, and forgets removed objects with their children", async () => {
     const { adapter, calls } = fakeAdapter([
       { id: "demo.0.dev", value: { type: "device", common: { name: "Dev" } } },
@@ -201,6 +257,24 @@ describe("KnownObjects — read once, write only on a difference", () => {
     expect(known.get("dev.on")).toBeUndefined();
     expect(known.get("other")).toEqual({ type: "state", common: { name: "Other" } });
     expect(calls.filter(c => c[0] !== "list").map(c => `${c[0]} ${c[1]}`)).toEqual(["set demo.0.dev", "del dev"]);
+  });
+
+  it("lists the known ids, all or below one id, so nobody reads the own tree a second time", async () => {
+    // fakeroku audit 2026-10-22: without a listing the adapter read its tree three times at start (load + two reads)
+    const { adapter, calls } = fakeAdapter([
+      { id: "demo.0.dev", value: { type: "device", common: { name: "Dev" } } },
+      { id: "demo.0.dev.on", value: { type: "state", common: { name: "On" } } },
+      { id: "demo.0.device", value: { type: "device", common: { name: "Other" } } },
+    ]);
+    const known = new KnownObjects(adapter);
+    await known.load();
+    expect(known.ids()).toEqual(["demo.0.dev", "demo.0.dev.on", "demo.0.device"]);
+    expect(known.ids("dev")).toEqual(["demo.0.dev.on"]);
+    expect(known.ids("demo.0.dev")).toEqual(["demo.0.dev.on"]);
+    await known.extend("dev.off", { type: "state", common: { name: "Off" } });
+    await known.remove("dev.on");
+    expect(known.ids("dev")).toEqual(["demo.0.dev.off"]);
+    expect(calls.filter(c => c[0] === "list")).toHaveLength(1);
   });
 
   it("skips a row without an object, and a delete without recursive keeps the children known", async () => {
@@ -286,7 +360,7 @@ describe("KnownObjects — overlapping operations wait for each other", () => {
         if (failFirstExtend && calls === 1) {
           return Promise.reject(new Error("db busy"));
         }
-        db.set(full(id), mergedWith(db.get(full(id)), patch));
+        db.set(full(id), extendedWith(db.get(full(id)), patch));
         return answer(delays.extend);
       },
       setForeignObject: (id, obj) => {

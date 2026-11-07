@@ -1,7 +1,9 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "rootDirs": ["../src", "../build"],
+    "types": ["iobroker", "mocha", "node"]
   },
   "include": ["./**/*.js", "./**/*.cjs", "./**/*.mjs"]
 }

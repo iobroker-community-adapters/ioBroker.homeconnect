@@ -22,6 +22,8 @@ const dgram = require("node:dgram");
 const path = require("node:path");
 const { AsyncLocalStorage } = require("node:async_hooks");
 const { EventEmitter } = require("node:events");
+// a node method this hook wraps and calls with the arguments it got — typed by node per overload, called here untyped
+/** @typedef {(this: unknown, ...args: any[]) => any} Native */
 
 const dir = process.env.RESOURCE_PROBE_DIR;
 if (!dir) {
@@ -37,7 +39,9 @@ try {
   const { objects, states } = JSON.parse(fs.readFileSync(config, "utf8"));
   keep = new Set([Number(objects.port), Number(states.port)]);
 } catch (err) {
-  throw new Error(`network hook: cannot read the database ports from ${config} (${err.message})`);
+  throw new Error(
+    `network hook: cannot read the database ports from ${config} (${/** @type {Error} */ (err).message})`,
+  );
 }
 if (![...keep].every(p => Number.isInteger(p) && p > 0)) {
   throw new Error(`network hook: ${config} names no database ports`);
@@ -99,7 +103,8 @@ setInterval(pulse, 2000).unref();
 //    sockets created on the way — is counted with `cause`. A call from a loop that started before the command (a queue
 //    worker created at the start) carries no cause.
 const command = new AsyncLocalStorage();
-const emitEvent = EventEmitter.prototype.emit;
+const emitEvent = /** @type {Native} */ (EventEmitter.prototype.emit);
+/** @this {EventEmitter} */
 function causeEmit(event, ...args) {
   if (event === "stateChange" && typeof args[0] === "string" && args[1] && args[1].ack === false) {
     return command.run(args[0], () => emitEvent.call(this, event, ...args));
@@ -108,15 +113,44 @@ function causeEmit(event, ...args) {
 }
 EventEmitter.prototype.emit = causeEmit;
 let nested = 0;
+// each counted call carries its number `n` in its process — section 9 pairs an answer with it
+let counted = 0;
 const count = (kind, host, port, hook = byHook()) => {
   if (nested > 0 || keep.has(Number(port)) || hook) {
-    return;
+    return undefined;
   }
   const cause = command.getStore();
+  const n = ++counted;
   fs.appendFileSync(
     calls,
-    `${JSON.stringify(cause === undefined ? { t: Date.now(), kind, host, port } : { t: Date.now(), kind, host, port, cause })}\n`,
+    `${JSON.stringify(cause === undefined ? { t: Date.now(), kind, host, port, n } : { t: Date.now(), kind, host, port, cause, n })}\n`,
   );
+  return n;
+};
+// 9. It stamps when an HTTP answer reaches the adapter — `{ t, n }` in RESOURCE_PROBE_DIR/<pid>.answered, `n` the call's
+//    number in <pid>.calls (round 170, homeconnect 2026-11-05: a tester's 50th call of a minute drew a 429 at the window's
+//    edge — the server counts a call at the latest when it answers it, so a place in a window frees `seconds · 1000`
+//    after the answer, not after the send). In the installations the limit tests judge (INVENTORY_COUNTED=1) every
+//    answer reaches the adapter ANSWER_DELAY_MS late: a fixture answers within milliseconds, and a limiter that frees its
+//    place after the send would hold one call too many unseen. 20 ms lies above a timer's lateness (0–3 ms, 20 timers
+//    of 150 ms on the development Mac, 2026-11-05).
+const answeredLog = path.join(dir, `${process.pid}.answered`);
+const ANSWER_DELAY_MS = process.env.INVENTORY_COUNTED === "1" ? 20 : 0;
+const answered = n => {
+  if (n !== undefined) {
+    fs.appendFileSync(answeredLog, `${JSON.stringify({ t: Date.now(), n })}\n`);
+  }
+};
+// a fetch answer on its way to the adapter: stamped as it goes, late in the counted installations
+const handOver = (n, response) => {
+  if (ANSWER_DELAY_MS === 0) {
+    answered(n);
+    return response;
+  }
+  return new Promise(resolve => setTimeout(resolve, ANSWER_DELAY_MS)).then(() => {
+    answered(n);
+    return response;
+  });
 };
 // 6. It notes every answer a counterpart sends — data on a connection, a datagram, a fetch response — at most one line
 //    per counterpart and second in RESOURCE_PROBE_DIR/<pid>.answers (round 104, krobi 2026-10-03 12:01 for every
@@ -167,7 +201,7 @@ const hung = (host, port) => {
   const [wordHost, wordPort] = word.split(" ");
   return String(host) === wordHost && (wordPort === undefined || Number(port) === Number(wordPort));
 };
-const silent = () => hangWord() === "*";
+/** @type {string | false} */
 let hangNext = false;
 // A device that hangs takes the connection and never answers: the hung connection goes to this black hole, opened before
 // the listen record below is patched (no record), so the adapter's own timeouts — connect, TLS, request — run as with a
@@ -180,7 +214,7 @@ const hole = net.createServer(socket => {
   socket.resume();
 });
 hole.listen(0, "127.0.0.1", () => {
-  blackHole = hole.address().port;
+  blackHole = /** @type {import("node:net").AddressInfo} */ (hole.address()).port;
 });
 hole.unref();
 // Each hung attempt that ends writes `hang-end`; when the last open one of a host has ended, `hang-idle` follows — the
@@ -190,7 +224,11 @@ const hangOpen = new Map();
 const hangStart = (host, port) => {
   const key = `${host} ${port}`;
   hangOpen.set(key, (hangOpen.get(key) ?? 0) + 1);
-  fs.appendFileSync(calls, `${JSON.stringify({ t: Date.now(), kind: "hang-start", host, port })}\n`);
+  // round 157 (inventory-template audit V21): a hung attempt a command opened carries it — the command suite holds its
+  // window until the adapter gave each one up
+  const cause = command.getStore();
+  const rec = { t: Date.now(), kind: "hang-start", host, port };
+  fs.appendFileSync(calls, `${JSON.stringify(cause === undefined ? rec : { ...rec, cause })}\n`);
 };
 const hangEnd = (host, port) => {
   fs.appendFileSync(calls, `${JSON.stringify({ t: Date.now(), kind: "hang-end", host, port })}\n`);
@@ -292,6 +330,7 @@ const driftText = text => {
   }
 };
 const faultStatus = mode => (mode === "500" || mode === "500all" ? 500 : mode === "429" ? 429 : 200);
+/** @type {(mode: string) => Record<string, string>} */
 const faultHeaders = mode => (mode === "429" ? { "retry-after": "60" } : {});
 const refused = () => Object.assign(new Error("connect ECONNREFUSED (outage switch)"), { code: "ECONNREFUSED" });
 const reset = () => Object.assign(new Error("read ECONNRESET (outage switch)"), { code: "ECONNRESET" });
@@ -311,11 +350,12 @@ const track = (socket, opts) => {
   targets.set(socket, { host: opts.host ?? "localhost", port: Number(opts.port) });
   socket.once("close", () => open.delete(socket));
 };
-const connect = net.Socket.prototype.connect;
+const connect = /** @type {Native} */ (net.Socket.prototype.connect);
 // Round 104: an outgoing raw connection — not one an http client or fetch (undici) opened, whose requests are counted
 // where they begin, and not one a server of the adapter accepted (its writes are answers, not calls)
 const rawOut = new WeakSet();
 const byClient = () => /node:_http_(client|agent)|node:https|node:internal\/deps\/undici/.test(new Error().stack || "");
+/** @this {net.Socket} */
 function cutConnect(...args) {
   // Round 107: the host and port a TLS connection was asked for, before a fixture hook below rerouted it (tls.connect)
   const asked = tlsAsked;
@@ -368,12 +408,20 @@ function cutConnect(...args) {
 }
 net.Socket.prototype.connect = cutConnect;
 // Round 101: while everything hangs, nothing the counterparts send reaches the adapter on a connection opened before.
-const socketEmit = net.Socket.prototype.emit;
+const socketEmit = /** @type {Native} */ (net.Socket.prototype.emit);
+/** @this {net.Socket} */
 function cutSocketEmit(event, ...args) {
+  // Round 157 (fleet-suite audit): the switch holds at once, also on a connection opened before — the interval below drops
+  // it within 100 ms, and an answer in that gap reached the adapter while every counterpart was cut
+  if (event === "data" && open.has(this) && down()) {
+    this.destroy(reset());
+    return false;
+  }
   if (event === "data" && open.has(this)) {
     silenceIfHung(this);
   }
-  if (event === "data" && open.has(this) && (silent() || (silenced.has(this) && hangWord() !== ""))) {
+  // `*` needs no branch of its own: hung() reads it, so silenceIfHung above already silenced the connection
+  if (event === "data" && open.has(this) && silenced.has(this) && hangWord() !== "") {
     return false;
   }
   if (event === "data" && open.has(this)) {
@@ -385,11 +433,16 @@ function cutSocketEmit(event, ...args) {
   return socketEmit.call(this, event, ...args);
 }
 net.Socket.prototype.emit = cutSocketEmit;
-const socketWrite = net.Socket.prototype.write;
+const socketWrite = /** @type {Native} */ (net.Socket.prototype.write);
 // Round 104 (krobi 2026-10-07 10:14: API limits are defined in the adapter and checked): every
 // write on such a connection is a call of kind `tcp-write` — a device protocol on one socket (YNCA, NUT, MQTT) sends its
 // commands there, and until now only the connections were counted, so no command limit was ever judged.
+/** @this {net.Socket} */
 function causeWrite(...args) {
+  if (open.has(this) && down()) {
+    this.destroy(reset());
+    return false;
+  }
   silenceIfHung(this);
   const target = targets.get(this);
   if (target !== undefined && open.has(this) && rawOut.has(this)) {
@@ -404,9 +457,10 @@ net.Socket.prototype.write = causeWrite;
 // Round 107 (K18): a TLS connection TLS opens itself is recorded with the host the adapter asked for — a fixture hook
 // below that reroutes `tls.connect` to a local server would otherwise leave only its own address in the record, and a
 // declared counterpart (a broker whose host differs per account) could never be told from any other.
-const tlsConnect = tls.connect;
+const tlsConnect = /** @type {Native} */ (tls.connect);
 let tlsAsked = null;
 let tlsDepth = 0;
+/** @this {unknown} */
 function trackTls(...args) {
   const opts = args.find(a => a !== null && typeof a === "object" && !(a instanceof net.Socket)) ?? {};
   if (tlsDepth === 0 && !(opts.socket instanceof net.Socket)) {
@@ -464,9 +518,7 @@ for (const mod of [require("node:http"), require("node:https")]) {
         pathname = first.path ?? first.pathname;
         method = first.method;
       }
-      if (host !== undefined) {
-        count("http", String(host).replace(/:\d+$/, ""), port);
-      }
+      const n = host === undefined ? undefined : count("http", String(host).replace(/:\d+$/, ""), port);
       // a fixture hook below that calls http.request again is the same call, not a second one
       const outermost = nested === 0;
       nested++;
@@ -492,6 +544,27 @@ for (const mod of [require("node:http"), require("node:https")]) {
             return event === "response"
               ? emit.call(this, event, faultResponse(mode, rest[0]))
               : emit.call(this, event, ...rest);
+          };
+        }
+        if (n !== undefined) {
+          // section 9: the response, stamped as it goes to the adapter — late in the counted installations
+          const deliver = req.emit;
+          req.emit = function answeredEmit(event, ...rest) {
+            if (event !== "response") {
+              return deliver.call(this, event, ...rest);
+            }
+            if (ANSWER_DELAY_MS === 0) {
+              answered(n);
+              return deliver.call(this, event, ...rest);
+            }
+            setTimeout(() => {
+              answered(n);
+              // nobody takes it: drained, as node does with a response no listener takes
+              if (!deliver.call(this, event, ...rest)) {
+                rest[0]?.resume?.();
+              }
+            }, ANSWER_DELAY_MS);
+            return true;
           };
         }
         return req;
@@ -536,13 +609,14 @@ function faultResponse(mode, real) {
 }
 
 // Listening TCP servers (http, fastify): the address the server really holds, once it listens.
-const listen = net.Server.prototype.listen;
+const listen = /** @type {Native} */ (net.Server.prototype.listen);
 // Round 104: the port the adapter ASKED for (0 or none: the system picks one) — a fixed port is a declared one
 const askedPort = args => {
   const first = args[0];
   const port = first && typeof first === "object" ? first.port : first;
   return Number(port) || 0;
 };
+/** @this {net.Server} */
 function recordListen(...args) {
   const hook = byHook();
   const asked = askedPort(args);
@@ -557,7 +631,8 @@ function recordListen(...args) {
 net.Server.prototype.listen = recordListen;
 
 // Incoming TCP: a counterpart that connects to a server of the adapter.
-const serverEmit = net.Server.prototype.emit;
+const serverEmit = /** @type {Native} */ (net.Server.prototype.emit);
+/** @this {net.Server} */
 function cutServerEmit(event, ...args) {
   // round 133: the black hole's own side of a hung call is no connection of the adapter — tracked, `*` silenced it as a
   // hang of the client's ephemeral port that never ended
@@ -580,11 +655,13 @@ function cutServerEmit(event, ...args) {
 net.Server.prototype.emit = cutServerEmit;
 
 // fetch: wrapped at the call, so a fixture hook that assigns globalThis.fetch is cut as well.
+/** @type {Native | undefined} */
 let current = globalThis.fetch;
 const cutFetch = (...args) => {
+  let n;
   try {
     const url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]));
-    count("http", url.hostname, Number(url.port) || (url.protocol === "https:" ? 443 : 80));
+    n = count("http", url.hostname, Number(url.port) || (url.protocol === "https:" ? 443 : 80));
   } catch {
     // not a URL fetch would accept either — it rejects on its own
   }
@@ -602,11 +679,16 @@ const cutFetch = (...args) => {
   // Round 104 (krobi 2026-10-03 11:38 "everything, cloud too"): a fetch a fixture hook answers opens no socket, so its
   // address is never seen — the record says whether the call could be bound at all: a `dispatcher` of its own (a global
   // one cannot be told from node's default Agent, measured round 104).
-  if (target !== undefined && !keep.has(targetPort)) {
+  if (target !== undefined && !keep.has(/** @type {number} */ (targetPort))) {
     record({ kind: "fetch", host: target, port: targetPort, bound: args[1]?.dispatcher !== undefined });
   }
   if (target !== undefined && hung(target, targetPort)) {
     const signal = args[1]?.signal ?? (args[0] instanceof Request ? args[0].signal : undefined);
+    // Round 157 (fleet-suite audit): a real fetch with a signal already aborted rejects at once — `abort` never fires
+    // again, and the hung call stood as "never ended" in D21
+    if (signal?.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+    }
     hangStart(target, targetPort);
     return new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => {
@@ -619,7 +701,7 @@ const cutFetch = (...args) => {
     return Promise.reject(new TypeError("fetch failed", { cause: refused() }));
   }
   const mode =
-    target !== undefined && !keep.has(targetPort) && !byHook()
+    target !== undefined && !keep.has(/** @type {number} */ (targetPort)) && !byHook()
       ? faultFor(
           requestKey(
             args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET"),
@@ -633,24 +715,26 @@ const cutFetch = (...args) => {
     if (mode !== "drift") {
       return Promise.resolve(
         new Response(mode === "empty" ? "" : null, { status: faultStatus(mode), headers: faultHeaders(mode) }),
-      );
+      ).then(response => handOver(n, response));
     }
-    return current(...args).then(async response => {
-      const headers = new Headers(response.headers);
-      headers.delete("content-length");
-      headers.delete("content-encoding");
-      return new Response(driftText(await response.text()), {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
-    });
+    return /** @type {Native} */ (current)(...args)
+      .then(async response => {
+        const headers = new Headers(response.headers);
+        headers.delete("content-length");
+        headers.delete("content-encoding");
+        return new Response(driftText(await response.text()), {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      })
+      .then(response => handOver(n, response));
   }
-  return current(...args).then(response => {
+  return /** @type {Native} */ (current)(...args).then(response => {
     if (target !== undefined) {
       answer("http", target, targetPort);
     }
-    return response;
+    return handOver(n, response);
   });
 };
 function getFetch() {
@@ -666,7 +750,8 @@ Object.defineProperty(globalThis, "fetch", {
 });
 
 // UDP: where each socket binds, which groups it joins on which interface, where its multicast leaves, where it sends.
-const bind = dgram.Socket.prototype.bind;
+const bind = /** @type {Native} */ (dgram.Socket.prototype.bind);
+/** @this {dgram.Socket} */
 function recordBind(...args) {
   const hook = byHook();
   const asked = askedPort(args);
@@ -678,12 +763,14 @@ function recordBind(...args) {
 }
 dgram.Socket.prototype.bind = recordBind;
 const addMembership = dgram.Socket.prototype.addMembership;
+/** @this {dgram.Socket} */
 function recordJoin(group, iface) {
   record({ kind: "join", id: idOf(this), group, iface });
   return addMembership.call(this, group, iface);
 }
 dgram.Socket.prototype.addMembership = recordJoin;
 const setMulticastInterface = dgram.Socket.prototype.setMulticastInterface;
+/** @this {dgram.Socket} */
 function recordEgress(iface) {
   record({ kind: "egress", id: idOf(this), iface });
   return setMulticastInterface.call(this, iface);
@@ -692,8 +779,8 @@ dgram.Socket.prototype.setMulticastInterface = recordEgress;
 // Section 8: the IPv4 literals of a payload that are an address of this machine, each recorded once per way.
 const ownAddresses = new Set(
   Object.values(require("node:os").networkInterfaces())
-    .flat()
-    .filter(i => i && (i.family === "IPv4" || i.family === 4))
+    .flatMap(list => list ?? [])
+    .filter(i => i.family === "IPv4")
     .map(i => i.address),
 );
 const advertised = new Set();
@@ -718,7 +805,8 @@ const noteAdvert = (via, chunk) => {
 };
 const sentTo = new Set();
 const hookSockets = new WeakMap();
-const send = dgram.Socket.prototype.send;
+const send = /** @type {Native} */ (dgram.Socket.prototype.send);
+/** @this {dgram.Socket} */
 function cutSend(...args) {
   // send(msg, port, address) or send(msg, offset, length, port, address), as node:dgram reads it — round 101: the first
   // number was taken for the port, so the offset form (govee's LAN client) counted `localhost:0` and never hung
@@ -755,9 +843,10 @@ function cutSend(...args) {
   }
 }
 dgram.Socket.prototype.send = cutSend;
-const emit = dgram.Socket.prototype.emit;
+const emit = /** @type {Native} */ (dgram.Socket.prototype.emit);
+/** @this {dgram.Socket} */
 function cutEmit(event, ...args) {
-  if (event === "message" && (down() || silent())) {
+  if (event === "message" && down()) {
     return false;
   }
   // Round 107: a counterpart that hangs sends nothing either — also one that began to hang while the adapter ran

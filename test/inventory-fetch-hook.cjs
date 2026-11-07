@@ -69,7 +69,7 @@ const bshError = (key, status) =>
 /**
  * The endless event stream: one KEEP-ALIVE, then quiet until the adapter aborts (a PAIRED once the reserved flag stands).
  *
- * @param {AbortSignal | undefined} signal the adapter's abort signal of the request
+ * @param {AbortSignal | null | undefined} signal the adapter's abort signal of the request (fetch's init allows null)
  * @returns {Response} the streaming answer
  */
 function eventStream(signal) {

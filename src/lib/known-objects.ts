@@ -52,6 +52,39 @@ export function mergedWith(stored: unknown, patch: unknown): unknown {
   return base;
 }
 
+/** The lists the adapter layer empties before the merge when the write names them — a list written there replaces. */
+const REPLACED_LISTS = [
+  ["native", "repositories"],
+  ["native", "certificates"],
+  ["native", "devices"],
+  ["common", "members"],
+] as const;
+
+/**
+ * What `extendObject(patch)` and `extendForeignObject(id, patch)` leave of the whole object `stored`: the adapter layer
+ * first empties a stored `native.repositories`, `native.certificates`, `native.devices` or `common.members` the patch
+ * names (js-controller 7.2.2 `adapter.ts`, both methods), then the database merges ({@link mergedWith}). `stored` is
+ * not changed.
+ *
+ * @param stored the whole object before the write
+ * @param patch what was written
+ * @returns the whole object after the write
+ */
+export function extendedWith(stored: unknown, patch: unknown): unknown {
+  if (!isPlain(stored) || !isPlain(patch)) {
+    return mergedWith(stored, patch);
+  }
+  let base = stored;
+  for (const [part, key] of REPLACED_LISTS) {
+    const named = patch[part];
+    const held = base[part];
+    if (isPlain(named) && key in named && isPlain(held) && held[key]) {
+      base = { ...base, [part]: { ...held, [key]: [] } };
+    }
+  }
+  return mergedWith(base, patch);
+}
+
 /**
  * Structural equality: plain objects key by key in any order, arrays element by element, values by `Object.is`.
  *
@@ -79,14 +112,14 @@ export function sameStructure(a: unknown, b: unknown): boolean {
 }
 
 /**
- * True when `extendObject(patch)` would change nothing of `stored` — merging the patch leaves the same structure.
+ * True when `extendObject(patch)` would change nothing of `stored` — the write leaves the same structure.
  *
  * @param patch what the adapter would write
- * @param stored the object as it is in the database (undefined when unknown)
+ * @param stored the whole object as it is in the database (undefined when unknown)
  * @returns whether the write can be left out
  */
 export function coveredBy(patch: unknown, stored: unknown): boolean {
-  return sameStructure(mergedWith(stored, patch), stored);
+  return sameStructure(extendedWith(stored, patch), stored);
 }
 
 /** Stamped by the adapter layer on every write (`from`, `user`, `ts`) — never the adapter's own content. */
@@ -291,6 +324,21 @@ export class KnownObjects {
   }
 
   /**
+   * The full ids of the known objects — after `load()` the whole own tree, so nobody reads it a second time.
+   *
+   * @param below relative or full id; when given, only the ids below it (without the id itself)
+   * @returns the full ids in the order they were read or first written
+   */
+  public ids(below?: string): string[] {
+    const all = [...this.objects.keys()];
+    if (below === undefined) {
+      return all;
+    }
+    const root = `${this.full(below)}.`;
+    return all.filter(id => id.startsWith(root));
+  }
+
+  /**
    * `extendObject`, left out when the stored object already carries the patch.
    *
    * @param id relative or full id
@@ -305,7 +353,7 @@ export class KnownObjects {
         return false;
       }
       await this.adapter.extendObject(id, patch);
-      this.objects.set(key, mergedWith(stored, patch));
+      this.objects.set(key, extendedWith(stored, patch));
       return true;
     });
   }

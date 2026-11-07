@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { Placeholders, leaked } from "./placeholders";
 
+// The CPU time this test process spent since `since`, in ms — a linear-time bound measures the work, not the wall clock:
+// under load (other processes, a busy runner) the clock stretches, and a 2 s wall-clock bound broke a needle run before
+// its first mutation (2026-10-28, load 41). The suite runs in forks (vitest.config.mts): the process is this file alone.
+function cpuMs(since: NodeJS.CpuUsage): number {
+  const used = process.cpuUsage(since);
+  return (used.user + used.system) / 1000;
+}
+
+// Measured 2026-10-28: 7–183 ms of CPU for the three tests, 17–129 s under each needle that makes the reading
+// quadratic — the bound sits more than four times away from both.
+const CPU_BOUND_MS = 4_000;
+
 describe("Placeholders", () => {
   it("gives the same value the same placeholder, in any case, and counts per kind", () => {
     const p = new Placeholders();
@@ -53,11 +65,11 @@ describe("Placeholders", () => {
     const text = `${"a".repeat(200_000)} ${":".repeat(200_000)}a ${"1.".repeat(100_000)}x ${"1:".repeat(100_000)}x`;
     // a percent-encoded gap holds letters (`%aa`): unbounded, it read on from every letter (round 99 security review)
     const gaps = `home${"%20.".repeat(100_000)}x home wifi${" ".repeat(200_000)}x a${"%aa".repeat(70_000)}`;
-    const started = Date.now();
+    const started = process.cpuUsage();
     p.text(text);
     p.text(gaps);
     leaked(gaps, ["Home WiFi 5", "10.0.0.1", "a b c d e f"]);
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(cpuMs(started)).toBeLessThan(CPU_BOUND_MS);
   });
 
   it("replaces a registered name as written or in its lower-case id form, longest first", () => {
@@ -206,9 +218,9 @@ describe("Placeholders.deep with keys that meet", () => {
       );
       keys[`Home${between.join("")}WiFi`] = i;
     }
-    const started = Date.now();
+    const started = process.cpuUsage();
     const out = p.deep(keys) as Record<string, number>;
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(cpuMs(started)).toBeLessThan(CPU_BOUND_MS);
     expect(Object.keys(out)).toHaveLength(20_000);
     expect(out["network-1#20000"]).toBe(19_999);
   });
@@ -305,9 +317,9 @@ describe("leaked", () => {
 
   it("reads a long report in linear time", () => {
     const report = `a${"%aa".repeat(70_000)} ${"a ".repeat(100_000)}${" ".repeat(200_000)}x 10${".".repeat(200_000)}x`;
-    const started = Date.now();
+    const started = process.cpuUsage();
     leaked(report, ["a b c d e f", "10.0.0.1", "Home WiFi 5"]);
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(cpuMs(started)).toBeLessThan(CPU_BOUND_MS);
   });
 
   it("names every real value that still stands in the report, judged on its own", () => {

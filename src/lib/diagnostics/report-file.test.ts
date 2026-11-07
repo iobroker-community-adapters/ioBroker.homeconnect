@@ -27,6 +27,8 @@ describe("reportFrame", () => {
       connected: false,
     });
     expect(frame.runtime.node).toBe(process.version);
+    // round 157 (master audit M15): the platform was unchecked
+    expect(frame.runtime.platform).toBe(`${process.platform} ${process.arch}`);
   });
 
   it("keeps the readMe to one short sentence pair", () => {

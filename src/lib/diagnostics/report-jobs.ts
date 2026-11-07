@@ -26,6 +26,9 @@ export const REPORT_COOLDOWN_MS = 2_000;
 /** How long a finished report waits for the card to fetch it. */
 export const REPORT_KEEP_MS = 10 * 60_000;
 
+/** The answer of every message and every report after `stop` (round 165). */
+const STOPPING = { error: "the adapter is stopping — no report" } as const;
+
 /** One device as the card lists it. */
 export interface ReportDevice {
   /** The device id. */
@@ -146,10 +149,10 @@ export interface ReportSource<L> {
 
 /** The adapter's report jobs: one per device at a time, held in memory until fetched. */
 export class ReportJobs<L> {
-  private readonly running = new Set<string>();
   private readonly finished = new Map<string, number>();
   private readonly jobs = new Map<string, { device: string; result?: Report | { error: string }; doneAt?: number }>();
   private jobCount = 0;
+  private stopped = false;
 
   /**
    * @param source the adapter's side
@@ -167,6 +170,9 @@ export class ReportJobs<L> {
    * @returns the answer for the card
    */
   public handle(payload: unknown): Promise<unknown> {
+    if (this.stopped) {
+      return Promise.resolve(STOPPING);
+    }
     const { action, device, job } = (typeof payload === "object" && payload !== null ? payload : {}) as {
       action?: unknown;
       device?: unknown;
@@ -208,18 +214,22 @@ export class ReportJobs<L> {
    * @returns the job, or why there is none
    */
   public start(deviceId: string): { job: string } | { error: string } {
+    if (this.stopped) {
+      return STOPPING;
+    }
     for (const [id, job] of this.jobs) {
       if (job.device === deviceId && !job.result) {
         return { job: id };
       }
     }
-    if (!this.source.devices().some(d => d.id === deviceId)) {
+    const device = this.source.devices().find(d => d.id === deviceId);
+    if (!device) {
       return { error: `unknown device '${deviceId}'` };
     }
     const id = `${deviceId}#${++this.jobCount}`;
     const job: { device: string; result?: Report | { error: string }; doneAt?: number } = { device: deviceId };
     this.jobs.set(id, job);
-    void this.make(deviceId).then(result => {
+    void this.make(device).then(result => {
       job.result = result;
       job.doneAt = this.now();
     });
@@ -244,6 +254,17 @@ export class ReportJobs<L> {
     return job.result;
   }
 
+  /**
+   * Stop for the adapter's `onUnload`, before its `callback`: every job is dropped, no message starts a new one, and a
+   * report still being made ends after the step it is in, without its file and without its log line. Round 165 (govee
+   * 2026-10-31, server log): four reports were finished through TERMINATE, and the host killed the process after
+   * stopTimeout; the same instance without a job stopped in 0.7 s.
+   */
+  public stop(): void {
+    this.stopped = true;
+    this.jobs.clear();
+  }
+
   /** Drop the finished reports nobody fetched within REPORT_KEEP_MS. */
   private dropUnfetched(): void {
     const now = this.now();
@@ -257,19 +278,17 @@ export class ReportJobs<L> {
   /**
    * Make one device's report: the live read only for a connected device, then the adapter's body inside the frame.
    *
-   * @param deviceId the device id
+   * Round 157 (master audit M7/M8): `start` hands over the device it found and never starts a second job for a device
+   * with an open one — the lookup and the "running" set here were branches no caller reached.
+   *
+   * @param device the device `start` found
    * @returns the report, or why there is none
    */
-  private async make(deviceId: string): Promise<Report | { error: string }> {
-    const device = this.source.devices().find(d => d.id === deviceId);
-    const now = this.now();
-    if (!device) {
-      return { error: `unknown device '${deviceId}'` };
-    }
-    if (this.running.has(deviceId) || now - (this.finished.get(deviceId) ?? -Infinity) < REPORT_COOLDOWN_MS) {
+  private async make(device: ReportSourceDevice): Promise<Report | { error: string }> {
+    const deviceId = device.id;
+    if (this.now() - (this.finished.get(deviceId) ?? -Infinity) < REPORT_COOLDOWN_MS) {
       return { error: "a report for this device is being made right now — try again in a moment" };
     }
-    this.running.add(deviceId);
     try {
       let live: L | undefined;
       let liveError: string | undefined;
@@ -280,7 +299,13 @@ export class ReportJobs<L> {
           liveError = errText(e);
         }
       }
+      if (this.stopped) {
+        return STOPPING;
+      }
       const body = await this.source.build(deviceId, live, liveError);
+      if (this.stopped) {
+        return STOPPING;
+      }
       const made = new Date(this.now());
       const frame: ReportFrame = reportFrame(this.source.adapter, this.source.version, made, device.connected);
       const liveRead: LiveRead = !device.connected
@@ -297,11 +322,13 @@ export class ReportJobs<L> {
       const head = { ...frame, liveRead };
       return { fileName, content: JSON.stringify(onceEach({ ...head, ...body.content, ...head }), null, 2) };
     } catch (e) {
+      if (this.stopped) {
+        return STOPPING;
+      }
       const reason = errText(e);
       this.source.log.warn(`${deviceId}: diagnostics report failed: ${reason}`);
       return { error: `report failed: ${reason}` };
     } finally {
-      this.running.delete(deviceId);
       this.finished.set(deviceId, this.now());
     }
   }

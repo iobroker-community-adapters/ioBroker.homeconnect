@@ -64,7 +64,7 @@ if (dir) {
         return original.apply(this, args);
       };
     }
-    return function unloadCallback(...rest) {
+    return /** @this {unknown} */ function unloadCallback(...rest) {
       if (!done) {
         done = Date.now();
         fs.appendFileSync(unloadLog, `${JSON.stringify({ t: done, kind: "callback" })}\n`);
@@ -178,7 +178,7 @@ if (dir) {
       }
     }
   }
-  const sendDatagram = dgram.Socket.prototype.send;
+  const sendDatagram = /** @type {(this: unknown, ...args: any[]) => any} */ (dgram.Socket.prototype.send);
   dgram.Socket.prototype.send = function (...args) {
     // send(msg, port, address) or send(msg, offset, length, port, address); an unbound socket binds and sends again
     const portAt = typeof args[1] === "number" && typeof args[2] === "number" ? 3 : 1;
@@ -203,11 +203,11 @@ if (dir) {
   };
   // a server or socket gets its handle in an internal nextTick — its owner is whoever calls listen/connect/bind
   const OWNER = Symbol("resourceProbeOwner");
-  for (const [proto, method] of [
+  for (const [proto, method] of /** @type {Array<[any, string]>} */ ([
     [net.Server.prototype, "listen"],
     [net.Socket.prototype, "connect"],
     [dgram.Socket.prototype, "bind"],
-  ]) {
+  ])) {
     const original = proto[method];
     proto[method] = function (...args) {
       if (!this[OWNER]) {
@@ -257,7 +257,8 @@ if (dir) {
   // not count. A bulk read
   // (getStatesAsync) is no single read.
   const singleReads = new Map();
-  const Module = require("node:module");
+  // `_load` is node's internal loader, not in its types
+  const Module = /** @type {any} */ (require("node:module"));
   const load = Module._load;
   const WRAPPED = Symbol("resourceProbeWrapped");
   const askedByAdapter = () => {
@@ -276,12 +277,12 @@ if (dir) {
     const cls = exported && typeof exported === "object" ? exported.AdapterClass : undefined;
     if (typeof cls === "function" && !cls.prototype[WRAPPED]) {
       cls.prototype[WRAPPED] = true;
-      for (const [method, foreign] of [
+      for (const [method, foreign] of /** @type {Array<[string, boolean]>} */ ([
         ["getState", false],
         ["getForeignState", true],
         ["setStateChanged", false],
         ["setForeignStateChanged", true],
-      ]) {
+      ])) {
         const original = cls.prototype[method];
         if (typeof original !== "function") {
           continue;
@@ -318,7 +319,7 @@ if (dir) {
         left.push(`${t.type} from ${t.owner}`);
       }
     }
-    for (const h of process._getActiveHandles()) {
+    for (const h of /** @type {any} */ (process)._getActiveHandles()) {
       if (h && h[OWNER] && !h.destroyed && mine(h[OWNER])) {
         left.push(`${h.constructor.name} from ${h[OWNER]}`);
       }

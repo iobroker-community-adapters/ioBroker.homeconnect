@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Round 157 (master audit M37): pure data, no page — jsdom cost every run of the file for nothing.
 import { describe, expect, it, vi } from "vitest";
 import { DIAGNOSTICS_TEXTS, registerDiagnosticsTexts } from "./diagnosticsTexts";
 

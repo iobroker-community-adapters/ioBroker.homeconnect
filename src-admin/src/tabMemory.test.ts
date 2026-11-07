@@ -15,8 +15,13 @@ describe("forgetLastTab", () => {
   });
 
   it("stands in for the admin before the page storage is used, and leaves it working", () => {
+    // round 157 (master audit M36): `not.toThrow` on a catch-all could never be red — the page's own entry stays when the
+    // admin's storage stands in
+    const pageStorage = window.localStorage;
+    pageStorage.setItem("App.demo", "_expert");
     page._localStorage = { getItem: () => null, removeItem: () => undefined };
-    expect(() => forgetLastTab("demo.0", TABS)).not.toThrow();
+    forgetLastTab("demo.0", TABS);
+    expect(pageStorage.getItem("App.demo")).toBe("_expert");
   });
 
   it("removes this adapter's remembered tab, and nothing else", () => {

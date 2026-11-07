@@ -32,6 +32,17 @@ export default [
     },
   },
   {
+    // JavaScript carries its types in JSDoc, and test/tsconfig.json type-checks the test hooks (round 154). The base
+    // applies the TypeScript preset to every file, whose `check-tag-names` (typed) calls @type/@typedef/@property
+    // redundant; for JavaScript the rule takes the form of the plugin's own preset for JS with TypeScript types
+    // (`flat/recommended-typescript-flavor`). The base already lifts `jsdoc/no-types` for these files. The option is
+    // spelled out: a bare severity keeps the options an earlier config gave the rule (flat config).
+    files: ["**/*.js", "**/*.cjs", "**/*.mjs"],
+    rules: {
+      "jsdoc/check-tag-names": ["warn", { typed: false }],
+    },
+  },
+  {
     ignores: [
       // Session files of the note-taking hook: its cooldown marker tmp/last-ndc.ts is a timestamp, not TypeScript.
       ".remember/**",

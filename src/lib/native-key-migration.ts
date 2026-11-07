@@ -29,7 +29,8 @@
  * Fleet master: `Entwicklung/.consistency-master/src/lib/native-key-migration.ts`. Every adapter
  * that migrates native keys carries this file and its test byte for byte — the release run
  * (consistency level 1) reports any difference. Change the master, then copy; never the copy.
- * The file imports nothing adapter-specific: the caller hands in its own error-text helper.
+ * The file imports nothing adapter-specific: the caller hands in its own error-text helper, and the merge of
+ * `extendForeignObject` comes from the fleet master `known-objects.ts`, which every adapter carries.
  *
  * `common` keys too (since 2026-09-25): js-controller MERGES the manifest's `common` into the instance object on every
  * update and never removes a key (v7.2.2 `setupUpload.ts` `extendCommon`, only `visWidgets`/`localLinks` are deleted
@@ -41,6 +42,8 @@
  * Order within one call: every rename is applied before any drop, in one write — a takeover of a dropped key belongs
  * in the same table as `{ from, to }`; a takeover in the adapter's own code must run before this call.
  */
+
+import { coveredBy } from "./known-objects";
 
 /** Rename: the old value wins over the freshly added default; the old key is nulled. */
 export interface NativeKeyRename {
@@ -56,7 +59,10 @@ export interface NativeKeyRename {
 export interface NativeKeyCoercion {
   /** The key whose value type changed. */
   key: string;
-  /** Returns the value in its new form; an unchanged result writes nothing. */
+  /**
+   * Returns the value in its new form; a result the merge would not change writes nothing. An object is merged into
+   * the stored one key by key (a list under `devices` replaces it), so a nested key the result leaves out stays.
+   */
   coerce: (value: unknown) => unknown;
 }
 
@@ -151,7 +157,8 @@ const isStorable = (v: unknown): boolean => v !== undefined && !(typeof v === "n
  * Renames targeting the same key are evaluated together, in order: the first source whose
  * value is meaningful wins; when none is, the first present one (its coercion may still turn
  * an empty legacy value into a sensible one). Every present source is nulled. A coercion
- * writes only when the coerced value differs from the stored one. A drop nulls its key when it
+ * writes only when the merge of the coerced value would change the stored one — so an object
+ * built anew on every start settles after one write. A drop nulls its key when it
  * still holds a value — an absent or already nulled key writes nothing.
  *
  * @param native the instance's current native settings
@@ -201,7 +208,7 @@ export function buildNativeKeyPatch(
       continue;
     }
     const coerced = m.coerce(native[m.key]);
-    if (isStorable(coerced) && !Object.is(coerced, native[m.key])) {
+    if (isStorable(coerced) && !coveredBy({ native: { [m.key]: coerced } }, { native })) {
       patch[m.key] = coerced;
     }
   }

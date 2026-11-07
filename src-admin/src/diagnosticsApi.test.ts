@@ -1,3 +1,5 @@
+// @vitest-environment node
+// Round 157 (master audit M37): pure logic, no page — jsdom cost every run of the file for nothing.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DeviceListError,
@@ -17,10 +19,16 @@ function silentInstance(alive?: boolean): {
   socket: DiagnosticsSocket;
   setAlive(val: boolean): void;
   watchers: Set<StateHandler>;
+  delivered: Promise<void>;
 } {
   const watchers = new Set<StateHandler>();
+  // round 157 (master audit M31): the moment the first value reached the card — a test waits for it, never for a count
+  // of microtasks the implementation happens to take
+  let deliver: () => void = () => undefined;
+  const delivered = new Promise<void>(resolve => (deliver = resolve));
   return {
     watchers,
+    delivered,
     setAlive: val => watchers.forEach(handler => handler("system.adapter.demo.0.alive", { val })),
     socket: {
       sendTo: () => new Promise(() => {}),
@@ -28,7 +36,12 @@ function silentInstance(alive?: boolean): {
         expect(id).toBe("system.adapter.demo.0.alive");
         watchers.add(handler);
         // Like the admin connection: the current value first, after a round trip.
-        return alive === undefined ? undefined : Promise.resolve().then(() => handler(id, { val: alive }));
+        return alive === undefined
+          ? undefined
+          : Promise.resolve().then(() => {
+              handler(id, { val: alive });
+              deliver();
+            });
       },
       unsubscribeState: (_id, handler) => {
         watchers.delete(handler!);
@@ -139,10 +152,9 @@ describe("askInstance (through the API)", () => {
   });
 
   it("ends a report's wait when the instance stops (or restarts) in the middle of it", async () => {
-    const { socket, setAlive, watchers } = silentInstance(true);
+    const { socket, setAlive, watchers, delivered } = silentInstance(true);
     const report = makeDiagnosticsApi(socket, "demo.0").exportReport("lamp-2b3c");
-    await Promise.resolve();
-    await Promise.resolve();
+    await delivered;
     setAlive(false);
     await expect(report).rejects.toMatchObject({ reason: "stopped" });
     expect(watchers.size).toBe(0);
@@ -210,10 +222,8 @@ describe("the admin's 30-second rule", () => {
   function adminConnection(reportMs: number): DiagnosticsSocket {
     let readyAt = Number.POSITIVE_INFINITY;
     const report = { fileName: "demo_lamp.json", content: "{}" };
+    // round 157 (master audit M33): the card never sends `export` — that branch of the stand-in was dead
     const instance = (data: { action: string }): Promise<unknown> => {
-      if (data.action === "export") {
-        return new Promise(resolve => setTimeout(() => resolve(report), reportMs));
-      }
       if (data.action === "start") {
         readyAt = Date.now() + reportMs;
         return Promise.resolve({ job: "j" });
@@ -243,7 +253,6 @@ describe("the admin's 30-second rule", () => {
   });
 
   it("says that the connection gave up, never that the report failed", async () => {
-    vi.useFakeTimers();
     const socket: DiagnosticsSocket = { sendTo: () => Promise.resolve("timeout") };
     const list = makeDiagnosticsApi(socket, "demo.0").listDevices();
     await expect(list).rejects.toMatchObject({ reason: "noAnswer" });

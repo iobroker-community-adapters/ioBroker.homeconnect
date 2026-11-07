@@ -1,3 +1,4 @@
+import { extendedWith } from "./known-objects";
 import {
   buildCommonKeyPatch,
   buildNativeKeyPatch,
@@ -22,7 +23,8 @@ interface FakeAdapter {
 }
 
 /**
- * A fake adapter whose object store applies every merge, so a second run sees the first.
+ * A fake adapter whose object store applies every merge as js-controller does (`extendedWith`: deep, the lists the
+ * adapter layer empties replaced), so a second run sees the first.
  *
  * @param native the instance's native settings (undefined = no instance object)
  * @param opts failure switches for the read and the write, and the instance's common part
@@ -57,11 +59,8 @@ function fakeAdapter(
         if (opts.writeFails) {
           return Promise.reject(new Error("write refused"));
         }
-        if (store && obj.native) {
-          store.native = { ...store.native, ...obj.native };
-        }
-        if (store && obj.common) {
-          store.common = { ...store.common, ...obj.common };
+        if (store) {
+          Object.assign(store, extendedWith(store, obj));
         }
         return Promise.resolve({});
       },
@@ -214,7 +213,23 @@ describe("buildCommonKeyPatch", () => {
     const table: NativeKeyMigration[] = KEPT_COMMON_KEYS.map(k => ({ commonDrop: k }));
     const common = Object.fromEntries(KEPT_COMMON_KEYS.map(k => [k, "user value"]));
     expect(buildCommonKeyPatch(common, table)).toEqual({});
-    expect(KEPT_COMMON_KEYS).toEqual(expect.arrayContaining(["title", "enabled", "custom", "supportedMessages"]));
+    // round 157 (master audit M24): the list itself from its source — the table above is built from it, so a key struck
+    // from the list stayed green. `preserveAttributes` of js-controller (7.2.5, lib/setup/setupUpload.js, measured
+    // 2026-10-28 in the throwaway controller), the keys the controller maintains itself, and `supportedMessages`
+    expect(KEPT_COMMON_KEYS).toEqual([
+      "title",
+      "schedule",
+      "restartSchedule",
+      "mode",
+      "loglevel",
+      "enabled",
+      "custom",
+      "tier",
+      "visWidgets",
+      "localLinks",
+      "compact",
+      "supportedMessages",
+    ]);
   });
 
   it("takes a key literally, even one with a trailing space", () => {
@@ -323,6 +338,36 @@ describe("migrateNativeKeys", () => {
     const { adapter } = fakeAdapter({ pollInterval: 30, bind: "0.0.0.0" }, { writeFails: true });
     await expect(migrateNativeKeys(adapter, DROP_OLD, errText)).resolves.toBe(false);
     expect(adapter.log.warn.mock.calls[0][0]).toContain("ignoring pollInterval for this run");
+  });
+
+  it("keeps a nested key the coerced object leaves out — the controller merges an object key by key", async () => {
+    const table: NativeKeyMigration[] = [{ key: "options", coerce: () => ({ mode: "auto" }) }];
+    const { adapter, store } = fakeAdapter({ options: { mode: "manual", level: 3 } });
+    await expect(migrateNativeKeys(adapter, table, errText)).resolves.toBe(true);
+    expect(adapter.extendForeignObjectAsync).toHaveBeenCalledWith("system.adapter.adapter.0", {
+      native: { options: { mode: "auto" } },
+    });
+    expect(store?.native).toEqual({ options: { mode: "auto", level: 3 } });
+  });
+
+  it("writes an object only when the merge would change what is stored, so it settles after one write", async () => {
+    // a fresh object on every call, as a coercion builds it — the same structure is no change and no second restart
+    const table: NativeKeyMigration[] = [{ key: "options", coerce: () => ({ mode: "auto" }) }];
+    const { adapter } = fakeAdapter({ options: { mode: "manual", level: 3 } });
+    await expect(migrateNativeKeys(adapter, table, errText)).resolves.toBe(true);
+    await expect(migrateNativeKeys(adapter, table, errText)).resolves.toBe(false);
+    expect(adapter.extendForeignObjectAsync).toHaveBeenCalledTimes(1);
+    expect(adapter.log.info).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a stored device table with a shorter one, as the controller empties `native.devices` first", async () => {
+    const rows = [{ ip: "192.0.2.1" }];
+    const table: NativeKeyMigration[] = [{ key: "devices", coerce: () => structuredClone(rows) }];
+    const { adapter, store } = fakeAdapter({ devices: [{ ip: "192.0.2.1", zone: "main" }, { ip: "192.0.2.9" }] });
+    await expect(migrateNativeKeys(adapter, table, errText)).resolves.toBe(true);
+    expect(store?.native).toEqual({ devices: [{ ip: "192.0.2.1" }] });
+    await expect(migrateNativeKeys(adapter, table, errText)).resolves.toBe(false);
+    expect(adapter.extendForeignObjectAsync).toHaveBeenCalledTimes(1);
   });
 
   it("patches the in-memory config and continues when the write fails", async () => {
