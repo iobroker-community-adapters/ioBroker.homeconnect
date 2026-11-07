@@ -79,11 +79,6 @@ const LONGEST_PACED_SECONDS = Math.max(...PACED_SECONDS);
  */
 const DAILY_HOLD_AFTER_MS = MINUTE_SECONDS * 1000;
 /**
- * At most this long after a request ends its place reaches the request file — a kill, a crash or a power cut skips
- * onUnload, and the day's places must still reach the next process.
- */
-const HAND_OVER_EVERY_MS = MINUTE_SECONDS * 1000;
-/**
  * The windows with their strictest declared limit, read where a place is handed out (the inventory run's pacing hook
  * widens the declaration as the adapter loads it).
  *
@@ -248,8 +243,6 @@ class Homeconnect extends utils.Adapter {
   private readonly budget = new RequestBudget(LONGEST_PACED_SECONDS);
   /** Where the places of the last day outlive a restart (request-budget.ts); empty until onReady knows it. */
   private budgetFile = "";
-  /** The hand-over that follows a request's end within {@link HAND_OVER_EVERY_MS}, while one is due. */
-  private handOverTimer: ioBroker.Timeout | undefined;
   /** When the day's next place frees, as the latest hold measured it (see {@link noteDailyHold}). */
   private dailyHoldUntil = 0;
   /** Whether the day's quota is spent — from its first hold until the day has a minute's requests free again. */
@@ -1607,8 +1600,7 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * The request of a place is over: the place now frees on its own, so the queue looks again. During the stop the
-   * next process gets the place anew, counted from this answer; while the adapter runs it reaches the request file
-   * within {@link HAND_OVER_EVERY_MS}, so a kill or a crash costs the next process at most that much of the day.
+   * next process gets the place anew, counted from this answer.
    *
    * @param place the request's place
    * @param answeredAt when Home Connect answered, undefined when no answer came
@@ -1617,11 +1609,6 @@ class Homeconnect extends utils.Adapter {
     this.budget.settle(place, answeredAt);
     if (this.terminating) {
       this.handOverRequestBudget();
-    } else if (this.budgetFile && this.handOverTimer === undefined) {
-      this.handOverTimer = this.setTimeout(() => {
-        this.handOverTimer = undefined;
-        this.handOverRequestBudget();
-      }, HAND_OVER_EVERY_MS);
     }
     void this.pumpSlots();
   }
@@ -1940,10 +1927,6 @@ class Homeconnect extends utils.Adapter {
       // every request that ends after this (`settlePlace`) and once more right before the callback.
       this.refuseWaiting();
       this.releasePauseWaits();
-      if (this.handOverTimer !== undefined) {
-        this.clearTimeout(this.handOverTimer);
-        this.handOverTimer = undefined;
-      }
       this.handOverRequestBudget();
       // A report still being made ends after its current step, and no message starts a new one (round 165).
       this.diagnostics.stop();

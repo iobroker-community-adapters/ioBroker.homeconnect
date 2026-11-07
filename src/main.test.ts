@@ -1817,7 +1817,7 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(done).toBe(true);
     });
 
-    it("hands the day's places to the request file while it runs, so a kill or a crash keeps them", async () => {
+    it("writes the request file at the stop only, never while it runs — a diagnostics report writes no file", async () => {
       const { existsSync, readFileSync } = await import("node:fs");
       const ctx = setup();
       await ctx.i.onReady();
@@ -1826,8 +1826,12 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       await vi.advanceTimersByTimeAsync(100);
       await read;
       const file = join(dataFolder.path, "request-times.json");
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(existsSync(file)).toBe(false);
-      await vi.advanceTimersByTimeAsync(60_000);
+      let done = false;
+      ctx.i.onUnload(() => (done = true));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(true);
       const kept = JSON.parse(readFileSync(file, "utf8")) as { heldFrom: number[] };
       expect(kept.heldFrom).toEqual([calls[0].answered]);
     });
