@@ -442,7 +442,7 @@ Das laufende Programm, die Türen und die Gesamtzähler haben jetzt eigene Kanä
 
 ## Anfragegrenzen
 
-Home Connect gewährt 1000 Anfragen pro Tag je Anwendung und Konto, höchstens 50 pro Minute, und sperrt für zehn Minuten nach zehn fehlgeschlagenen Anfragen in Folge. Der Adapter ist darauf gebaut: ein dauerhafter Ereignisstrom statt Abfragen im Takt, dauerhaft gemerkte Programmdefinitionen, höchstens 50 Anfragen pro Minute (der erste Start nach einem Update oder mit einem neuen Gerät liest deshalb einige Minuten), deine Befehle vor wartenden Leseanfragen, und eine selbsttätige Pause nach einer Grenz-Antwort — das Log nennt die Grenze und wie lange Home Connect sperrt. Einzustellen ist nichts — aber eine zweite eigene Anwendung mit denselben Zugangsdaten teilt sich dasselbe Kontingent.
+Home Connect gewährt 1000 Anfragen pro Tag je Anwendung und Konto, höchstens 50 pro Minute, und sperrt für zehn Minuten nach zehn fehlgeschlagenen Anfragen in Folge. Der Adapter ist darauf gebaut: ein dauerhafter Ereignisstrom statt Abfragen im Takt, dauerhaft gemerkte Programmdefinitionen, höchstens 50 Anfragen pro Minute (der erste Start nach einem Update oder mit einem neuen Gerät liest deshalb einige Minuten) und höchstens 1000 in 24 Stunden, auch über einen Neustart hinweg (sind sie verbraucht, pausiert der Adapter, bis die älteste einen Tag alt ist — Befehle in dieser Zeit verwirft er, statt sie Stunden später zu senden, und das Log sagt einmal, wie lange), deine Befehle vor wartenden Leseanfragen, und eine selbsttätige Pause nach einer Grenz-Antwort — das Log nennt die Grenze und wie lange Home Connect sperrt. Einzustellen ist nichts — aber eine zweite eigene Anwendung mit denselben Zugangsdaten teilt sich dasselbe Kontingent.
 
 ## Fehlersuche
 

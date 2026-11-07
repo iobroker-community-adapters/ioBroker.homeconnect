@@ -311,7 +311,7 @@ export function rateLimitText(description?: string, retryMs?: number): string {
  * @param seconds the duration in seconds
  * @returns e.g. `54 s`, `9 min`, `5 h 5 min`
  */
-function spokenDuration(seconds: number): string {
+export function spokenDuration(seconds: number): string {
   if (seconds < 120) {
     return `${seconds} s`;
   }

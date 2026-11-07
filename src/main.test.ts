@@ -189,10 +189,10 @@ const httpMock = vi.hoisted(() => ({
   postForm: vi.fn(),
 }));
 // The transport is faked; the wording of a 429 is the real one.
-vi.mock("./lib/http", async importOriginal => ({
-  ...httpMock,
-  rateLimitText: (await importOriginal<{ rateLimitText: typeof rateLimitText }>()).rateLimitText,
-}));
+vi.mock("./lib/http", async importOriginal => {
+  const actual = await importOriginal<{ rateLimitText: typeof rateLimitText; spokenDuration: typeof spokenDuration }>();
+  return { ...httpMock, rateLimitText: actual.rateLimitText, spokenDuration: actual.spokenDuration };
+});
 
 // The declared limits as the adapter loaded them; `widen` plays the inventory run's pacing hook, which multiplies every
 // `max` by 1000 while the adapter process loads src/lib/api-limits.json.
@@ -206,7 +206,7 @@ vi.mock("./lib/api-limits", async importOriginal => {
 });
 
 import * as mainModule from "./main";
-import type { JsonResult, rateLimitText } from "./lib/http";
+import type { JsonResult, rateLimitText, spokenDuration } from "./lib/http";
 import type { WriteRequest } from "./lib/command-dispatch";
 import type * as ApiLimits from "./lib/api-limits";
 
@@ -1653,6 +1653,160 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       await next;
       // still on their way when the stop reported done, they fill the second after that moment
       expect(sentAt).toEqual([doneAt + 1_000]);
+    });
+  });
+
+  describe("the day's 1000 (krobi 2026-10-07 10:14: the limits are defined in the adapter and kept)", () => {
+    const DAY = 86_400_000;
+    beforeEach(async () => {
+      const { mkdtempSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      dataFolder.path = mkdtempSync(join(tmpdir(), "hc-main-day-"));
+    });
+    afterEach(async () => {
+      const { rmSync } = await import("node:fs");
+      rmSync(dataFolder.path, { recursive: true, force: true });
+      dataFolder.path = "";
+    });
+
+    /**
+     * Leave places of the last day in the data folder, as a previous process hands them over: the oldest is a day old
+     * `freesInMs` from now, the others spread up to an hour ago — none of them in the last minute.
+     *
+     * @param count the places
+     * @param freesInMs when the oldest place is a day old
+     */
+    const seedDay = async (count: number, freesInMs: number): Promise<void> => {
+      const { writeFileSync } = await import("node:fs");
+      const oldest = NOW - DAY + freesInMs;
+      const step = Math.floor((NOW - 3_600_000 - oldest) / (count - 1));
+      const heldFrom = Array.from({ length: count }, (_, k) => oldest + k * step);
+      writeFileSync(join(dataFolder.path, "request-times.json"), JSON.stringify({ heldFrom }));
+    };
+
+    /**
+     * The adapter's lines about the day's quota.
+     *
+     * @param ctx the adapter under test
+     * @returns the warnings that name the day's limit
+     */
+    const dayWarnings = (ctx: Ctx): string[] =>
+      ctx.i.log.warn.mock.calls.map(([m]) => String(m)).filter(m => m.includes("calls in 1 day"));
+
+    it("takes over the places of the last day at a restart and sends nothing until the oldest is a day old", async () => {
+      await seedDay(1000, 120_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      httpMock.getJson.mockClear();
+      await expect(ctx.i.apiGet("/api/a")).resolves.toBeUndefined();
+      expect(httpMock.getJson).not.toHaveBeenCalled();
+      expect(dayWarnings(ctx)).toEqual([
+        "The adapter holds its requests to Home Connect for 2 min (limit: 1000 calls in 1 day) — they all went out within the last 24 hours.",
+      ]);
+      // a user's write in the hold is dropped where the user sees it, never sent later
+      await expect(ctx.i.apiWrite({ method: "PUT", path: "/api/p", body: { key: "k" } })).resolves.toBeUndefined();
+      vi.setSystemTime(NOW + 120_000 - 1);
+      await expect(ctx.i.apiGet("/api/b")).resolves.toBeUndefined();
+      expect(httpMock.getJson).not.toHaveBeenCalled();
+      vi.setSystemTime(NOW + 120_000);
+      const next = ctx.i.apiGet("/api/c");
+      await vi.advanceTimersByTimeAsync(0);
+      await next;
+      expect(httpMock.getJson).toHaveBeenCalledTimes(1);
+      expect(httpMock.putJson).not.toHaveBeenCalled();
+      // one line for the one hold
+      expect(dayWarnings(ctx)).toHaveLength(1);
+    });
+
+    it("drops a write that waits when the day fills, instead of sending it when a place frees later", async () => {
+      await seedDay(990, 120_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      const { calls, answer } = answerByHand();
+      const reads = Array.from({ length: 10 }, (_, n) => ctx.i.apiGet(`/api/r${n}`));
+      await vi.advanceTimersByTimeAsync(5_000);
+      // ten reads on their way fill the second and, with the 990 of the last day, the day
+      expect(calls).toHaveLength(10);
+      const write = ctx.i.apiWrite({ method: "PUT", path: "/api/p", body: { key: "k" } });
+      await vi.advanceTimersByTimeAsync(0);
+      answer[0]({ ...okResult(), answeredAt: Date.now() });
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(write).resolves.toBeUndefined();
+      expect(dayWarnings(ctx)).toHaveLength(1);
+      for (const give of answer) {
+        give(okResult());
+      }
+      await Promise.all(reads);
+      // the hold ends when the oldest place is a day old — the dropped write still never goes out
+      await vi.advanceTimersByTimeAsync(130_000);
+      expect(httpMock.putJson).not.toHaveBeenCalled();
+    });
+
+    it("hands the next process every place of the last day, not only the last minute's", async () => {
+      const { readFileSync } = await import("node:fs");
+      const ctx = setup();
+      await ctx.i.onReady();
+      const calls = answerAfter(() => 20);
+      const read = ctx.i.apiGet("/api/a");
+      await vi.advanceTimersByTimeAsync(100);
+      await read;
+      expect(calls).toHaveLength(1);
+      // the instance runs two more hours, then stops
+      vi.setSystemTime(Date.now() + 2 * 3_600_000);
+      await new Promise<void>(resolve => ctx.i.onUnload(resolve));
+      const kept = JSON.parse(readFileSync(join(dataFolder.path, "request-times.json"), "utf8")) as {
+        heldFrom: number[];
+      };
+      expect(kept.heldFrom).toContain(calls[0].answered);
+    });
+
+    it("waits for a place of the day that frees within the minute instead of dropping the write", async () => {
+      await seedDay(1000, 5_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      const write = ctx.i.apiWrite({ method: "PUT", path: "/api/p", body: { key: "k" } });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(httpMock.putJson).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(1);
+      await expect(write).resolves.toMatchObject({ ok: true });
+      expect(dayWarnings(ctx)).toEqual([]);
+    });
+
+    it("lets the event stream's connect wait for the end of the hold instead of asking again every few seconds", async () => {
+      await seedDay(1000, 120_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      await ctx.auths[0].port.onSignedIn();
+      const takeSlot = ctx.streams[0].deps.takeSlot as () => Promise<unknown>;
+      let got: unknown = "pending";
+      void takeSlot().then(place => (got = place));
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(got).toBe("pending");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(got).toMatchObject({ sent: expect.any(Function) });
+    });
+
+    it("tells the connection test that requests pause, not that the adapter shuts down, when the day holds them", async () => {
+      await seedDay(1000, 120_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      await (ctx.auths[0].port.setConnected as (c: boolean) => Promise<void>)(true);
+      await ctx.auths[0].port.onSignedIn();
+      httpMock.getJson.mockClear();
+      const answer = await ctx.i.checkConnection();
+      expect(httpMock.getJson).not.toHaveBeenCalled();
+      expect(answer).toEqual({
+        error: "Home Connect requests are paused after a rate limit for another 120 s — try again later.",
+      });
+    });
+
+    it("reports the requests of the last minute and of the last day apart", async () => {
+      await seedDay(1000, 120_000);
+      const ctx = setup();
+      await ctx.i.onReady();
+      const host = (ctx.i as unknown as { reportHost(): { adapterState(): Record<string, unknown> } }).reportHost();
+      expect(host.adapterState()).toMatchObject({ requestsLastMinute: 0, requestsLastDay: 1000 });
     });
   });
 });
@@ -3633,7 +3787,8 @@ describe("Homeconnect diagnostics report", () => {
     expect(host().liveReadBlocked()).toMatch(/8 error answers in a row/);
     (ctx.i as unknown as { errorStreak: number }).errorStreak = 0;
     ctx.i.restBlockedUntil = Date.now() + 40_000;
-    expect(host().liveReadBlocked()).toMatch(/blocks requests for another 4\d s/);
+    // the adapter's own hold of the day's quota is a pause too, not only Home Connect's block
+    expect(host().liveReadBlocked()).toMatch(/requests to Home Connect are paused for another 4\d s/);
     ctx.i.restBlockedUntil = 0;
     ctx.auths[0].accessToken = undefined;
     expect(host().liveReadBlocked()).toBe("not signed in to Home Connect");
