@@ -23,12 +23,91 @@
           "seconds": 60,
           "per": "account",
           "source": "https://api-docs.home-connect.com/general/#rate-limiting (50 requests per client and user account per minute)"
-        },
+        }
+      ]
+    },
+    {
+      "name": "Home Connect REST API",
+      "match": {
+        "host": "api.home-connect.com",
+        "pathPattern": "^/api/.*$"
+      },
+      "limits": [
         {
           "max": 1000,
           "seconds": 86400,
           "per": "account",
-          "source": "https://api-docs.home-connect.com/general/#rate-limiting (1000 requests per client and user account per day)"
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (1000 requests per client and user account per day; every HTTPS request to the REST API counts toward the daily limit)"
+        }
+      ]
+    },
+    {
+      "name": "Home Connect token refresh",
+      "match": {
+        "host": "api.home-connect.com",
+        "method": "POST",
+        "pathPattern": "^/security/oauth/token$",
+        "bodyPattern": "(?:^|&)grant_type=refresh_token(?:&|$)"
+      },
+      "limits": [
+        {
+          "max": 10,
+          "seconds": 60,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 token refresh per minute)"
+        },
+        {
+          "max": 100,
+          "seconds": 86400,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (100 token refresh per day)"
+        }
+      ]
+    },
+    {
+      "name": "Home Connect program starts",
+      "match": {
+        "host": "api.home-connect.com",
+        "method": "PUT",
+        "pathPattern": "^/api/homeappliances/[^/]+/programs/active$"
+      },
+      "limits": [
+        {
+          "max": 5,
+          "seconds": 60,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (5 program starts per client and user account per minute)"
+        }
+      ]
+    },
+    {
+      "name": "Home Connect program stops",
+      "match": {
+        "host": "api.home-connect.com",
+        "method": "DELETE",
+        "pathPattern": "^/api/homeappliances/[^/]+/programs/active$"
+      },
+      "limits": [
+        {
+          "max": 5,
+          "seconds": 60,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (5 program stops per client and user account per minute)"
+        }
+      ]
+    },
+    {
+      "name": "Home Connect event monitoring channels",
+      "match": {
+        "host": "api.home-connect.com",
+        "pathPattern": "^/api/homeappliances(?:/[^/]+)?/events$"
+      },
+      "limits": [
+        {
+          "max": 10,
+          "concurrent": true,
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 event monitoring channels per client and Home Connect user account at any time)"
         }
       ]
     }

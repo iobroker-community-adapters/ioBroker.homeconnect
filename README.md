@@ -133,7 +133,8 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: live updates start right after the appliance list, so no event is lost while the appliances are read
 - (krobipd) Fixed: an appliance that connects, disconnects or is removed while the appliances are being read is read and shown by that newer state
 - (krobipd) Fixed: a request now holds its place in the Home Connect quota until a minute after its answer, so the 51st request of a minute no longer draws a 429
-- (krobipd) Fixed: the 1000 requests Home Connect allows per day are now kept, across a restart too; once spent, commands are dropped instead of sent hours later and reads wait
+- (krobipd) Fixed: the 1000 requests Home Connect allows per day are now kept, across a restart, a crash and a power cut too; once spent, commands are dropped instead of sent hours later and reads wait
+- (krobipd) Fixed: program starts and stops stay within the 5 per minute Home Connect allows each, and token refreshes within 10 per minute and 100 per day; the log says once which limit holds a request and for how long
 - (krobipd) Fixed: a sign-in that cannot reach Home Connect no longer tells you to check the Client ID
 
 <!--

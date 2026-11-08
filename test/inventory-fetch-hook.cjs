@@ -9,8 +9,8 @@ const path = require("node:path");
 
 const BASE = "https://api.home-connect.com";
 const DIR = path.join(__dirname, "fixtures", "inventory");
-// Round 123 (LIMIT_ACCOUNT in test/inventory.js): an installation the limit tests judge gets a smaller account — at
-// Home Connect's own 50 per minute the full one needs over a thousand requests, more than a day allows.
+// Round 123 (INVENTORY_COUNTED, set by adapterEnv in test/inventory.js): an installation the limit tests judge gets a
+// smaller account — at Home Connect's own 50 per minute the full one needs over a thousand requests, more than a day allows.
 const LIMIT_ACCOUNT = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "limit-account.json"), "utf8"));
 const TYPES = fs
   .readdirSync(DIR)

@@ -115,17 +115,90 @@ EventEmitter.prototype.emit = causeEmit;
 let nested = 0;
 // each counted call carries its number `n` in its process — section 9 pairs an answer with it
 let counted = 0;
-const count = (kind, host, port, hook = byHook()) => {
+// Round 171: an HTTP call carries its method and its path without the query (`match.method`, `match.pathPattern` — an
+// upstream that limits one endpoint, Home Connect's 5 program starts a minute, is declared as its own counterpart).
+/**
+ * @param {string} kind
+ * @param {unknown} host
+ * @param {unknown} port
+ * @param {boolean} [hook] byHook()
+ * @param {{ method: string, path: string }} [request] requestOf()
+ */
+const count = (kind, host, port, hook = byHook(), request = undefined) => {
   if (nested > 0 || keep.has(Number(port)) || hook) {
     return undefined;
   }
   const cause = command.getStore();
   const n = ++counted;
-  fs.appendFileSync(
-    calls,
-    `${JSON.stringify(cause === undefined ? { t: Date.now(), kind, host, port, n } : { t: Date.now(), kind, host, port, cause, n })}\n`,
-  );
+  const line = { t: Date.now(), kind, host, port, ...request, ...(cause === undefined ? {} : { cause }), n };
+  fs.appendFileSync(calls, `${JSON.stringify(line)}\n`);
   return n;
+};
+const requestOf = (method, pathname) => ({
+  method: String(method ?? "GET").toUpperCase(),
+  path: String(pathname ?? "/").split("?")[0] || "/",
+});
+// 10. It notes the first 1024 characters of each HTTP call's body (`{ n, body }` in RESOURCE_PROBE_DIR/<pid>.bodies —
+//     `match.bodyPattern`, Govee names the device of a call in its body) and when each call ended (`{ t, n }` in
+//     <pid>.closed: the response read to its end, cancelled or failed — a limit on calls open at the same time, Home
+//     Connect's 10 event channels, counts from the send to that end; round 171).
+const bodies = path.join(dir, `${process.pid}.bodies`);
+const closedLog = path.join(dir, `${process.pid}.closed`);
+const noteBody = (n, body) => {
+  if (n === undefined || body === undefined || body === null) {
+    return;
+  }
+  const text =
+    typeof body === "string"
+      ? body
+      : Buffer.isBuffer(body) || body instanceof Uint8Array
+        ? Buffer.from(body).toString("utf8")
+        : body instanceof URLSearchParams
+          ? body.toString()
+          : undefined;
+  if (text !== undefined && text !== "") {
+    fs.appendFileSync(bodies, `${JSON.stringify({ n, body: text.slice(0, 1024) })}\n`);
+  }
+};
+const ended = new Set();
+const closed = n => {
+  if (n !== undefined && !ended.has(n)) {
+    ended.add(n);
+    fs.appendFileSync(closedLog, `${JSON.stringify({ t: Date.now(), n })}\n`);
+  }
+};
+const READS = new Set(["text", "json", "arrayBuffer", "blob", "formData", "bytes"]);
+// a fetch response whose end is noted: read through one of its readers, or through its body stream to the end
+const closeTracked = (n, response) => {
+  if (n === undefined || !(response instanceof Response)) {
+    return response;
+  }
+  if (response.body === null) {
+    closed(n);
+    return response;
+  }
+  const body = response.body;
+  let stream;
+  return new Proxy(response, {
+    get(target, prop) {
+      if (typeof prop === "string" && READS.has(prop)) {
+        return (...args) => target[prop](...args).finally(() => closed(n));
+      }
+      if (prop === "body") {
+        if (stream === undefined) {
+          const pass = new TransformStream();
+          body.pipeTo(pass.writable).then(
+            () => closed(n),
+            () => closed(n),
+          );
+          stream = pass.readable;
+        }
+        return stream;
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 };
 // 9. It stamps when an HTTP answer reaches the adapter — `{ t, n }` in RESOURCE_PROBE_DIR/<pid>.answered, `n` the call's
 //    number in <pid>.calls (round 170, homeconnect 2026-11-05: a tester's 50th call of a minute drew a 429 at the window's
@@ -133,22 +206,26 @@ const count = (kind, host, port, hook = byHook()) => {
 //    after the answer, not after the send). In the installations the limit tests judge (INVENTORY_COUNTED=1) every
 //    answer reaches the adapter ANSWER_DELAY_MS late: a fixture answers within milliseconds, and a limiter that frees its
 //    place after the send would hold one call too many unseen. 20 ms lies above a timer's lateness (0–3 ms, 20 timers
-//    of 150 ms on the development Mac, 2026-11-05).
+//    of 150 ms on the development Mac, 2026-11-05). Round 171: with the answer's status (`{ t, n, status }`) — an error
+//    window counts the calls answered with 400 and up (Home Connect: "Error Limit (10 per 10 minutes)").
 const answeredLog = path.join(dir, `${process.pid}.answered`);
 const ANSWER_DELAY_MS = process.env.INVENTORY_COUNTED === "1" ? 20 : 0;
-const answered = n => {
+const answered = (n, status) => {
   if (n !== undefined) {
-    fs.appendFileSync(answeredLog, `${JSON.stringify({ t: Date.now(), n })}\n`);
+    fs.appendFileSync(
+      answeredLog,
+      `${JSON.stringify({ t: Date.now(), n, ...(typeof status === "number" ? { status } : {}) })}\n`,
+    );
   }
 };
 // a fetch answer on its way to the adapter: stamped as it goes, late in the counted installations
 const handOver = (n, response) => {
   if (ANSWER_DELAY_MS === 0) {
-    answered(n);
+    answered(n, response?.status);
     return response;
   }
   return new Promise(resolve => setTimeout(resolve, ANSWER_DELAY_MS)).then(() => {
-    answered(n);
+    answered(n, response?.status);
     return response;
   });
 };
@@ -258,7 +335,7 @@ const silenceIfHung = socket => {
 // 7. It plays a counterpart that answers wrong (round 124, plan P5 — D6: a 500 and an empty 200 delete nothing; D21: a
 //    series of 429 makes the adapter back off; C26b: drifted fields crash nothing): while the file `fault` in
 //    RESOURCE_PROBE_DIR holds `500`, `429`, `empty` or `drift`, HTTP answers the adapter gets (fetch and http/https) are
-//    replaced — that status with an empty body (429 with `retry-after: 60`), an empty 200, or the real answer with its
+//    replaced — that status with an empty body (429 with `retry-after: 97`), an empty 200, or the real answer with its
 //    JSON drifted: of every object's keys the first of each three is gone, the second null, the third of another type.
 //    A 429 and `500all` (round 125, D21: a series of errors) replace every answer. A 500, an empty 200 and drift replace the first answer to each request (method,
 //    host, port, path) of a process under that fault and let the repeat through: a wrong answer to every call stops a login-first adapter
@@ -331,7 +408,8 @@ const driftText = text => {
 };
 const faultStatus = mode => (mode === "500" || mode === "500all" ? 500 : mode === "429" ? 429 : 200);
 /** @type {(mode: string) => Record<string, string>} */
-const faultHeaders = mode => (mode === "429" ? { "retry-after": "60" } : {});
+// round 171 (limits audit #26): 97 s — a fixed one-minute fallback after any 429 waits too short and shows it
+const faultHeaders = mode => (mode === "429" ? { "retry-after": "97" } : {});
 const refused = () => Object.assign(new Error("connect ECONNREFUSED (outage switch)"), { code: "ECONNREFUSED" });
 const reset = () => Object.assign(new Error("read ECONNRESET (outage switch)"), { code: "ECONNRESET" });
 const optionsOf = args => {
@@ -372,8 +450,9 @@ function cutConnect(...args) {
   ) {
     const host = hangNext || opts.host;
     hangNext = false;
-    // an HTTP request to a hung host was counted where it began; a raw connection is counted here
-    if (!/node:_http_(client|agent)|node:https/.test(new Error().stack || "")) {
+    // an HTTP request, a fetch or node's WebSocket to a hung host was counted where it began; a raw connection is
+    // counted here
+    if (!byClient()) {
       count("tcp", opts.host ?? "localhost", Number(opts.port));
     }
     const name = typeof host === "string" ? host : opts.host;
@@ -390,7 +469,9 @@ function cutConnect(...args) {
   // Round 100: an http agent hands `path: null` on — the record missed every HTTP and TLS connection until then, so
   // "chosen network address" never saw one (krobi 2026-10-03 11:38: the chosen address holds for the cloud too)
   if (typeof opts.path !== "string") {
-    if (!/node:_http_(client|agent)|node:https/.test(new Error().stack || "")) {
+    // round 171: undici's socket too — counted beside the fetch that opened it, a counterpart declared by its host alone
+    // held every fetch twice
+    if (!byClient()) {
       count("tcp", opts.host ?? "localhost", Number(opts.port));
     }
     record({
@@ -518,7 +599,10 @@ for (const mod of [require("node:http"), require("node:https")]) {
         pathname = first.path ?? first.pathname;
         method = first.method;
       }
-      const n = host === undefined ? undefined : count("http", String(host).replace(/:\d+$/, ""), port);
+      const n =
+        host === undefined
+          ? undefined
+          : count("http", String(host).replace(/:\d+$/, ""), port, undefined, requestOf(method, pathname));
       // a fixture hook below that calls http.request again is the same call, not a second one
       const outermost = nested === 0;
       nested++;
@@ -534,6 +618,27 @@ for (const mod of [require("node:http"), require("node:https")]) {
       }
       try {
         const req = original.apply(this, args);
+        if (n !== undefined) {
+          // section 10: the body as the adapter writes it, and the end of the call
+          const write = req.write;
+          const end = req.end;
+          let noted = false;
+          const note = chunk => {
+            if (!noted && chunk !== undefined && typeof chunk !== "function") {
+              noted = true;
+              noteBody(n, chunk);
+            }
+          };
+          req.write = function bodyWrite(chunk, ...rest) {
+            note(chunk);
+            return write.call(this, chunk, ...rest);
+          };
+          req.end = function bodyEnd(chunk, ...rest) {
+            note(chunk);
+            return end.call(this, chunk, ...rest);
+          };
+          req.once("close", () => closed(n));
+        }
         const mode =
           outermost && host !== undefined && !keep.has(Number(port)) && !byHook()
             ? faultFor(requestKey(method, String(host).replace(/:\d+$/, ""), port, pathname))
@@ -550,15 +655,23 @@ for (const mod of [require("node:http"), require("node:https")]) {
           // section 9: the response, stamped as it goes to the adapter — late in the counted installations
           const deliver = req.emit;
           req.emit = function answeredEmit(event, ...rest) {
+            // round 171 (limits audit #27): a WebSocket of the `ws` package upgrades an HTTP request — its socket was the
+            // http client's, so no frame on it counted; from the upgrade on every write is a call (`tcp-write`)
+            if (event === "upgrade") {
+              answered(n, rest[0]?.statusCode);
+              if (rest[1] instanceof net.Socket) {
+                rawOut.add(rest[1]);
+              }
+            }
             if (event !== "response") {
               return deliver.call(this, event, ...rest);
             }
             if (ANSWER_DELAY_MS === 0) {
-              answered(n);
+              answered(n, rest[0]?.statusCode);
               return deliver.call(this, event, ...rest);
             }
             setTimeout(() => {
-              answered(n);
+              answered(n, rest[0]?.statusCode);
               // nobody takes it: drained, as node does with a response no listener takes
               if (!deliver.call(this, event, ...rest)) {
                 rest[0]?.resume?.();
@@ -661,7 +774,15 @@ const cutFetch = (...args) => {
   let n;
   try {
     const url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]));
-    n = count("http", url.hostname, Number(url.port) || (url.protocol === "https:" ? 443 : 80));
+    const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET");
+    n = count(
+      "http",
+      url.hostname,
+      Number(url.port) || (url.protocol === "https:" ? 443 : 80),
+      undefined,
+      requestOf(method, url.pathname),
+    );
+    noteBody(n, args[1]?.body);
   } catch {
     // not a URL fetch would accept either — it rejects on its own
   }
@@ -687,17 +808,20 @@ const cutFetch = (...args) => {
     // Round 157 (fleet-suite audit): a real fetch with a signal already aborted rejects at once — `abort` never fires
     // again, and the hung call stood as "never ended" in D21
     if (signal?.aborted) {
+      closed(n);
       return Promise.reject(signal.reason ?? new DOMException("aborted", "AbortError"));
     }
     hangStart(target, targetPort);
     return new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => {
         hangEnd(target, targetPort);
+        closed(n);
         reject(signal.reason ?? new DOMException("aborted", "AbortError"));
       });
     });
   }
   if (down()) {
+    closed(n);
     return Promise.reject(new TypeError("fetch failed", { cause: refused() }));
   }
   const mode =
@@ -715,7 +839,7 @@ const cutFetch = (...args) => {
     if (mode !== "drift") {
       return Promise.resolve(
         new Response(mode === "empty" ? "" : null, { status: faultStatus(mode), headers: faultHeaders(mode) }),
-      ).then(response => handOver(n, response));
+      ).then(response => handOver(n, closeTracked(n, response)));
     }
     return /** @type {Native} */ (current)(...args)
       .then(async response => {
@@ -728,15 +852,65 @@ const cutFetch = (...args) => {
           headers,
         });
       })
-      .then(response => handOver(n, response));
+      .then(
+        response => handOver(n, closeTracked(n, response)),
+        err => {
+          closed(n);
+          throw err;
+        },
+      );
   }
-  return /** @type {Native} */ (current)(...args).then(response => {
-    if (target !== undefined) {
-      answer("http", target, targetPort);
-    }
-    return handOver(n, response);
-  });
+  return /** @type {Native} */ (current)(...args).then(
+    response => {
+      if (target !== undefined) {
+        answer("http", target, targetPort);
+      }
+      return handOver(n, closeTracked(n, response));
+    },
+    err => {
+      closed(n);
+      throw err;
+    },
+  );
 };
+// Round 171 (limits audit #27): node's own WebSocket (undici) — every message it sends is a call (`tcp-write`) to the
+// host of its address, like a write on a raw connection
+const NativeWebSocket = globalThis.WebSocket;
+if (typeof NativeWebSocket === "function" && typeof NativeWebSocket.prototype.send === "function") {
+  const portOf = url => Number(url.port) || (url.protocol === "wss:" || url.protocol === "https:" ? 443 : 80);
+  const send = NativeWebSocket.prototype.send;
+  NativeWebSocket.prototype.send = function countedSend(...args) {
+    try {
+      const url = new URL(this.url);
+      count("tcp-write", url.hostname, portOf(url));
+    } catch {
+      // no address — send throws on its own
+    }
+    return Reflect.apply(send, this, args);
+  };
+  // its handshake is the HTTP request the `ws` package makes too, opened past the wrapped fetch: counted where it begins,
+  // answered with the upgrade, ended at the upgrade or when it fails
+  globalThis.WebSocket = class CountedWebSocket extends NativeWebSocket {
+    /** @param {ConstructorParameters<typeof NativeWebSocket>} args */
+    constructor(...args) {
+      let n;
+      try {
+        const url = new URL(String(args[0]));
+        n = count("http", url.hostname, portOf(url), undefined, requestOf("GET", url.pathname));
+      } catch {
+        // no address — the constructor throws on its own
+      }
+      super(...args);
+      if (n !== undefined) {
+        this.addEventListener("open", () => {
+          answered(n, 101);
+          closed(n);
+        });
+        this.addEventListener("close", () => closed(n));
+      }
+    }
+  };
+}
 function getFetch() {
   return current && cutFetch;
 }

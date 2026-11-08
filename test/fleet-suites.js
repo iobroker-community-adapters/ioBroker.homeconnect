@@ -27,8 +27,8 @@
 //                                       each met by a restart (network hook,
 //                                       section 7 `fault`: the first answer to each request wrong, the repeat right),
 //                                       red as well when the wrong answers reached no request past the first one of a
-//                                       clean start · D21 after a 429 with retry-after 60 no call to that host before
-//                                       the minute is up · D21 under a series of errors (a 500 to every answer) the calls
+//                                       clean start · D21 after a 429 with retry-after 97 no call to that host before
+//                                       it ran out · D21 under a series of errors (a 500 to every answer) the calls
 //                                       to a host get fewer from minute to minute
 //   "one device gone while the channel lives" D6 one device stays in the account's list and stops answering: only
 //                                       that one goes unreachable (a marker already down before counts not; counted by
@@ -39,9 +39,15 @@
 //   "every writable datapoint reaches the adapter" D10 (no start) every writable state of the inventory reached the
 //                                       adapter's stateChange in this run (resource probe; the commands of the
 //                                       template's suite "a command nobody answers stays unconfirmed")
+//   "every limit holds when it is pressed" (round 171) every window of every counterpart in src/lib/api-limits.json
+//                                       once more with a lowered maximum (press-hook.js: half the most calls one lane
+//                                       held before), one counted installation per window of a counterpart, restarted
+//                                       like the host: no lane above the lowered maximum, one lane at it, every process
+//                                       loaded the declaration
 //   "the whole run"                     (no start, round 157) D4 nothing is written after the unload callback in any stop
 //                                       of the run (resource probe) · D17 no datagram to 255.255.255.255, and every own
-//                                       address it names to others is the chosen one (network hook, section 8)
+//                                       address it names to others is the chosen one (network hook, section 8) · round
+//                                       171: no lane of any installation above a declared limit, any window, sliding
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert");
@@ -92,8 +98,10 @@ const START_MS = 60000;
 const FIRST_START_MS = 2 * START_MS;
 // D21: how long the start with every counterpart hung outlives the deadline — the pulse of the network hook beats every 2 s
 const HANG_SLACK_MS = 15000;
-// D21: the retry-after the network hook sends with every 429 (section 7), and the slack around its first answer.
-const RETRY_AFTER_MS = 60000;
+// D21: the retry-after the network hook sends with every 429 (section 7), and the slack around its first answer. Round
+// 171 (limits audit #26): 97 s, not 60 — an adapter that waits a fixed minute after any 429 never read the header and was
+// green with 60; 97 is no fallback anyone picks and still ends inside BACKOFF_WINDOW_MS.
+const RETRY_AFTER_MS = 97000;
 const RETRY_GRACE_MS = 2000;
 // D21 (plan line: "the calls per window decrease — backoff"): four windows of a minute under a 500 to every answer; the
 // first holds the start, the second against the fourth is the verdict.
@@ -147,7 +155,12 @@ const WATCH = process.env.KROBI_D06_WATCH ? JSON.parse(process.env.KROBI_D06_WAT
 // last suites were left out. restoreState of the contract sets it; the suite's line says what it started from.
 const CARRY = process.env.KROBI_D06_CARRY ? JSON.parse(process.env.KROBI_D06_CARRY) : { before: {}, end: null };
 // fs as it is before the measurement below wraps it — the measurement reads through these
-const FS = { readdirSync: fs.readdirSync, readFileSync: fs.readFileSync, statSync: fs.statSync };
+const FS = {
+  readdirSync: fs.readdirSync,
+  readFileSync: fs.readFileSync,
+  statSync: fs.statSync,
+  existsSync: fs.existsSync,
+};
 // The state of the run between two suites. `suite`, `start`, `reads`, `cleared`, `read` and `wrote` belong to the suite
 // running: its title, its start, what it read of an earlier suite, whether it removed the instance data before its
 // adapter started, the output files it read and wrote. `first` is the world before the first suite and `firstStart` that
@@ -980,7 +993,9 @@ function retryTooEarly(calls) {
     const first = Math.min(...times);
     const again = times.filter(when => when > first + RETRY_GRACE_MS && when < first + RETRY_AFTER_MS - RETRY_GRACE_MS);
     if (again.length > 0) {
-      early.push(`${host}: ${again.length} call(s), the first ${again[0] - first} ms after a 429 with retry-after 60`);
+      early.push(
+        `${host}: ${again.length} call(s), the first ${again[0] - first} ms after a 429 with retry-after ${RETRY_AFTER_MS / 1000}`,
+      );
     }
   }
   return early;
@@ -1150,12 +1165,491 @@ function workshopMutexProblem(startDir) {
   }
 }
 
+// Round 171 (krobi 2026-11-07, translated — 15:44 "check closely whether day, hour and minute limits of every kind are
+// checked and kept", 15:45 "no island or one-off solutions", 16:37 "no fleet service sets a calendar reset"): every limit
+// of src/lib/api-limits.json is judged here, one copy for every adapter. A window of any length (a second, a minute, an
+// hour, a day) slides — a calendar day is one of its windows, never the other way round — and a call holds its place
+// until `seconds · 1000` after its answer (round 170). Judged over the WHOLE run (until round 170 only the installations
+// before the template's suite "one counterpart hangs" were), and pressed: a run that stays below a limit proves nothing
+// about the limiter, so every window of every counterpart runs once more with a lowered maximum (press-hook.js).
+const PRESS_HOOK = path.join(__dirname, "press-hook.js");
+// how long one press phase waits at most for the pressed counterparts to reach their maximum or fall quiet
+const PRESS_DEADLINE_MS = 120000;
+const PRESS_QUIET_MS = SETTLE_MS;
+
+/**
+ * Round 171: whether a host never leaves the user's network — RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 1122 loopback
+ * (127/8, ::1), RFC 3927 link-local (169.254/16, fe80::/10), RFC 4193 unique local (fc00::/7), RFC 2365 and RFC 5771
+ * scoped multicast (239/8, 224.0.0.0/24), RFC 919 limited broadcast, RFC 6762 `.local` and RFC 6761 `localhost` names.
+ * RFC 1918 §3: such an address is not reachable from the Internet, so a counterpart declared `network: "private"` never
+ * takes a cloud's calls.
+ *
+ * @param {string} host the host a call went to
+ */
+function privateHost(host) {
+  const name = String(host)
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (/\.local\.?$/.test(name)) {
+    return true;
+  }
+  // RFC 6761 §6.3: `localhost` and every name under it is the loopback
+  if (/(?:^|\.)localhost\.?$/.test(name)) {
+    return true;
+  }
+  const v4 = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
+  if (v4) {
+    const [a, b, c] = v4.slice(1, 4).map(Number);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      a === 239 ||
+      (a === 224 && b === 0 && c === 0) ||
+      name.endsWith("255.255.255.255")
+    );
+  }
+  return name === "::1" || /^f[cd][0-9a-f]{0,2}:/.test(name) || /^fe[89ab][0-9a-f]?:/.test(name);
+}
+
+/**
+ * Round 100: whether a counted call belongs to a declared counterpart — every field of `match` must fit. Round 107:
+ * `hostPattern`, an anchored regular expression. Round 171: `network: "private"` (privateHost), `method` and the anchored
+ * `pathPattern` of an HTTP call, and `bodyPattern` over the first 1024 characters of its body (network hook, section 10)
+ * — an upstream that limits one endpoint (Home Connect: 5 program starts a minute) is declared as its own counterpart.
+ *
+ * @param {{ host?: string, method?: string, path?: string, body?: string }} call a counted call
+ * @param {Record<string, string | number>} match the counterpart's `match`
+ */
+function fits(call, match) {
+  return Object.entries(match).every(([key, value]) => {
+    if (key === "hostPattern") {
+      return new RegExp(String(value)).test(String(call.host));
+    }
+    if (key === "pathPattern" || key === "bodyPattern") {
+      const text = key === "pathPattern" ? call.path : call.body;
+      return typeof text === "string" && new RegExp(String(value)).test(text);
+    }
+    if (key === "network") {
+      return value === "private" && privateHost(String(call.host));
+    }
+    return call[key] === value;
+  });
+}
+
+/**
+ * Round 171: the window a limit counts in — its `seconds`, "<seconds> errors" for the calls answered with an error in it
+ * (`errors: true`, Home Connect's "Error Limit (10 per 10 minutes)"), or "concurrent" for calls open at the same time.
+ */
+function limitKey(limit) {
+  if (limit.concurrent === true) {
+    return "concurrent";
+  }
+  return limit.errors === true ? `${limit.seconds} errors` : String(limit.seconds);
+}
+
+/** Round 171: the window of a limitKey in words, as a verdict names it. */
+function windowWords(key) {
+  if (key === "concurrent") {
+    return "open at once";
+  }
+  return key.endsWith(" errors") ? `answered with an error within ${Number.parseFloat(key)} s` : `within ${key} s`;
+}
+
+/**
+ * Round 171: the calls a window of `key` counts — for an error window those answered with a client or server error
+ * (status 400 and up, RFC 9110 §15.5 and §15.6; the network hook stamps the status with the answer, section 9), a call
+ * without an answer never reached the counterpart's count.
+ */
+function countedIn(calls, key) {
+  return key.endsWith(" errors") ? calls.filter(c => typeof c.status === "number" && c.status >= 400) : calls;
+}
+
+/**
+ * Round 171: the lane a call counts in for one limit — the whole account, its host, or its device: the named group
+ * `device` of the counterpart's pathPattern or bodyPattern (Govee names the device in the body of each call).
+ */
+function laneOf(call, limit, match) {
+  if (limit.per === "host") {
+    return String(call.host);
+  }
+  if (limit.per === "device") {
+    for (const [key, text] of [
+      ["pathPattern", call.path],
+      ["bodyPattern", call.body],
+    ]) {
+      const device =
+        match[key] && typeof text === "string" ? new RegExp(match[key]).exec(text)?.groups?.device : undefined;
+      if (device !== undefined) {
+        return `device ${device}`;
+      }
+    }
+    return "device unknown";
+  }
+  return "account";
+}
+
+/**
+ * Round 171: how many calls one lane held at the moment each call went out, in a window of `key` — half open, a call held
+ * from its send until `seconds · 1000` after its answer (`answered ?? t`, round 170); "concurrent": from its send until it
+ * ended (`closed`, network hook section 10; a call that never ended is open until its process's last sign of life, `end`).
+ *
+ * @param {{ t: number, answered?: number, closed?: number, end?: number }[]} sent the lane's calls, oldest first
+ * @param {string} key limitKey()
+ * @param {number} [span] a longer window counts only this span (ms) — the press plan's window of one phase
+ * @returns {{ t: number, held: number }[]}
+ */
+function heldAt(sent, key, span = Infinity) {
+  if (key === "concurrent") {
+    return sent.map(c => ({
+      t: c.t,
+      held: sent.filter(o => o.t <= c.t && (o.closed ?? o.end ?? Infinity) > c.t).length,
+    }));
+  }
+  const window = Math.min(Number.parseFloat(key) * 1000, span);
+  return sent.map((c, j) => ({
+    t: c.t,
+    held: 1 + sent.slice(0, j).filter(o => c.t - (o.answered ?? o.t) < window).length,
+  }));
+}
+
+/** Round 171: the most calls one lane held at once in a window of `key`, at most `span` long (heldAt). */
+function heldPeak(sent, key, span) {
+  return Math.max(0, ...heldAt(sent, key, span).map(h => h.held));
+}
+
+/** Round 171: the moment one lane first held `max` calls in a window of `key` (heldAt); undefined while it never did. */
+function reachedAt(sent, key, max) {
+  return heldAt(sent, key).find(h => h.held >= max)?.t;
+}
+
+/**
+ * Round 171: per installation, counterpart, window and lane the most calls held, and the strictest declared maximum of
+ * that window (several entries with the same `seconds` — a burst and an average — count as their minimum).
+ *
+ * @param {{ install: number, host?: string, method?: string, path?: string, body?: string }[]} calls limitCalls()
+ * @param {(install: number) => object[]} tableOf the counterparts an installation's processes loaded
+ * @param {number} [span] a longer window counts only this span (ms; pressPlan: PRESS_DEADLINE_MS, one press phase)
+ */
+function peaksOf(calls, tableOf, span) {
+  const peaks = [];
+  for (const install of [...new Set(calls.map(c => c.install))].sort((a, b) => a - b)) {
+    const mine = calls.filter(c => c.install === install);
+    for (const d of tableOf(install)) {
+      const theirs = mine.filter(c => fits(c, d.match));
+      const keys = new Map();
+      for (const limit of d.limits) {
+        const key = limitKey(limit);
+        const strictest = keys.get(key);
+        if (strictest === undefined || limit.max < strictest.max) {
+          keys.set(key, limit);
+        }
+      }
+      for (const [key, limit] of keys) {
+        const lanes = new Map();
+        for (const c of countedIn(theirs, key)) {
+          const lane = laneOf(c, limit, d.match);
+          lanes.set(lane, [...(lanes.get(lane) ?? []), c]);
+        }
+        for (const [lane, sent] of lanes) {
+          peaks.push({
+            name: d.name,
+            key,
+            lane,
+            install,
+            peak: heldPeak(sent, key, span),
+            max: limit.max,
+            source: limit.source,
+          });
+        }
+      }
+    }
+  }
+  return peaks;
+}
+
+/**
+ * Round 171: every lane of every installation above its maximum — over the whole run, each installation against the
+ * table its processes loaded (a pressed one against its lowered maximum).
+ */
+function overLimits(calls, tableOf) {
+  return peaksOf(calls, tableOf)
+    .filter(p => p.peak > p.max)
+    .map(
+      p =>
+        `${p.name} (${p.lane}, installation ${p.install}): ${p.peak} calls ${windowWords(p.key)}, at most ${p.max} (${p.source})`,
+    );
+}
+
+/**
+ * Round 171: which windows the press installations lower, and to what. Per counterpart and window the most calls one lane
+ * held in the judged installations so far; pressed is every window that held at least two, to half of that — the
+ * adapter's own demand stays twice the lowered maximum, a run that wants a few calls less still presses it. Group k
+ * lowers the k-th window of every counterpart (shortest first): two windows of one counterpart in one installation would
+ * let the stricter one bind and the other never fill; windows of different counterparts share it — a counterpart held
+ * back delays no other (krobi 2026-10-07 10:12: "ein gerät darf niemals ein anderen blockieren"). An error window fills
+ * only with errors, which a fixture never sends: it is lowered to half of its declared maximum and pressed in groups of
+ * its own after the others, with a 500 to every answer (the network hook's `500all`) — under that the demand of every
+ * other window falls. A window longer than a press phase (an hour, a day) is measured within one phase (peaksOf with
+ * PRESS_DEADLINE_MS, R171-49): an installation before the press lasts up to 790 s (lab run 20261107-185219-654623-hand),
+ * half of what it held is more than one phase lets the adapter ask.
+ *
+ * @param {object[]} peaks peaksOf() over the judged installations
+ * @param {object[]} declared the counterparts of src/lib/api-limits.json
+ * @returns {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[] }} idle: windows a lane
+ *   never held two calls in, error windows declared below two — nothing to lower, the run's own demand holds them
+ */
+function pressPlan(peaks, declared) {
+  const most = new Map();
+  for (const p of peaks.filter(q => !q.key.endsWith(" errors"))) {
+    const id = `${p.name}\u0000${p.key}`;
+    most.set(id, Math.max(most.get(id) ?? 0, p.peak));
+  }
+  const byName = new Map();
+  const errorsByName = new Map();
+  const idle = [];
+  for (const [id, peak] of most) {
+    const [name, key] = id.split("\u0000");
+    if (peak < 2) {
+      idle.push(`${name}: at most ${peak} call(s) ${windowWords(key)}`);
+      continue;
+    }
+    byName.set(name, [...(byName.get(name) ?? []), { name, key, max: Math.floor(peak / 2), peak }]);
+  }
+  // the error windows of every counterpart the run called
+  for (const d of declared.filter(e => peaks.some(p => p.name === e.name))) {
+    const strictest = new Map();
+    for (const limit of d.limits.filter(l => l.errors === true)) {
+      strictest.set(limitKey(limit), Math.min(strictest.get(limitKey(limit)) ?? Infinity, limit.max));
+    }
+    for (const [key, declaredMax] of strictest) {
+      if (declaredMax < 2) {
+        idle.push(`${d.name}: at most ${declaredMax} call(s) ${windowWords(key)} declared`);
+        continue;
+      }
+      errorsByName.set(d.name, [
+        ...(errorsByName.get(d.name) ?? []),
+        { name: d.name, key, max: Math.floor(declaredMax / 2), peak: declaredMax },
+      ]);
+    }
+  }
+  const order = key => (key === "concurrent" ? Infinity : Number.parseFloat(key));
+  const groupsOf = byWindows => {
+    const groups = [];
+    for (const windows of byWindows.values()) {
+      windows.sort((a, b) => order(a.key) - order(b.key));
+      windows.forEach((w, k) => (groups[k] = [...(groups[k] ?? []), w]));
+    }
+    return groups;
+  };
+  return { groups: [...groupsOf(byName), ...groupsOf(errorsByName)], idle };
+}
+
+/** Round 171: whether a press group lowers error windows — its installation answers every call with a 500. */
+function pressesErrors(group) {
+  return group.some(w => w.key.endsWith(" errors"));
+}
+
+/**
+ * Round 171: the verdict on one press installation — red when a lane held more than the lowered maximum (the limiter
+ * did not keep it), when no lane reached it (the demand fell, the limit stays unproven), or when a process that called
+ * a counterpart loaded no declaration (no `<pid>.limits` of the press hook).
+ *
+ * @param {object[]} calls limitCalls() of the press installation
+ * @param {{ name: string, key: string, max: number, peak: number }[]} group pressPlan().groups[k]
+ * @param {object[]} table the counterparts the installation's processes loaded
+ * @param {string[]} unloaded the processes of the installation that called and wrote no `<pid>.limits`
+ */
+function pressVerdict(calls, group, table, unloaded) {
+  const wrong = unloaded.map(pid => `process ${pid} called a counterpart and never loaded src/lib/api-limits.json`);
+  const peaks = peaksOf(calls, () => table);
+  for (const w of group) {
+    const held = Math.max(0, ...peaks.filter(p => p.name === w.name && p.key === w.key).map(p => p.peak));
+    const window = windowWords(w.key);
+    // R171-49: a window longer than a phase was lowered from what one lane held within one phase (pressPlan)
+    const span = Number.parseFloat(w.key) * 1000 > PRESS_DEADLINE_MS ? ` within ${PRESS_DEADLINE_MS / 1000} s` : "";
+    const half = w.key.endsWith(" errors")
+      ? `half of the declared ${w.peak}, a 500 to every answer`
+      : `half of ${w.peak}${span} in the installations before`;
+    if (held > w.max) {
+      wrong.push(`${w.name}: ${held} calls ${window} — the limiter let more through than the lowered maximum ${w.max}`);
+    } else if (held < w.max) {
+      wrong.push(
+        `${w.name}: at most ${held} calls ${window}, never the lowered maximum ${w.max} (${half}) — the press proved nothing`,
+      );
+    }
+  }
+  return wrong;
+}
+
+/**
+ * Round 171: whether a press phase is over — every pressed window that reached its lowered maximum was watched for one
+ * more window after that (at most PRESS_DEADLINE_MS; concurrent: PRESS_QUIET_MS), and every window that never reached it
+ * fell quiet for that same window — it emptied, the demand ended — after its counterpart's last call, or after
+ * `quietFrom` while none came (at least PRESS_QUIET_MS). R171-49, lab run 20261107-185219-654623-hand: My.JDownloader is
+ * asked every 30 s, both phases ended after PRESS_QUIET_MS between two of its cycles, none of its calls inside them.
+ * The demand is twice the lowered maximum (pressPlan), so a limiter that keeps the window holds the rest back and its
+ * counterpart falls quiet — silence after the maximum is the limiter at work, never the end: a limiter that frees the
+ * window too early lets the held calls through inside that watched window.
+ *
+ * @param {object[]} calls limitCalls() of the phase, oldest first
+ * @param {object[]} table the lowered counterparts (lowered())
+ * @param {{ name: string, key: string, max: number }[]} group pressPlan().groups[k]
+ * @param {number} now the moment asked (ms)
+ * @param {number} [quietFrom] the moment the phase began to wait for silence (after a restart)
+ */
+function pressPhaseOver(calls, table, group, now, quietFrom) {
+  return group.every(w => {
+    const d = table.find(e => e.name === w.name);
+    const limit = d?.limits.find(l => limitKey(l) === w.key);
+    if (limit === undefined) {
+      return true;
+    }
+    const theirs = calls.filter(c => fits(c, d.match));
+    const lanes = new Map();
+    for (const c of countedIn(theirs, w.key)) {
+      const lane = laneOf(c, limit, d.match);
+      lanes.set(lane, [...(lanes.get(lane) ?? []), c]);
+    }
+    const watch =
+      w.key === "concurrent" ? PRESS_QUIET_MS : Math.min(Number.parseFloat(w.key) * 1000, PRESS_DEADLINE_MS);
+    const reached = Math.min(...[...lanes.values()].map(sent => reachedAt(sent, w.key, w.max) ?? Infinity));
+    if (Number.isFinite(reached)) {
+      return now - reached >= watch;
+    }
+    const silentFrom = Math.max(quietFrom ?? -Infinity, theirs.at(-1)?.t ?? -Infinity);
+    return Number.isFinite(silentFrom) && now - silentFrom >= Math.max(PRESS_QUIET_MS, watch);
+  });
+}
+
+/**
+ * Round 171: the calls the limits judge, each with its installation (round 113: `clearInstanceData` writes
+ * `<time>.install`, a process belongs to the installation its first call falls in, the restarts the host plays in it
+ * with it), its body (`<pid>.bodies`), its answer's status (`<pid>.answered`), its end (`<pid>.closed`) and its
+ * process's last sign of life (`end`, for a call
+ * that never ended — network hook sections 3 and 10) — every installation where the adapter has no PACING_HOOKS,
+ * otherwise only the counted ones (round 123: the others ran with a widened budget).
+ *
+ * @param {string} dir RESOURCE_DIR
+ * @param {object[]} all readCalls(from)
+ * @param {boolean} pacing whether the adapter has PACING_HOOKS
+ * @param {number} [from] the earliest call of interest (ms; 0: the whole run)
+ */
+function limitCalls(dir, all, pacing, from = 0) {
+  const files = FS.readdirSync(dir);
+  const marks = suffix => files.filter(f => f.endsWith(suffix)).map(f => Number(f.slice(0, -suffix.length)));
+  const installs = marks(".install");
+  const at = t => installs.filter(i => i <= t).length;
+  const counted = new Set(marks(".counted").map(at));
+  const pair = suffix => new Map(recordLines(dir, suffix, from).map(r => [`${r.pid} ${r.n}`, r]));
+  const bodies = pair(".bodies");
+  const closed = pair(".closed");
+  const answers = pair(".answered");
+  const calls = all.filter(c => !String(c.kind).startsWith("hang-"));
+  const installOf = new Map();
+  const lastSign = new Map();
+  for (const c of calls) {
+    installOf.set(c.pid, installOf.get(c.pid) ?? at(c.t));
+    lastSign.set(c.pid, Math.max(lastSign.get(c.pid) ?? 0, c.t));
+  }
+  for (const pid of lastSign.keys()) {
+    try {
+      const beat = Number(FS.readFileSync(path.join(dir, `${pid}.alive`), "utf8"));
+      lastSign.set(pid, Math.max(lastSign.get(pid), Number.isFinite(beat) ? beat : 0));
+    } catch {
+      // a process without the network hook has no pulse — its last call is its last sign
+    }
+  }
+  return calls
+    .filter(c => !pacing || counted.has(installOf.get(c.pid)))
+    .map(c => ({
+      ...c,
+      install: installOf.get(c.pid),
+      body: bodies.get(`${c.pid} ${c.n}`)?.body,
+      status: answers.get(`${c.pid} ${c.n}`)?.status,
+      closed: closed.get(`${c.pid} ${c.n}`)?.t,
+      end: lastSign.get(c.pid),
+    }));
+}
+
+/**
+ * Round 171: the installation a moment belongs to — the number of `<time>.install` marks up to it.
+ *
+ * @param {string} dir RESOURCE_DIR
+ * @param {number} t the moment (ms)
+ */
+function installAt(dir, t) {
+  return FS.readdirSync(dir).filter(f => f.endsWith(".install") && Number(f.slice(0, -".install".length)) <= t).length;
+}
+
+/**
+ * Round 171: the counterparts each installation's processes loaded — the table the press hook wrote as `<pid>.limits`,
+ * otherwise the declaration itself.
+ */
+function tablesOf(dir, calls, declared) {
+  const loaded = new Map();
+  const seen = new Set();
+  for (const c of calls) {
+    if (loaded.has(c.install) || seen.has(c.pid)) {
+      continue;
+    }
+    seen.add(c.pid);
+    const file = path.join(dir, `${c.pid}.limits`);
+    if (FS.existsSync(file)) {
+      loaded.set(c.install, JSON.parse(FS.readFileSync(file, "utf8")));
+    }
+  }
+  return install => loaded.get(install) ?? declared;
+}
+
+/**
+ * Round 171: the declaration with the windows of one press group lowered — what press-hook.js hands the adapter (every
+ * entry of a pressed window gets the lowered maximum).
+ *
+ * @param {object[]} declared the counterparts of src/lib/api-limits.json
+ * @param {{ name: string, key: string, max: number }[]} group pressPlan().groups[k]
+ */
+function lowered(declared, group) {
+  return declared.map(d => ({
+    ...d,
+    limits: d.limits.map(limit => {
+      const w = group.find(g => g.name === d.name && g.key === limitKey(limit));
+      return w === undefined ? limit : { ...limit, max: w.max };
+    }),
+  }));
+}
+
+/**
+ * Round 171 (limits audit #30): the tests a run skipped — `this.skip()` in a hook, `it.skip`, a test without a body —
+ * each judged nothing, and the run counted none of them as a failure.
+ */
+function skippedTests(suite) {
+  return [
+    ...suite.tests.filter(test => test.isPending()).map(test => test.fullTitle()),
+    ...suite.suites.flatMap(skippedTests),
+  ];
+}
+
 module.exports = function fleetSuites(templateSuite, ctx) {
   const mutexProblem = workshopMutexProblem(ctx.ADAPTER_DIR);
   if (mutexProblem) {
     throw new Error(mutexProblem);
   }
   const suite = withProtocol(templateSuite);
+  // Round 171 (limits audit #30): last in the harness span, after every suite — a skipped test, or a test run alone
+  // (`.only`, every other one filtered out), left suites unjudged while the run ended green
+  after(function () {
+    // mocha's Suite#hasOnly (lib/suite.js), which @types/mocha does not declare
+    let root = /** @type {(Mocha.Suite & { hasOnly(): boolean }) | undefined} */ (this.test?.parent);
+    while (root?.parent) {
+      root = /** @type {Mocha.Suite & { hasOnly(): boolean }} */ (root.parent);
+    }
+    assert.ok(!root?.hasOnly(), "a test or suite runs alone (.only) — every other test of the run judged nothing");
+    const skipped = root ? skippedTests(root) : [];
+    assert.deepStrictEqual(skipped, [], `tests the run skipped, each judged nothing:\n${skipped.join("\n")}`);
+  });
   const {
     ADAPTER_DIR,
     ADAPTER,
@@ -1167,6 +1661,7 @@ module.exports = function fleetSuites(templateSuite, ctx) {
     clearInstanceData,
     resetInstanceNative,
     fixtureNative,
+    seedInstanceObjects,
     setSystemLanguage,
     playControllerRestarts,
     adapterEnv,
@@ -1178,6 +1673,9 @@ module.exports = function fleetSuites(templateSuite, ctx) {
     RESOURCE_DIR,
     HANG_DEADLINE_MS,
     CHOSEN_ADDRESS,
+    PACING_HOOKS,
+    countThisInstallation,
+    stopCounting,
   } = ctx;
   // round 165: every restart and wait of this file through the protocol, with its seconds — the starts and stops inside
   // them, like every other, at the harness (protocolHarness)
@@ -1214,9 +1712,13 @@ module.exports = function fleetSuites(templateSuite, ctx) {
   // D3 → D14: the error text of the cut connection test in the first language
   let firstLanguageError;
 
+  // round 171 (yamaha 2026-11-07): a configured installation holds its devices as own objects (CLAUDE_PATTERNS.md § native
+  // "Wohin", round 170) — the adapter seeds them after the native, before every fresh start; never on a running
+  // installation (the group switches) and never in the upgrade suite, whose state seedPrevious lays
   async function start(harness, language, ...hooks) {
     clearInstanceData(harness);
     await resetInstanceNative(harness, await fixtureNative());
+    await seedInstanceObjects(harness);
     await setSystemLanguage(harness, language);
     const restarts = playControllerRestarts(harness, null, ...hooks);
     await withinDeadline(
@@ -1626,6 +2128,7 @@ module.exports = function fleetSuites(templateSuite, ctx) {
         // no wait for a tree: after a rejected login none comes (red-proof run 2026-10-16 — the full start hung 6 min)
         clearInstanceData(harness);
         await resetInstanceNative(harness, await fixtureNative());
+        await seedInstanceObjects(harness);
         await setSystemLanguage(harness, FIRST_LANGUAGE);
         const restarts = playControllerRestarts(harness, null, ...NET);
         await withinDeadline(
@@ -1856,8 +2359,8 @@ module.exports = function fleetSuites(templateSuite, ctx) {
         console.log(`      no HTTP call in ${BACKOFF_WINDOW_MS} ms after a start answered with 429 — nothing to see`);
         return;
       }
-      // network hook, section 7: every 429 says `retry-after: 60`; the calls of the first two seconds may be in flight
-      // together, any later one before the minute is up ignores the rate limit (mcm1957: 429 is a rate limit)
+      // network hook, section 7: every 429 says `retry-after: 97`; the calls of the first two seconds may be in flight
+      // together, any later one before it ran out ignores the rate limit (mcm1957: 429 is a rate limit)
       const early = retryTooEarly(refusedCalls);
       assert.deepStrictEqual(early, [], `calls before the retry-after of a 429 ran out:\n${early.join("\n")}`);
     });
@@ -1972,6 +2475,7 @@ module.exports = function fleetSuites(templateSuite, ctx) {
       const harness = getHarness();
       clearInstanceData(harness);
       await resetInstanceNative(harness, await fixtureNative());
+      await seedInstanceObjects(harness);
       await setSystemLanguage(harness, FIRST_LANGUAGE);
       fs.writeFileSync(HANG_FILE, "*");
       since = Date.now();
@@ -2077,6 +2581,118 @@ module.exports = function fleetSuites(templateSuite, ctx) {
     });
   });
 
+  // Round 171 (krobi 2026-11-07 15:44/15:45): every window of every counterpart once more with a lowered maximum
+  // (pressPlan) — a run below a limit proves nothing about the limiter that should keep it. One counted installation per
+  // group, restarted like the host does after a change of the instance object, so a window longer than an installation
+  // (a day) has to outlive the restart. No wait for fresh values: an adapter held back is what the suite plays.
+  const API_LIMITS_FILE = path.join(ADAPTER_DIR, "src", "lib", "api-limits.json");
+  const PRESS_FILE = path.join(RESOURCE_DIR, "press");
+  const declaredLimits = () => JSON.parse(fs.readFileSync(API_LIMITS_FILE, "utf8")).counterparts;
+  // the end of a press phase (pressPhaseOver), asked against the lowered table of the group
+  const pressedOrQuiet = (group, since, quietFrom) => () =>
+    pressPhaseOver(
+      limitCalls(RESOURCE_DIR, readCalls(since), false, since),
+      lowered(declaredLimits(), group),
+      group,
+      Date.now(),
+      quietFrom,
+    );
+
+  suite("every limit holds when it is pressed", getHarness => {
+    /** @type {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[] }} */
+    let plan = { groups: [], idle: [] };
+    const pressed = [];
+    before(async function () {
+      if (NET.length === 0 || !fs.existsSync(API_LIMITS_FILE)) {
+        return;
+      }
+      // every installation of the run before this suite (RUN_WIDE: it needs every suite before it), a window longer
+      // than a phase within one phase (R171-49)
+      plan = pressPlan(
+        peaksOf(
+          limitCalls(RESOURCE_DIR, readCalls(), PACING_HOOKS.length > 0),
+          () => declaredLimits(),
+          PRESS_DEADLINE_MS,
+        ),
+        declaredLimits(),
+      );
+      this.timeout(plan.groups.length * (FIRST_START_MS + 2 * PRESS_DEADLINE_MS + 2 * STOP_MS + 60000) + 60000);
+      const harness = getHarness();
+      try {
+        for (const group of plan.groups) {
+          clearInstanceData(harness);
+          countThisInstallation();
+          const since = Date.now();
+          const press = {};
+          for (const w of group) {
+            press[w.name] = { ...press[w.name], [w.key]: w.max };
+          }
+          fs.writeFileSync(PRESS_FILE, JSON.stringify(press));
+          if (pressesErrors(group)) {
+            fs.writeFileSync(FAULT_FLAG, "500all");
+          }
+          await resetInstanceNative(harness, await fixtureNative());
+          await seedInstanceObjects(harness);
+          await setSystemLanguage(harness, FIRST_LANGUAGE);
+          const restarts = playControllerRestarts(harness, null, PRESS_HOOK, ...NET);
+          await withinDeadline(
+            harness.startAdapterAndWait(false, adapterEnv(PRESS_HOOK, ...NET)),
+            FIRST_START_MS,
+            "the adapter did not start",
+          );
+          await feedFixtures(harness);
+          await restarts.done;
+          await waitWindow("pressed to the lowered maximum", PRESS_DEADLINE_MS, pressedOrQuiet(group, since));
+          await restartAsTheHost(harness, null, "after the press", PRESS_HOOK, ...NET);
+          await feedFixtures(harness);
+          await waitWindow(
+            "pressed after the restart",
+            PRESS_DEADLINE_MS,
+            pressedOrQuiet(group, Date.now(), Date.now()),
+          );
+          await withinDeadline(harness.stopAdapter(), STOP_MS, "the adapter did not stop");
+          fs.rmSync(FAULT_FLAG, { force: true });
+          pressed.push({ group, install: installAt(RESOURCE_DIR, since) });
+        }
+      } finally {
+        fs.rmSync(PRESS_FILE, { force: true });
+        fs.rmSync(FAULT_FLAG, { force: true });
+        stopCounting();
+      }
+    });
+    after(() => {
+      fs.rmSync(PRESS_FILE, { force: true });
+      fs.rmSync(FAULT_FLAG, { force: true });
+      stopCounting();
+    });
+
+    it("holds every window of every counterpart at a lowered maximum", function () {
+      if (NET.length === 0) {
+        noNet("no limit to press");
+        return;
+      }
+      if (!fs.existsSync(API_LIMITS_FILE)) {
+        console.log("      no src/lib/api-limits.json — the adapter declares no counterpart (its sealed register)");
+        return;
+      }
+      plan.idle.forEach(line => console.log(`      not pressed — ${line}`));
+      assert.ok(
+        plan.groups.length + plan.idle.length > 0,
+        "no installation before this suite called a declared counterpart — nothing measured, nothing pressed",
+      );
+      const wrong = [];
+      for (const { group, install } of pressed) {
+        const calls = limitCalls(RESOURCE_DIR, readCalls(), false).filter(c => c.install === install);
+        const pids = [...new Set(calls.map(c => c.pid))];
+        const unloaded = pids.filter(pid => !fs.existsSync(path.join(RESOURCE_DIR, `${pid}.limits`)));
+        const table = tablesOf(RESOURCE_DIR, calls, lowered(declaredLimits(), group))(install);
+        wrong.push(...pressVerdict(calls, group, table, unloaded).map(line => `installation ${install}: ${line}`));
+      }
+      assert.strictEqual(pressed.length, plan.groups.length, "a press installation did not run to its end");
+      assert.deepStrictEqual(wrong, [], `while a window was pressed:\n${wrong.join("\n")}`);
+    });
+  });
+
   // Round 157 (fleet-suite audit): the records of the WHOLE run, read after its last start — in the first suite they saw
   // only the stops and network records up to there; every later stop (language, group switch, rename, the six processes of
   // the wrong answers, the dropped device, the hang) went unjudged. No start of its own.
@@ -2093,6 +2709,18 @@ module.exports = function fleetSuites(templateSuite, ctx) {
         [],
         `written after the unload callback (lost — callback() comes after the last write):\n${late.join("\n")}`,
       );
+    });
+
+    // Round 171: every limit over the whole run — the commands, the reports, the fleet suites and the press installations
+    // too (until round 170 the template judged only the installations before its suite "one counterpart hangs")
+    it("stays within every limit it declares, over the whole run", function () {
+      if (!fs.existsSync(API_LIMITS_FILE)) {
+        console.log("      no src/lib/api-limits.json — the adapter declares no counterpart (its sealed register)");
+        return;
+      }
+      const calls = limitCalls(RESOURCE_DIR, readCalls(), PACING_HOOKS.length > 0);
+      const over = overLimits(calls, tablesOf(RESOURCE_DIR, calls, declaredLimits()));
+      assert.deepStrictEqual(over, [], `calls above a declared limit:\n${over.join("\n")}`);
     });
 
     it("sends no datagram to 255.255.255.255 — a broadcast comes from address and netmask (D17)", function () {
@@ -2141,6 +2769,27 @@ module.exports.emptiedDuring = emptiedDuring;
 module.exports.restartEmpties = restartEmpties;
 module.exports.retryTooEarly = retryTooEarly;
 module.exports.sameIds = sameIds;
+module.exports.privateHost = privateHost;
+module.exports.fits = fits;
+module.exports.limitKey = limitKey;
+module.exports.skippedTests = skippedTests;
+module.exports.laneOf = laneOf;
+module.exports.heldAt = heldAt;
+module.exports.heldPeak = heldPeak;
+module.exports.reachedAt = reachedAt;
+module.exports.peaksOf = peaksOf;
+module.exports.overLimits = overLimits;
+module.exports.pressPlan = pressPlan;
+module.exports.pressVerdict = pressVerdict;
+module.exports.pressPhaseOver = pressPhaseOver;
+module.exports.pressesErrors = pressesErrors;
+module.exports.countedIn = countedIn;
+module.exports.windowWords = windowWords;
+module.exports.PRESS_QUIET_MS = PRESS_QUIET_MS;
+module.exports.limitCalls = limitCalls;
+module.exports.installAt = installAt;
+module.exports.tablesOf = tablesOf;
+module.exports.lowered = lowered;
 module.exports.recordFiles = recordFiles;
 module.exports.recordLines = recordLines;
 module.exports.stateText = stateText;

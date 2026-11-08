@@ -200,8 +200,11 @@ const limitsMock = vi.hoisted(() => ({ widen: 1 }));
 vi.mock("./lib/api-limits", async importOriginal => {
   const actual = await importOriginal<typeof ApiLimits>();
   return {
-    declaredLimit: (seconds: number): number => actual.declaredLimit(seconds) * limitsMock.widen,
-    minimumGapMs: (): number => Math.ceil(actual.minimumGapMs() / limitsMock.widen),
+    ...actual,
+    counterparts: (): ApiLimits.Counterpart[] =>
+      actual.counterparts().map(c => ({ ...c, limits: c.limits.map(l => ({ ...l, max: l.max * limitsMock.widen })) })),
+    limitFor: (call: ApiLimits.LimitedCall, seconds: number): number =>
+      actual.limitFor(call, seconds) * limitsMock.widen,
   };
 });
 
@@ -1786,7 +1789,7 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(warnings(ctx)).toEqual([HOLD_2_MIN]);
     });
 
-    it("sends a sign-in request in a spent day at once — the day's own hold never stops one, its place still counts", async () => {
+    it("sends a sign-in request in a spent day at once — the REST API's day does not count it", async () => {
       await seedDay(1000, 7_200_000);
       const ctx = setup();
       await ctx.i.onReady();
@@ -1797,7 +1800,9 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(httpMock.postForm).toHaveBeenCalledTimes(1);
       expect(warnings(ctx)).toEqual([]);
       const host = (ctx.i as unknown as { reportHost(): { adapterState(): Record<string, unknown> } }).reportHost();
-      expect(host.adapterState()).toMatchObject({ requestsLastDay: 1001 });
+      // api-docs: "Every HTTPS request to the Home Connect REST API counts toward the daily limit" — the token endpoint
+      // has its own quota (src/lib/api-limits.json)
+      expect(host.adapterState()).toMatchObject({ requestsLastDay: 1000 });
     });
 
     it("ends a sign-in request's wait for a pause of Home Connect at the stop, and the stop reports done", async () => {
@@ -1817,7 +1822,7 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(done).toBe(true);
     });
 
-    it("writes the request file at the stop only, never while it runs — a diagnostics report writes no file", async () => {
+    it("hands the day's places to the request file while it runs, so a kill or a crash keeps them", async () => {
       const { existsSync, readFileSync } = await import("node:fs");
       const ctx = setup();
       await ctx.i.onReady();
@@ -1826,14 +1831,10 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       await vi.advanceTimersByTimeAsync(100);
       await read;
       const file = join(dataFolder.path, "request-times.json");
-      await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(existsSync(file)).toBe(false);
-      let done = false;
-      ctx.i.onUnload(() => (done = true));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(done).toBe(true);
-      const kept = JSON.parse(readFileSync(file, "utf8")) as { heldFrom: number[] };
-      expect(kept.heldFrom).toEqual([calls[0].answered]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      const kept = JSON.parse(readFileSync(file, "utf8")) as { windows: Record<string, Record<string, unknown>> };
+      expect(kept.windows["Home Connect REST API"]["86400"]).toEqual({ account: [calls[0].answered] });
     });
 
     it("gives the event stream's connect its place before the reads that wait", async () => {
@@ -1894,9 +1895,9 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       vi.setSystemTime(Date.now() + 2 * 3_600_000);
       await new Promise<void>(resolve => ctx.i.onUnload(resolve));
       const kept = JSON.parse(readFileSync(join(dataFolder.path, "request-times.json"), "utf8")) as {
-        heldFrom: number[];
+        windows: Record<string, Record<string, Record<string, number[]>>>;
       };
-      expect(kept.heldFrom).toContain(calls[0].answered);
+      expect(kept.windows["Home Connect REST API"]["86400"].account).toContain(calls[0].answered);
     });
 
     it("waits for a place of the day that frees within the minute instead of dropping the write", async () => {
@@ -1956,6 +1957,136 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(host.adapterState()).toMatchObject({ restPausedForS: 0, dayQuotaSpent: true, dayPlaceFreesInS: 120 });
       await vi.advanceTimersByTimeAsync(120_000);
       await read;
+    });
+  });
+
+  describe("every counterpart of the declaration (tooling round 171: every limit of every kind)", () => {
+    beforeEach(async () => {
+      const { mkdtempSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      dataFolder.path = mkdtempSync(join(tmpdir(), "hc-main-counterparts-"));
+    });
+    afterEach(async () => {
+      const { rmSync } = await import("node:fs");
+      rmSync(dataFolder.path, { recursive: true, force: true });
+      dataFolder.path = "";
+    });
+    /**
+     * Every write is taken at once, its answer stamped like http.ts does.
+     *
+     * @returns the answer stamps of the PUT requests, in their order
+     */
+    const takeWrites = (): number[] => {
+      const answered: number[] = [];
+      httpMock.putJson.mockImplementation(() => {
+        answered.push(Date.now());
+        return Promise.resolve({ ...okResult(), answeredAt: Date.now() });
+      });
+      httpMock.deleteJson.mockImplementation(() => Promise.resolve({ ...okResult(), answeredAt: Date.now() }));
+      return answered;
+    };
+    /**
+     * A sign-in request as the sign-in sends it.
+     *
+     * @param ctx the adapter under test
+     * @param grant the grant type of the form
+     * @returns its answer
+     */
+    const signIn = (ctx: Ctx, grant: string): Promise<{ status: number }> =>
+      (
+        ctx.i as unknown as {
+          sendForm(path: string, form: Record<string, string>): Promise<{ status: number }>;
+        }
+      ).sendForm("/security/oauth/token", { grant_type: grant });
+    const start = (ctx: Ctx, n: number): Promise<unknown> =>
+      ctx.i.apiWrite({ method: "PUT", path: `/api/homeappliances/ha${n}/programs/active`, body: { key: "P" } });
+
+    it("keeps 50 reads a minute although program starts and token refreshes allow fewer — each counts its own", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      answerAfter(() => 20);
+      const reads = Array.from({ length: 50 }, (_, n) => ctx.i.apiGet(`/api/r${n}`));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(50);
+      await Promise.all(reads);
+    });
+
+    it("holds a sixth program start within a minute — a stop and a read of the same moment go on", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      const answered = takeWrites();
+      answerAfter(() => 20);
+      const starts = Array.from({ length: 6 }, (_, n) => start(ctx, n));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(5);
+      // decision H-14: which limit and for how long, in one line — a seventh start of the same hold adds none
+      const holds = (): string[] =>
+        ctx.i.log.info.mock.calls.map(([m]) => String(m)).filter(m => m.startsWith("The adapter holds"));
+      expect(holds()).toEqual([
+        "The adapter holds commands to Home Connect for 60 s (limit: 5 calls in 1 minute, Home Connect program starts).",
+      ]);
+      const seventh = start(ctx, 6);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(holds()).toHaveLength(1);
+      const stop = ctx.i.apiWrite({ method: "DELETE", path: "/api/homeappliances/ha0/programs/active" });
+      const read = ctx.i.apiGet("/api/x");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(httpMock.deleteJson).toHaveBeenCalledTimes(1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(1);
+      // the first start's place frees a minute after its answer — as the fleet judge counts it (heldAt: t − answered < window)
+      await vi.advanceTimersByTimeAsync(answered[0] + 60_000 - Date.now() - 1);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(6);
+      // the seventh at the second start's place, a minute after its answer
+      await vi.advanceTimersByTimeAsync(answered[1] + 60_000 - Date.now() - 1);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(6);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(7);
+      await Promise.all([...starts, seventh, stop, read]);
+      // the reads of the same moment went on without a line of their own
+      expect(holds()).toHaveLength(1);
+    });
+
+    it("holds an eleventh token refresh within a minute, never a poll of the sign-in link's code", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      httpMock.postForm.mockClear();
+      httpMock.postForm.mockImplementation(() =>
+        Promise.resolve({ status: 200, ok: true, body: {}, answeredAt: Date.now() }),
+      );
+      const refreshes = Array.from({ length: 11 }, () => signIn(ctx, "refresh_token"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(httpMock.postForm).toHaveBeenCalledTimes(10);
+      expect(ctx.i.log.info).toHaveBeenCalledWith(
+        "The adapter holds its sign-in requests to Home Connect for 60 s (limit: 10 calls in 1 minute, Home Connect token refresh).",
+      );
+      const polls = Array.from({ length: 3 }, () => signIn(ctx, "urn:ietf:params:oauth:grant-type:device_code"));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(httpMock.postForm).toHaveBeenCalledTimes(13);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(httpMock.postForm).toHaveBeenCalledTimes(14);
+      await Promise.all([...refreshes, ...polls]);
+    });
+
+    it("hands a program start's place to the next process — a restart within the minute holds the sixth", async () => {
+      const first = setup();
+      await first.i.onReady();
+      takeWrites();
+      await vi.advanceTimersByTimeAsync(0);
+      const starts = Array.from({ length: 5 }, (_, n) => start(first, n));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.all(starts);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(5);
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      const next = setup();
+      await next.i.onReady();
+      const sixth = start(next, 5);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(httpMock.putJson).toHaveBeenCalledTimes(6);
+      await sixth;
     });
   });
 });
@@ -3937,14 +4068,26 @@ describe("Homeconnect diagnostics report", () => {
     expect(host().liveReadBlocked()).toMatch(/Home Connect blocks requests for another 4\d s/);
     ctx.i.restBlockedUntil = 0;
     // the adapter's own hold of a spent day is no block of Home Connect — and a live read would wait hours for it
-    (ctx.i as unknown as { dayEpisode: boolean }).dayEpisode = true;
-    (ctx.i as unknown as { budget: { restore(t: number[]): void } }).budget.restore(
-      Array.from({ length: 1000 }, (_, k) => Date.now() - 3_600_000 + k),
+    const inner = ctx.i as unknown as {
+      budget: { restore(kept: { windows: object; earlier: number[] }, now: number, call: object): void };
+      noteLongHold(now: number, waitMs: number, window: object, kind: string): void;
+      spentWindows: Map<string, unknown>;
+    };
+    inner.budget.restore(
+      { windows: {}, earlier: Array.from({ length: 1000 }, (_, k) => Date.now() - 3_600_000 + k) },
+      Date.now(),
+      { host: "api.home-connect.com", method: "GET", path: "/api/homeappliances" },
+    );
+    inner.noteLongHold(
+      Date.now(),
+      3_600_000,
+      { name: "Home Connect REST API", key: "86400", max: 1000, seconds: 86_400 },
+      "read",
     );
     expect(host().liveReadBlocked()).toBe(
       "the day's request quota is spent (limit: 1000 calls in 1 day) — reads wait for their place",
     );
-    (ctx.i as unknown as { dayEpisode: boolean }).dayEpisode = false;
+    inner.spentWindows.clear();
     ctx.auths[0].accessToken = undefined;
     expect(host().liveReadBlocked()).toBe("not signed in to Home Connect");
     (ctx.i as unknown as { terminating: boolean }).terminating = true;

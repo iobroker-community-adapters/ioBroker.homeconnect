@@ -9,7 +9,7 @@ import { isRecord } from "./pure-helpers";
 import { errorDescription, errorKey, rateLimitText, readBodyCapped, retryAfterMs } from "./http";
 
 /** SSE endpoint for all appliances (the "all" stream also carries PAIRED/DEPAIRED). */
-const EVENTS_PATH = "/api/homeappliances/events";
+export const EVENTS_PATH = "/api/homeappliances/events";
 /**
  * Consider the connection dead if no traffic (incl. KEEP-ALIVE) arrives within
  * this window. The heartbeat comes every ~55 s; 90 s did not survive a single
@@ -107,9 +107,12 @@ async function refusedKey(res: Response): Promise<{ key?: string; description?: 
 export interface StreamPlace {
   /** The connect just went out — called right after fetch was invoked, in the same synchronous step (tooling round 140). */
   sent(): void;
-  /** Home Connect answered the connect — the headers arrived (tooling round 170). */
-  answered(): void;
-  /** The attempt is over: without an answer the place counts from its send; one that never went out is given back. */
+  /** Home Connect answered the connect with `status` — the headers arrived (tooling round 170). */
+  answered(status: number): void;
+  /**
+   * The attempt is over — the stream closed, or the connect failed: one of Home Connect's event monitoring channels is
+   * free again; without an answer the place counts from its send; one that never went out is given back.
+   */
   ended(): void;
 }
 
@@ -297,7 +300,7 @@ export class EventStream {
       place?.sent();
       const res = await opening;
       // The headers are here: Home Connect counted the connect, its place frees a window's length after now.
-      place?.answered();
+      place?.answered(res.status);
       this.clearConnectTimer();
       if (!res.ok) {
         // Reading the (small, capped) body frees the connection too — undici
