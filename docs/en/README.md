@@ -18,7 +18,7 @@ The setting **Access to Home Connect** chooses how the adapter signs in:
 - **Home Connect developer access** — the documented way: an application of your own in the free Home Connect Developer Program, with a Client ID and a Client Secret. It is set up once, see the next chapter.
 - **Home Connect app (beta)** — signs in the way the Home Connect app does, with the account you use in the app; no developer account, no Client ID. It uses the public sign-in of the Home Connect app, which Home Connect can change at any time — the developer access stays the documented way.
 
-Both ways give the same object tree and the same commands, and the adapter holds the documented request limits in both. Switching from one to the other drops the stored login and needs a new sign-in. The values the app sign-in needs — the app's public client, its return address, the permissions and the forms of the address the sign-in ends on — come from [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
+Both ways read and control the appliances through the same Home Connect API, and the adapter holds the documented request limits in both. Switching from one to the other drops the stored login and needs a new sign-in. The values the app sign-in needs — the app's public client, its return address, the permissions and the forms of the address the sign-in ends on — come from [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
 
 ## Getting your Home Connect credentials
 

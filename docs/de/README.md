@@ -18,7 +18,7 @@ Die Einstellung **Zugang zu Home Connect** wählt, wie sich der Adapter anmeldet
 - **Home Connect Entwicklerzugang** — der dokumentierte Weg: eine eigene Anwendung im kostenlosen Home Connect Developer Program, mit Client ID und Client Secret. Sie wird einmal eingerichtet, siehe nächstes Kapitel.
 - **Home Connect App (Beta)** — meldet sich so an wie die Home Connect App, mit dem Konto, das du in der App verwendest; kein Entwicklerkonto, keine Client ID. Der App-Zugang nutzt die öffentliche Anmeldung der Home Connect App, die Home Connect jederzeit ändern kann — der Entwicklerzugang bleibt der dokumentierte Weg.
 
-Beide Wege liefern denselben Objektbaum und dieselben Befehle, und der Adapter hält in beiden die dokumentierten Anfragegrenzen ein. Ein Wechsel von einem zum anderen verwirft die gespeicherte Anmeldung und braucht eine neue. Die Werte, die die App-Anmeldung braucht — die öffentliche Kennung der App, ihre Rücksprungadresse, die Berechtigungen und die Formen der Adresse, auf der die Anmeldung endet — stammen aus [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
+Beide Wege lesen und steuern die Geräte über dieselbe Home-Connect-API, und der Adapter hält in beiden die dokumentierten Anfragegrenzen ein. Ein Wechsel von einem zum anderen verwirft die gespeicherte Anmeldung und braucht eine neue. Die Werte, die die App-Anmeldung braucht — die öffentliche Kennung der App, ihre Rücksprungadresse, die Berechtigungen und die Formen der Adresse, auf der die Anmeldung endet — stammen aus [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
 
 ## Zugangsdaten bei Home Connect anlegen
 
