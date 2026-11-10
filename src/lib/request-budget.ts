@@ -9,7 +9,10 @@
 // (timeout, transport error) frees its place a window's length after its send. A window of the calls open at once
 // (`concurrent`) counts a place from its send until the request ended — for the event stream until the stream closed.
 // A window of the calls answered with an error (`errors`) counts a place while it is on its way (it may become one)
-// and, answered with a status of 400 and up, a window's length after its answer.
+// and, answered with a status of 400 and up, a window's length after its answer. A window of an unbroken series of them
+// (`errors: "successive"`, Home Connect's "10 successive requests … which result in an error") forgets every error
+// answered before an answer without one in the same lane — answer order; a request without an answer neither counts nor
+// ends the series.
 //
 // The places outlive a restart. Home Connect counts per account, not per process: a restart right after the start — a
 // changed setting, the host's own restart — began with a fresh budget, and the new process's first reads stacked on
@@ -19,14 +22,22 @@
 // (2.0.0-alpha.0), one list for every request — are read as places of a REST read.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { fits, limitKey, type Counterpart, type DeclaredLimit, type LimitedCall } from "./api-limits";
+import {
+  countsErrors,
+  countsSeries,
+  fits,
+  limitKey,
+  type Counterpart,
+  type DeclaredLimit,
+  type LimitedCall,
+} from "./api-limits";
 import { isRecord } from "./pure-helpers";
 
 /** A window of one counterpart with its strictest limit — the fleet suites judge a window by its strictest entry. */
 export interface CountedWindow {
   /** The counterpart's name. */
   name: string;
-  /** The window's key: its seconds, "<seconds> errors", or "concurrent" (`limitKey`). */
+  /** The window's key: its seconds, "<seconds> errors", "<seconds> successive errors", or "concurrent" (`limitKey`). */
   key: string;
   /** The calls it allows. */
   max: number;
@@ -42,6 +53,8 @@ export interface RequestPlace {
   answeredAt?: number;
   /** Whether the answer carried a status of 400 and up. */
   failed: boolean;
+  /** Where its answer stands in the order of answers (0 for a place a previous process left, which came first). */
+  answerOrder?: number;
   /** Whether the request is still on its way — it holds its place in every window until its answer or its end. */
   open: boolean;
   /** Whether the request ended (body read, aborted, failed) — until then it is open in a window of calls at once. */
@@ -159,9 +172,10 @@ function laneOf(call: LimitedCall, limit: DeclaredLimit, match: Counterpart["mat
  * @param key the window's key
  * @param lane the lane
  * @param now the current time (epoch ms)
+ * @param seriesEnd in a window of a series: the answer order of the lane's latest answer without an error, -1 for none
  * @returns whether it holds
  */
-function holds(place: RequestPlace, id: string, key: string, lane: string, now: number): boolean {
+function holds(place: RequestPlace, id: string, key: string, lane: string, now: number, seriesEnd: number): boolean {
   if (place.lanes.get(id) !== lane) {
     return false;
   }
@@ -171,7 +185,10 @@ function holds(place: RequestPlace, id: string, key: string, lane: string, now: 
   if (place.open) {
     return true;
   }
-  if (key.endsWith(" errors") && !place.failed) {
+  if (countsErrors(key) && !place.failed) {
+    return false;
+  }
+  if (countsSeries(key) && (place.answerOrder ?? 0) <= seriesEnd) {
     return false;
   }
   return countsFrom(place) + spanOf(key) > now;
@@ -181,6 +198,10 @@ function holds(place: RequestPlace, id: string, key: string, lane: string, now: 
 export class RequestBudget {
   private places: RequestPlace[] = [];
   private readonly table: () => readonly Counterpart[];
+  /** The answers so far — the order a window of a series counts in. */
+  private answers = 0;
+  /** Per window of a series and lane (`<window id>\u0001<lane>`), the order of its latest answer without an error. */
+  private readonly seriesEnds = new Map<string, number>();
 
   /**
    * @param table the counterparts, read whenever a place is judged — the declaration as the process loaded it
@@ -223,18 +244,17 @@ export class RequestBudget {
    * @returns the window, or undefined when none of its counterparts declares one that long
    */
   public strictestWindow(call: LimitedCall, seconds: number): CountedWindow | undefined {
-    let strictest: CountedWindow | undefined;
-    for (const counterpart of this.table()) {
-      if (!fits(call, counterpart.match)) {
-        continue;
-      }
-      for (const { key, limit } of windowsOf(counterpart)) {
-        if (key === String(seconds) && (strictest === undefined || limit.max < strictest.max)) {
-          strictest = { name: counterpart.name, key, max: limit.max, seconds };
-        }
-      }
-    }
-    return strictest;
+    return this.strictestWhere(call, key => key === String(seconds));
+  }
+
+  /**
+   * The strictest window of the calls answered with an error among the counterparts a call fits.
+   *
+   * @param call the call
+   * @returns the window, or undefined when none of its counterparts declares one
+   */
+  public errorWindow(call: LimitedCall): CountedWindow | undefined {
+    return this.strictestWhere(call, countsErrors);
   }
 
   /**
@@ -251,19 +271,38 @@ export class RequestBudget {
 
   /**
    * Home Connect answered the request of a place (the headers arrived): from now it frees a window's length after this
-   * answer. A second answer changes nothing.
+   * answer. A second answer changes nothing, and neither does a status of 0 — the transport stamps its own failure
+   * with a time too, but no answer came: such a request frees a window's length after its send and neither counts in
+   * nor ends a series of errors.
    *
    * @param place the place
    * @param answeredAt when Home Connect answered (epoch ms)
-   * @param status the answer's HTTP status
+   * @param status the answer's HTTP status (0 = none came)
+   * @returns whether the answer ended a series that held errors — their places are free at once
    */
-  public answer(place: RequestPlace, answeredAt: number, status: number): void {
-    if (!place.open) {
-      return;
+  public answer(place: RequestPlace, answeredAt: number, status: number): boolean {
+    if (!place.open || status <= 0) {
+      return false;
     }
     place.open = false;
     place.answeredAt = answeredAt;
     place.failed = status >= 400;
+    const order = ++this.answers;
+    place.answerOrder = order;
+    let freed = false;
+    if (!place.failed) {
+      // an answer without an error ends the series of every window of a series the request counts in
+      for (const [id, lane] of place.lanes) {
+        if (!countsSeries(id.slice(id.indexOf("\u0000") + 1))) {
+          continue;
+        }
+        const slot = `${id}\u0001${lane}`;
+        const before = this.seriesEnds.get(slot) ?? -1;
+        freed ||= this.places.some(p => p.failed && p.lanes.get(id) === lane && (p.answerOrder ?? 0) > before);
+        this.seriesEnds.set(slot, order);
+      }
+    }
+    return freed;
   }
 
   /**
@@ -284,12 +323,12 @@ export class RequestBudget {
    * @param place the place
    * @param answeredAt when Home Connect answered (epoch ms), undefined when no answer came
    * @param status the answer's HTTP status (0 = none)
+   * @returns whether the answer ended a series that held errors ({@link answer})
    */
-  public settle(place: RequestPlace, answeredAt: number | undefined, status: number): void {
-    if (answeredAt !== undefined) {
-      this.answer(place, answeredAt, status);
-    }
+  public settle(place: RequestPlace, answeredAt: number | undefined, status: number): boolean {
+    const freed = answeredAt !== undefined && this.answer(place, answeredAt, status);
     this.close(place);
+    return freed;
   }
 
   /**
@@ -322,7 +361,7 @@ export class RequestBudget {
         wait = { ms, window };
       }
     };
-    const timed = table.flatMap(c => windowsOf(c).filter(w => w.key !== "concurrent" && !w.key.endsWith(" errors")));
+    const timed = table.flatMap(c => windowsOf(c).filter(w => w.key !== "concurrent" && !countsErrors(w.key)));
     const shortest = Math.min(...timed.map(w => spanOf(w.key)));
     for (const counterpart of table) {
       if (!fits(call, counterpart.match)) {
@@ -332,17 +371,19 @@ export class RequestBudget {
         const id = windowId(counterpart.name, key);
         const lane = laneOf(call, limit, counterpart.match);
         const window: CountedWindow = { name: counterpart.name, key, max: limit.max, seconds: limit.seconds };
-        if (key !== "concurrent" && !key.endsWith(" errors") && spanOf(key) === shortest) {
+        if (key !== "concurrent" && !countsErrors(key) && spanOf(key) === shortest) {
           const previous = this.lastIn(id, lane);
           if (previous) {
             raise(Math.max(0, countsFrom(previous) + Math.ceil(shortest / limit.max) - now), window);
           }
         }
-        const holding = this.places.filter(p => holds(p, id, key, lane, now));
+        const holding = this.places.filter(p => this.holds(p, id, key, lane, now));
         if (holding.length < limit.max) {
           continue;
         }
-        if (key === "concurrent") {
+        if (key === "concurrent" || (countsSeries(key) && holding.some(p => p.open))) {
+          // only an end frees a call open at once; in a series, an answer without an error frees every place at once —
+          // the request on its way decides before any time does
           raise(undefined, window);
           continue;
         }
@@ -368,13 +409,15 @@ export class RequestBudget {
    */
   public held(now: number, name: string, key: string): number {
     const id = windowId(name, key);
-    return this.places.filter(p => holds(p, id, key, "account", now)).length;
+    return this.places.filter(p => this.holds(p, id, key, "account", now)).length;
   }
 
   /**
    * For each window of time and each lane the times its places count from — a request still on its way counts from
    * now, the moment of the hand-over: what the next process takes over. The adapter hands over again whenever a
-   * request ends after the stop, so a late answer reaches the next process with its own time.
+   * request ends after the stop, so a late answer reaches the next process with its own time. A window of errors takes
+   * only the answered errors: a request whose answer never reached the adapter is no error the fleet judge counts —
+   * it stamps only the answers that came —, and one the stop still saw answered is handed over again with its answer.
    *
    * @param now the current time (epoch ms)
    * @returns the places per counterpart, window and lane, oldest first
@@ -389,7 +432,7 @@ export class RequestBudget {
         const id = windowId(counterpart.name, key);
         for (const place of this.places) {
           const lane = place.lanes.get(id);
-          if (lane === undefined || !holds(place, id, key, lane, now)) {
+          if (lane === undefined || !this.holds(place, id, key, lane, now) || (place.open && countsErrors(key))) {
             continue;
           }
           const byKey = (kept[counterpart.name] ??= {});
@@ -409,7 +452,8 @@ export class RequestBudget {
 
   /**
    * Take over the places a previous process left — each counts in its window from its time, like an answered request;
-   * one in a window of errors as one answered with an error. The single list of an earlier version counts as places of
+   * one in a window of errors as one answered with an error, and in a window of a series as answered before every
+   * answer of this process: the series goes on until an answer without an error. The single list of an earlier version counts as places of
    * `earlierCall` (a REST read) in every window of time it fits.
    *
    * @param kept what the file held
@@ -423,7 +467,8 @@ export class RequestBudget {
         restored.push({
           sentAt: t,
           answeredAt: t,
-          failed: key.endsWith(" errors"),
+          failed: countsErrors(key),
+          answerOrder: 0,
           open: false,
           closed: true,
           lanes: new Map([[id, lane]]),
@@ -439,13 +484,50 @@ export class RequestBudget {
         for (const [lane, times] of Object.entries(kept.windows[counterpart.name]?.[key] ?? {})) {
           times.forEach(t => add(id, key, lane, t));
         }
-        if (!key.endsWith(" errors") && fits(earlierCall, counterpart.match)) {
+        if (!countsErrors(key) && fits(earlierCall, counterpart.match)) {
           kept.earlier.forEach(t => add(id, key, laneOf(earlierCall, limit, counterpart.match), t));
         }
       }
     }
     restored.sort((a, b) => a.sentAt - b.sentAt);
     this.places = [...restored, ...this.places];
+  }
+
+  /**
+   * Whether a place holds in a window of one lane right now — in a window of a series only after the lane's latest
+   * answer without an error.
+   *
+   * @param place the place
+   * @param id the window's id
+   * @param key the window's key
+   * @param lane the lane
+   * @param now the current time (epoch ms)
+   * @returns whether it holds
+   */
+  private holds(place: RequestPlace, id: string, key: string, lane: string, now: number): boolean {
+    return holds(place, id, key, lane, now, this.seriesEnds.get(`${id}\u0001${lane}`) ?? -1);
+  }
+
+  /**
+   * The strictest window among the counterparts a call fits whose key passes a test.
+   *
+   * @param call the call
+   * @param test which keys count
+   * @returns the window, or undefined when none passes
+   */
+  private strictestWhere(call: LimitedCall, test: (key: string) => boolean): CountedWindow | undefined {
+    let strictest: CountedWindow | undefined;
+    for (const counterpart of this.table()) {
+      if (!fits(call, counterpart.match)) {
+        continue;
+      }
+      for (const { key, limit } of windowsOf(counterpart)) {
+        if (test(key) && (strictest === undefined || limit.max < strictest.max)) {
+          strictest = { name: counterpart.name, key, max: limit.max, seconds: limit.seconds };
+        }
+      }
+    }
+    return strictest;
   }
 
   /**

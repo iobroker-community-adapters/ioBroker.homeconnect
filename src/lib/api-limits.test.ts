@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { counterparts, fits, limitFor, limitKey, type Counterpart, type LimitedCall } from "./api-limits";
+import {
+  counterparts,
+  countsErrors,
+  countsSeries,
+  fits,
+  limitFor,
+  limitKey,
+  type Counterpart,
+  type LimitedCall,
+} from "./api-limits";
 
 const HOST = "api.home-connect.com";
 const read: LimitedCall = { host: HOST, method: "GET", path: "/api/homeappliances" };
@@ -57,9 +66,39 @@ describe("the declared Home Connect limits (api-docs → Rate Limiting, read 202
     expect(() => limitFor(read, 3600)).toThrow("declares no limit for GET /api/homeappliances in 3600 s");
   });
 
-  it("names a window as the fleet suites do: its seconds, its errors, or the calls open at once", () => {
+  it("declares the error limit as a series of the REST API — the sign-in link's poll answers pending, never counted", () => {
+    const rest = counterparts().find(c => c.name === "Home Connect REST API")!;
+    expect(rest.limits).toContainEqual({
+      max: 10,
+      seconds: 600,
+      errors: "successive",
+      per: "account",
+      source:
+        "https://api-docs.home-connect.com/general/#rate-limiting (10 successive requests per client and Home Connect user account per 10 minutes which result in an error)",
+    });
+    expect(
+      counterparts()
+        .filter(c => c.limits.some(l => l.errors !== undefined))
+        .map(c => c.name),
+    ).toEqual(["Home Connect REST API"]);
+    expect(fits(poll, rest.match)).toBe(false);
+    // a window of errors is no window of calls: it caps no request count
+    expect(() => limitFor(read, 600)).toThrow("declares no limit for GET /api/homeappliances in 600 s");
+  });
+
+  it("names a window as the fleet suites do: its seconds, its errors, a series of them, or the calls open at once", () => {
     expect(limitKey({ max: 50, seconds: 60, per: "account", source: "s" })).toBe("60");
     expect(limitKey({ max: 10, seconds: 600, errors: true, per: "account", source: "s" })).toBe("600 errors");
+    expect(limitKey({ max: 10, seconds: 600, errors: "successive", per: "account", source: "s" })).toBe(
+      "600 successive errors",
+    );
+    expect(["60", "600 errors", "600 successive errors", "concurrent"].map(countsErrors)).toEqual([
+      false,
+      true,
+      true,
+      false,
+    ]);
+    expect(["600 errors", "600 successive errors"].map(countsSeries)).toEqual([false, true]);
     expect(limitKey({ max: 10, concurrent: true, per: "account", source: "s" })).toBe("concurrent");
   });
 });

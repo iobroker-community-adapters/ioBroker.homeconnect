@@ -59,10 +59,16 @@ export async function postForm(
   try {
     parsed = await parseJsonBody(res);
   } catch (e) {
-    return { status: 0, ok: false, body: { error: "network_error", error_description: errText(e) }, answeredAt };
+    return {
+      status: 0,
+      ok: false,
+      body: { error: "network_error", error_description: errText(e) },
+      answeredAt,
+      answeredStatus: res.status,
+    };
   }
   if (parsed.tooLarge) {
-    return { status: 0, ok: false, body: { error: "response_too_large" }, answeredAt };
+    return { status: 0, ok: false, body: { error: "response_too_large" }, answeredAt, answeredStatus: res.status };
   }
   // A 429 says how long Home Connect blocks — the whole account, the token endpoint included.
   const retryAfter = res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : undefined;
@@ -72,6 +78,7 @@ export async function postForm(
     body: parsed.json,
     ...(retryAfter === undefined ? {} : { retryAfterMs: retryAfter }),
     answeredAt,
+    answeredStatus: res.status,
   };
 }
 
@@ -79,6 +86,8 @@ export async function postForm(
 export type FormAnswer = FormPostResult & {
   /** When the headers arrived (epoch ms) — undefined when no answer came (transport error, timeout). */
   answeredAt?: number;
+  /** The status the headers carried, with `answeredAt` — `status` is 0 when the body broke off after them. */
+  answeredStatus?: number;
 };
 
 /** Result of a bearer-token JSON request (GET/PUT/DELETE): status, ok, the unwrapped `data`, and an error key on failure. */
@@ -105,6 +114,11 @@ export interface JsonResult {
    * abort).
    */
   answeredAt?: number;
+  /**
+   * The status the headers carried, with `answeredAt` — `status` is 0 when the body broke off after them, but Home
+   * Connect answered with this one: the request budget counts it (a series of errors, test/fleet-suites.js).
+   */
+  answeredStatus?: number;
 }
 
 /**
@@ -227,9 +241,16 @@ async function requestJson(
   // appliance sync and ended the whole start-up chain — it is a transport
   // failure like any other.
   try {
-    return { ...(await toJsonResult(res)), answeredAt };
+    return { ...(await toJsonResult(res)), answeredAt, answeredStatus: res.status };
   } catch (e) {
-    return { status: 0, ok: false, data: undefined, error: `network_error: ${errText(e)}`, answeredAt };
+    return {
+      status: 0,
+      ok: false,
+      data: undefined,
+      error: `network_error: ${errText(e)}`,
+      answeredAt,
+      answeredStatus: res.status,
+    };
   }
 }
 

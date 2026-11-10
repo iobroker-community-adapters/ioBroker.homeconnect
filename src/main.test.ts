@@ -1119,18 +1119,19 @@ describe("Homeconnect rate limiting", () => {
     expect(order).toEqual(["GET /api/r1", "PUT /api/w", "GET /api/r2", "GET /api/r3"]);
   });
 
-  it("tells the sync the error budget is used up after eight failed answers in a row, and free after a success", async () => {
+  it("tells the sync the error budget is used up two short of the declared series of ten, and free after a success", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     const left = ctx.syncs[0].port.errorBudgetLeft as () => boolean;
-    httpMock.getJson.mockResolvedValue(failResult(409, { error: "SDK.Error.Refused" }));
+    // answers as http.ts stamps them — a status without its answer stamp would be no answer at all
+    httpMock.getJson.mockResolvedValue(failResult(409, { error: "SDK.Error.Refused", answeredAt: Date.now() }));
     for (let n = 0; n < 7; n++) {
       await get(ctx, `/api/f${n}`);
     }
     expect(left()).toBe(true);
     await get(ctx, "/api/f7");
     expect(left()).toBe(false);
-    httpMock.getJson.mockResolvedValue(okResult());
+    httpMock.getJson.mockResolvedValue({ ...okResult(), answeredAt: Date.now() });
     await get(ctx, "/api/ok");
     expect(left()).toBe(true);
   });
@@ -1949,12 +1950,12 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(host.adapterState()).toMatchObject({
         requestsLastMinute: 0,
         requestsLastDay: 1000,
-        dayQuotaSpent: false,
-        dayPlaceFreesInS: 0,
+        limitSpent: false,
+        limitPlaceFreesInS: 0,
       });
       const read = ctx.i.apiGet("/api/a");
       await vi.advanceTimersByTimeAsync(0);
-      expect(host.adapterState()).toMatchObject({ restPausedForS: 0, dayQuotaSpent: true, dayPlaceFreesInS: 120 });
+      expect(host.adapterState()).toMatchObject({ restPausedForS: 0, limitSpent: true, limitPlaceFreesInS: 120 });
       await vi.advanceTimersByTimeAsync(120_000);
       await read;
     });
@@ -2067,6 +2068,177 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       await vi.advanceTimersByTimeAsync(60_000);
       expect(httpMock.postForm).toHaveBeenCalledTimes(14);
       await Promise.all([...refreshes, ...polls]);
+    });
+
+    /**
+     * Every read is answered at once with an error, its answer stamped like http.ts does.
+     *
+     * @returns the answer stamps, in their order
+     */
+    const failReads = (): number[] => {
+      const answered: number[] = [];
+      httpMock.getJson.mockImplementation(() => {
+        answered.push(Date.now());
+        return Promise.resolve({ ...failResult(409, { error: "SDK.Error.Refused" }), answeredAt: Date.now() });
+      });
+      return answered;
+    };
+    const holdLines = (ctx: Ctx): string[] =>
+      ctx.i.log.warn.mock.calls.map(([m]) => String(m)).filter(m => m.startsWith("The adapter holds"));
+
+    it("holds every REST request after ten successive error answers until the first leaves the window", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      const answered = failReads();
+      const reads = Array.from({ length: 11 }, (_, n) => ctx.i.apiGet(`/api/e${n}`));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      // decision H-14: one line names the limit and the wait
+      expect(holdLines(ctx)).toEqual([
+        "The adapter holds its requests to Home Connect for 10 min (limit: 10 successive calls answered with an error in 10 minutes) — commands in that time are dropped, reads wait for their place.",
+      ]);
+      // a command would act ten minutes late: dropped
+      takeWrites();
+      await expect(
+        ctx.i.apiWrite({ method: "PUT", path: "/api/homeappliances/ha1/settings/X", body: { key: "X", value: 1 } }),
+      ).resolves.toBeUndefined();
+      expect(httpMock.putJson).not.toHaveBeenCalled();
+      // the first error's place frees ten minutes after its answer
+      await vi.advanceTimersByTimeAsync(answered[0] + 600_000 - Date.now() - 1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(11);
+      await Promise.all(reads);
+      expect(holdLines(ctx)).toHaveLength(1);
+    });
+
+    it("lets requests go on while an answer without an error ends each series — and never counts the poll of the sign-in link's code", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      let n = 0;
+      httpMock.getJson.mockImplementation(() =>
+        Promise.resolve({
+          ...(++n % 10 === 0 ? okResult() : failResult(404, { error: "SDK.Error.NoProgramActive" })),
+          answeredAt: Date.now(),
+        }),
+      );
+      const reads = Array.from({ length: 30 }, (_, k) => ctx.i.apiGet(`/api/s${k}`));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(30);
+      await Promise.all(reads);
+      // the poll answers "pending" with an error until the user confirms — twelve of them hold nothing
+      httpMock.postForm.mockClear();
+      httpMock.postForm.mockImplementation(() =>
+        Promise.resolve({ status: 400, ok: false, body: { error: "authorization_pending" }, answeredAt: Date.now() }),
+      );
+      const polls = Array.from({ length: 12 }, () => signIn(ctx, "urn:ietf:params:oauth:grant-type:device_code"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(httpMock.postForm).toHaveBeenCalledTimes(12);
+      await Promise.all(polls);
+      expect(holdLines(ctx)).toEqual([]);
+    });
+
+    it("hands the series of error answers to the next process — a restart within the ten minutes holds the next request", async () => {
+      const first = setup();
+      await first.i.onReady();
+      const answered = failReads();
+      const reads = Array.from({ length: 10 }, (_, n) => first.i.apiGet(`/api/e${n}`));
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.all(reads);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      const next = setup();
+      await next.i.onReady();
+      const read = next.i.apiGet("/api/after");
+      await vi.advanceTimersByTimeAsync(answered[0] + 600_000 - Date.now() - 1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(11);
+      await read;
+    });
+
+    /**
+     * Nine reads answered at once with an error, then one the test answers by hand.
+     *
+     * @returns the answer stamps of the nine, and the hand that answers the tenth
+     */
+    const nineThenOpen = (): { answered: number[]; answerTenth: (res: JsonResult) => void } => {
+      const answered: number[] = [];
+      let answerTenth: (res: JsonResult) => void = () => undefined;
+      httpMock.getJson.mockImplementation(() => {
+        if (answered.length < 9) {
+          answered.push(Date.now());
+          return Promise.resolve({ ...failResult(409, { error: "SDK.Error.Refused" }), answeredAt: Date.now() });
+        }
+        return new Promise<JsonResult>(resolve => (answerTenth = resolve));
+      });
+      return { answered, answerTenth: res => answerTenth(res) };
+    };
+
+    it("goes on at once when a request on its way ends the series, though another request's hold lets the queue sleep", async () => {
+      const ctx = setup();
+      await ctx.i.onReady();
+      httpMock.postForm.mockClear();
+      httpMock.postForm.mockImplementation(() =>
+        Promise.resolve({ status: 200, ok: true, body: {}, answeredAt: Date.now() }),
+      );
+      const refreshes = Array.from({ length: 11 }, () => signIn(ctx, "refresh_token"));
+      await vi.advanceTimersByTimeAsync(1_500);
+      // the eleventh refresh waits about a minute — no REST request, so the series never holds it: the queue sleeps
+      expect(httpMock.postForm).toHaveBeenCalledTimes(10);
+      const { answerTenth } = nineThenOpen();
+      const reads = Array.from({ length: 12 }, (_, n) => ctx.i.apiGet(`/api/s${n}`));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      httpMock.getJson.mockImplementation(() => Promise.resolve({ ...okResult(), answeredAt: Date.now() }));
+      answerTenth({ ...okResult(), answeredAt: Date.now() });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(12);
+      expect(httpMock.postForm).toHaveBeenCalledTimes(10);
+      expect(holdLines(ctx)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await Promise.all([...refreshes, ...reads]);
+    });
+
+    it("hands no request still on its way at the stop into the series — the judge counts only the answers that came", async () => {
+      const first = setup();
+      await first.i.onReady();
+      nineThenOpen();
+      const reads = Array.from({ length: 10 }, (_, n) => first.i.apiGet(`/api/e${n}`));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await new Promise<void>(resolve => first.i.onUnload(resolve));
+      void reads;
+      const next = setup();
+      await next.i.onReady();
+      httpMock.getJson.mockImplementation(() => Promise.resolve({ ...okResult(), answeredAt: Date.now() }));
+      const read = next.i.apiGet("/api/after");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(11);
+      await read;
+    });
+
+    it("hands over the error a request still on its way at the stop got during it — the next process holds the request after the series", async () => {
+      const first = setup();
+      await first.i.onReady();
+      const { answered, answerTenth } = nineThenOpen();
+      const reads = Array.from({ length: 10 }, (_, n) => first.i.apiGet(`/api/e${n}`));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      const stopped = new Promise<void>(resolve => first.i.onUnload(resolve));
+      // the old process still lives when Home Connect answers the tenth with an error
+      answerTenth({ ...failResult(409, { error: "SDK.Error.Refused" }), answeredAt: Date.now() });
+      await stopped;
+      await Promise.all(reads);
+      const next = setup();
+      await next.i.onReady();
+      httpMock.getJson.mockImplementation(() => Promise.resolve({ ...okResult(), answeredAt: Date.now() }));
+      const read = next.i.apiGet("/api/after");
+      await vi.advanceTimersByTimeAsync(answered[0] + 600_000 - Date.now() - 1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(10);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(httpMock.getJson).toHaveBeenCalledTimes(11);
+      await read;
     });
 
     it("hands a program start's place to the next process — a restart within the minute holds the sixth", async () => {
@@ -4061,9 +4233,14 @@ describe("Homeconnect diagnostics report", () => {
         ctx.i as unknown as { reportHost(): { liveReadBlocked(): string | undefined; secrets(): string[] } }
       ).reportHost();
     expect(host().liveReadBlocked()).toBeUndefined();
-    (ctx.i as unknown as { errorStreak: number }).errorStreak = 8;
-    expect(host().liveReadBlocked()).toMatch(/8 error answers in a row/);
-    (ctx.i as unknown as { errorStreak: number }).errorStreak = 0;
+    httpMock.getJson.mockResolvedValue(failResult(409, { error: "SDK.Error.Refused", answeredAt: Date.now() }));
+    for (let n = 0; n < 8; n++) {
+      await ctx.i.apiGet(`/api/homeappliances/${HA}/f${n}`);
+    }
+    expect(host().liveReadBlocked()).toBe("8 error answers in a row — requests wait (Home Connect blocks after 10)");
+    httpMock.getJson.mockResolvedValue({ ...okResult(), answeredAt: Date.now() });
+    await ctx.i.apiGet(`/api/homeappliances/${HA}/ok`);
+    expect(host().liveReadBlocked()).toBeUndefined();
     ctx.i.restBlockedUntil = Date.now() + 40_000;
     expect(host().liveReadBlocked()).toMatch(/Home Connect blocks requests for another 4\d s/);
     ctx.i.restBlockedUntil = 0;
@@ -4085,7 +4262,7 @@ describe("Homeconnect diagnostics report", () => {
       "read",
     );
     expect(host().liveReadBlocked()).toBe(
-      "the day's request quota is spent (limit: 1000 calls in 1 day) — reads wait for their place",
+      "a request limit is spent (limit: 1000 calls in 1 day) — reads wait for their place",
     );
     inner.spentWindows.clear();
     ctx.auths[0].accessToken = undefined;

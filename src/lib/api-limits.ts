@@ -12,8 +12,12 @@ export interface DeclaredLimit {
   seconds?: number;
   /** Counts the calls open at the same time, from their send until they ended. */
   concurrent?: boolean;
-  /** Counts only the calls answered with an error (status 400 and up). */
-  errors?: boolean;
+  /**
+   * Counts only the calls answered with an error (status 400 and up): `true` every one in the window, `"successive"`
+   * only an unbroken series of them — an answer without an error ends the series (answer order; a call without an
+   * answer neither counts nor ends it).
+   */
+  errors?: boolean | string;
   /** The lane a call counts in: the whole account, its host, or its device (the named group `device`). */
   per: string;
   /** Where the number comes from. */
@@ -81,7 +85,8 @@ export function fits(call: LimitedCall, match: Counterpart["match"]): boolean {
 
 /**
  * The window a limit counts in, as the fleet suites name it (test/fleet-suites.js `limitKey`): its `seconds`,
- * "<seconds> errors" for the calls answered with an error, or "concurrent" for the calls open at once.
+ * "<seconds> errors" for the calls answered with an error, "<seconds> successive errors" for an unbroken series of
+ * them, or "concurrent" for the calls open at once.
  *
  * @param limit the limit
  * @returns the window's key
@@ -90,7 +95,30 @@ export function limitKey(limit: DeclaredLimit): string {
   if (limit.concurrent === true) {
     return "concurrent";
   }
+  if (limit.errors === "successive") {
+    return `${limit.seconds} successive errors`;
+  }
   return limit.errors === true ? `${limit.seconds} errors` : String(limit.seconds);
+}
+
+/**
+ * Whether a window counts only the calls answered with an error — every one, or an unbroken series of them.
+ *
+ * @param key the window's key ({@link limitKey})
+ * @returns whether it counts errors
+ */
+export function countsErrors(key: string): boolean {
+  return key.endsWith(" errors");
+}
+
+/**
+ * Whether a window counts an unbroken series of calls answered with an error — an answer without one ends it.
+ *
+ * @param key the window's key ({@link limitKey})
+ * @returns whether it counts a series
+ */
+export function countsSeries(key: string): boolean {
+  return key.endsWith(" successive errors");
 }
 
 /**
@@ -104,7 +132,7 @@ export function limitKey(limit: DeclaredLimit): string {
 export function limitFor(call: LimitedCall, seconds: number): number {
   const allowed = counterparts()
     .filter(c => fits(call, c.match))
-    .flatMap(c => c.limits.filter(l => l.seconds === seconds && l.concurrent !== true && l.errors !== true))
+    .flatMap(c => c.limits.filter(l => l.seconds === seconds && l.concurrent !== true && !countsErrors(limitKey(l))))
     .map(l => l.max);
   if (allowed.length === 0) {
     throw new Error(`src/lib/api-limits.json declares no limit for ${call.method} ${call.path} in ${seconds} s`);

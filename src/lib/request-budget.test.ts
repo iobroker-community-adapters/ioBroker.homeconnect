@@ -237,6 +237,98 @@ describe("a place holds while its request is on its way, then a window's length 
     expect(budget.waitMs(350, read()).ms).toBe(0);
   });
 
+  it("counts in a window of a series only the error answers after the latest answer without one", () => {
+    const series: Counterpart = {
+      name: "series",
+      match: { host: HOST, pathPattern: "^/api/.*$" },
+      limits: [limit(3, 600, { errors: "successive" })],
+    };
+    const budget = new RequestBudget(tableOf(hostWide(), series));
+    answered(budget, 0, read(), 404);
+    answered(budget, 100, read(), 409);
+    expect(budget.held(200, "series", "600 successive errors")).toBe(2);
+    // an answer without an error ends the series at once
+    answered(budget, 200, read(), 200);
+    expect(budget.held(300, "series", "600 successive errors")).toBe(0);
+    for (const t of [300, 400, 500]) {
+      answered(budget, t, read(), 500);
+    }
+    expect(budget.waitMs(600, read())).toEqual({
+      ms: 300 + 600_000 - 600,
+      window: { name: "series", key: "600 successive errors", max: 3, seconds: 600 },
+    });
+    // a request outside the counterpart neither counts nor ends the series
+    answered(budget, 700, refresh, 200);
+    expect(budget.held(800, "series", "600 successive errors")).toBe(3);
+    // every error leaves the window a window's length after its own answer
+    expect(budget.waitMs(300 + 600_000, read()).ms).toBe(0);
+  });
+
+  it("orders a series by the answers — a request on its way counts, one without an answer neither counts nor ends it", () => {
+    const series: Counterpart = {
+      name: "series",
+      match: { host: HOST, pathPattern: "^/api/.*$" },
+      limits: [limit(2, 600, { errors: "successive" })],
+    };
+    const budget = new RequestBudget(tableOf(hostWide(), series));
+    const slow = budget.take(0, read());
+    budget.sent(slow, 0);
+    answered(budget, 100, read(), 404);
+    // on its way it may still become an error — and its answer decides before any time does: no hold of ten minutes
+    // for a request that may well succeed
+    expect(budget.held(200, "series", "600 successive errors")).toBe(2);
+    expect(budget.waitMs(200, read())).toEqual({
+      ms: undefined,
+      window: { name: "series", key: "600 successive errors", max: 2, seconds: 600 },
+    });
+    // sent first, answered last: its answer without an error ends the error answered before it — and says so, the
+    // queue looks again at once
+    expect(budget.settle(slow, 300, 200)).toBe(true);
+    expect(budget.held(400, "series", "600 successive errors")).toBe(0);
+    // a second answer without an error ends no series: nothing frees, nothing to say
+    const calm = budget.take(350, read());
+    budget.sent(calm, 350);
+    expect(budget.settle(calm, 360, 200)).toBe(false);
+    answered(budget, 500, read(), 404);
+    const lost = budget.take(600, read());
+    budget.sent(lost, 600);
+    budget.settle(lost, undefined, 0);
+    // the transport stamps its own failure with a time too: still no answer
+    const failed = budget.take(650, read());
+    budget.sent(failed, 650);
+    budget.settle(failed, 660, 0);
+    expect(failed).toMatchObject({ failed: false, open: false, closed: true });
+    expect(failed.answeredAt).toBeUndefined();
+    expect(budget.held(700, "series", "600 successive errors")).toBe(1);
+    answered(budget, 800, read(), 404);
+    expect(budget.waitMs(900, read())).toMatchObject({ ms: 500 + 600_000 - 900, window: { name: "series" } });
+  });
+
+  it("names the REST API's series as the window of errors a REST read counts in — never the token endpoint's calls", () => {
+    const budget = new RequestBudget(counterparts);
+    expect(budget.errorWindow(read("/api/homeappliances/ha1/status"))).toEqual({
+      name: "Home Connect REST API",
+      key: "600 successive errors",
+      max: 10,
+      seconds: 600,
+    });
+    expect(budget.errorWindow(refresh)).toBeUndefined();
+    expect(budget.errorWindow(read("/api/homeappliances/events"))?.name).toBe("Home Connect REST API");
+  });
+
+  it("holds the eleventh REST request after ten successive error answers until the first leaves the window", () => {
+    const budget = new RequestBudget(counterparts);
+    for (let n = 0; n < 10; n++) {
+      answered(budget, n * 200, read(), 409);
+    }
+    expect(budget.waitMs(2_000, read())).toEqual({
+      ms: 600_000 - 2_000,
+      window: { name: "Home Connect REST API", key: "600 successive errors", max: 10, seconds: 600 },
+    });
+    // the token refresh is no REST request: the series never holds it
+    expect(budget.waitMs(2_000, refresh).ms).toBe(0);
+  });
+
   it("keeps a lane per device for a limit per device, and one per host for a limit per host", () => {
     const perDevice: Counterpart = {
       name: "per device",
@@ -282,9 +374,34 @@ describe("the request budget across a restart", () => {
     budget.sent(open, 2_000);
     expect(budget.heldPlaces(5_000)).toEqual({
       "Home Connect API": { 1: { account: [5_000] }, 60: { account: [1_000, 5_000] } },
+      // a request on its way is no error answer yet: the series takes only the answered errors
       "Home Connect REST API": { 86400: { account: [1_000, 5_000] } },
       "Home Connect program starts": { 60: { account: [1_000] } },
     });
+  });
+
+  it("hands over the series of error answers that still runs, and the next process holds the request after it", () => {
+    const f = file();
+    const first = new RequestBudget(counterparts);
+    answered(first, 0, read(), 500);
+    answered(first, 100, read(), 200);
+    for (let n = 0; n < 10; n++) {
+      answered(first, 200 + n * 100, read(), 409);
+    }
+    writeHeldPlaces(f, first.heldPlaces(2_000));
+    // the error before the answer without one is over — only the series after it goes to the file
+    expect(JSON.parse(readFileSync(f, "utf8")).windows["Home Connect REST API"]["600 successive errors"]).toEqual({
+      account: [200, 300, 400, 500, 600, 700, 800, 900, 1_000, 1_100],
+    });
+    const next = new RequestBudget(counterparts);
+    next.restore(readHeldPlaces(f, 3_000), 3_000, read());
+    expect(next.waitMs(3_000, read())).toMatchObject({
+      ms: 200 + 600_000 - 3_000,
+      window: { name: "Home Connect REST API", key: "600 successive errors" },
+    });
+    // the series goes on in the next process until an answer without an error ends it
+    answered(next, 600_200, read(), 200);
+    expect(next.held(600_300, "Home Connect REST API", "600 successive errors")).toBe(0);
   });
 
   it("takes the places over so a restart within the minute holds the sixth start, the folder created on the way", () => {

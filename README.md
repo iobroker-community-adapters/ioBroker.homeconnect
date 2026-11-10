@@ -135,6 +135,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: a request now holds its place in the Home Connect quota until a minute after its answer, so the 51st request of a minute no longer draws a 429
 - (krobipd) Fixed: the 1000 requests Home Connect allows per day are now kept, across a restart, a crash and a power cut too; once spent, commands are dropped instead of sent hours later and reads wait
 - (krobipd) Fixed: program starts and stops stay within the 5 per minute Home Connect allows each, and token refreshes within 10 per minute and 100 per day; the log says once which limit holds a request and for how long
+- (krobipd) Fixed: ten error answers in a row hold further requests for up to ten minutes, as Home Connect itself would block them — across a restart too; an answer without an error ends the series
 - (krobipd) Fixed: a sign-in that cannot reach Home Connect no longer tells you to check the Client ID
 
 <!--

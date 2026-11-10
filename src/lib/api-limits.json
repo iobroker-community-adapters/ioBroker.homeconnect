@@ -38,6 +38,13 @@
           "seconds": 86400,
           "per": "account",
           "source": "https://api-docs.home-connect.com/general/#rate-limiting (1000 requests per client and user account per day; every HTTPS request to the REST API counts toward the daily limit)"
+        },
+        {
+          "max": 10,
+          "seconds": 600,
+          "errors": "successive",
+          "per": "account",
+          "source": "https://api-docs.home-connect.com/general/#rate-limiting (10 successive requests per client and Home Connect user account per 10 minutes which result in an error)"
         }
       ]
     },

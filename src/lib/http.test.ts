@@ -99,7 +99,13 @@ describe("postForm", () => {
       refresh_token: "RT",
     });
 
-    expect(res).toEqual({ status: 200, ok: true, body: { access_token: "x" }, answeredAt: expect.any(Number) });
+    expect(res).toEqual({
+      status: 200,
+      ok: true,
+      body: { access_token: "x" },
+      answeredAt: expect.any(Number),
+      answeredStatus: 200,
+    });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("https://api.home-connect.com/security/oauth/token");
     expect(init.method).toBe("POST");
@@ -130,7 +136,13 @@ describe("postForm", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })),
     );
     const res = await postForm("https://api.home-connect.com", "/x", {});
-    expect(res).toEqual({ status: 400, ok: false, body: { error: "invalid_grant" }, answeredAt: expect.any(Number) });
+    expect(res).toEqual({
+      status: 400,
+      ok: false,
+      body: { error: "invalid_grant" },
+      answeredAt: expect.any(Number),
+      answeredStatus: 400,
+    });
   });
 
   it("passes on how long a 429 of the token endpoint blocks", async () => {
@@ -165,6 +177,7 @@ describe("getJson", () => {
       data: { homeappliances: [{ haId: "X" }] },
       error: undefined,
       answeredAt: expect.any(Number),
+      answeredStatus: 200,
     });
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("https://api.home-connect.com/api/homeappliances");
@@ -388,11 +401,13 @@ describe("response body cap", () => {
   it("applies the cap to the OAuth transport as well", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(big(6 * 1024 * 1024), { status: 200 })));
     const res = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
+    // Home Connect answered: the budget counts the status the headers carried
     expect(res).toEqual({
       status: 0,
       ok: false,
       body: { error: "response_too_large" },
       answeredAt: expect.any(Number),
+      answeredStatus: 200,
     });
   });
 });
@@ -498,17 +513,18 @@ describe("the answer stamp (tooling round 170)", () => {
     expect(res.answeredAt).toBe(HEADERS_AT);
   });
 
-  it("keeps the stamp on a body that breaks off after the headers (status 0)", async () => {
+  it("keeps the stamp and the headers' status on a body that breaks off after them (status 0)", async () => {
+    // Home Connect answered with that status — the budget counts it in a series of errors as the fleet judge does
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.stubGlobal("fetch", headersAt(slowBody('{"data":', true)));
     const read = await getJson("https://api.home-connect.com", "/x", "T");
-    expect(read).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
+    expect(read).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT, answeredStatus: 200 });
     vi.stubGlobal("fetch", headersAt(slowBody('{"error":', true), 409));
     const write = await putJson("https://api.home-connect.com", "/x", "T", { key: "k", value: 1 });
-    expect(write).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
-    vi.stubGlobal("fetch", headersAt(slowBody('{"access', true)));
+    expect(write).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT, answeredStatus: 409 });
+    vi.stubGlobal("fetch", headersAt(slowBody('{"access', true), 400));
     const token = await postForm("https://api.home-connect.com", "/security/oauth/token", {});
-    expect(token).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT });
+    expect(token).toMatchObject({ status: 0, ok: false, answeredAt: HEADERS_AT, answeredStatus: 400 });
   });
 
   it("carries no stamp when no answer came — a transport error, a timeout", async () => {
@@ -516,6 +532,7 @@ describe("the answer stamp (tooling round 170)", () => {
     const read = await getJson("https://api.home-connect.com", "/x", "T");
     expect(read.status).toBe(0);
     expect(read).not.toHaveProperty("answeredAt");
+    expect(read).not.toHaveProperty("answeredStatus");
     const write = await deleteJson("https://api.home-connect.com", "/x", "T");
     expect(write).not.toHaveProperty("answeredAt");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("The operation was aborted.", "TimeoutError")));
