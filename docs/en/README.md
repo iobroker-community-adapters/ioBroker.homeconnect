@@ -9,7 +9,16 @@ Every value arrives in a form you can use directly: on/off as a boolean, a fixed
 - Node.js >= 22
 - js-controller >= 7.2.5
 - Admin >= 8.3.5
-- A free Home Connect developer account, for a Client ID and a Client Secret
+- A free Home Connect developer account, for a Client ID and a Client Secret — or, with the app access (beta), the account of your Home Connect app
+
+## Developer access or Home Connect app (beta)
+
+The setting **Access to Home Connect** chooses how the adapter signs in:
+
+- **Home Connect developer access** — the documented way: an application of your own in the free Home Connect Developer Program, with a Client ID and a Client Secret. It is set up once, see the next chapter.
+- **Home Connect app (beta)** — signs in the way the Home Connect app does, with the account you use in the app; no developer account, no Client ID. It uses the public sign-in of the Home Connect app, which Home Connect can change at any time — the developer access stays the documented way.
+
+Both ways give the same object tree and the same commands, and the adapter holds the documented request limits in both. Switching from one to the other drops the stored login and needs a new sign-in. The values the app sign-in needs — the app's public client, its return address, the permissions and the forms of the address the sign-in ends on — come from [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
 
 ## Getting your Home Connect credentials
 
@@ -29,6 +38,16 @@ While the link waits, it renews itself every five minutes. If nobody confirms on
 You sign in once. The adapter refreshes its access by itself; a new sign-in is only needed when the access is revoked in your Home Connect account, when Home Connect refuses the application (disabled, deleted, new secret), or when the ioBroker data moved to another system — the stored login cannot be read there, and the log says so.
 
 When Home Connect refuses the sign-in, the panel shows what it answered and what to do; `auth.lastError` keeps the answer (see Troubleshooting).
+
+## Signing in with the Home Connect app (beta)
+
+1. Choose **Home Connect app (beta)** under **Access to Home Connect** and save — the instance restarts with the app access.
+2. In the sign-in panel, press **Open sign-in page**. A new browser tab opens the Home Connect sign-in; sign in with the account of your Home Connect app.
+3. The browser then ends on a Home Connect page that may show a QR code. Ignore it, copy the full address from the browser's address bar, paste it into the field **Address of the page the sign-in ended on** and press **Finish sign-in**.
+
+The panel shows the adapter's answer. A sign-in page stays valid for an hour, and a restart of the adapter forgets it — then open a new one. Pasting the same address twice does not work: Home Connect accepts each code once. After the sign-in the adapter refreshes its access by itself, as with the developer access; **Reset sign-in** forgets the login.
+
+The address you paste reaches no log line and no report. This is a beta: if something does not work, attach the diagnostics report (see below) to your report — it names the access in use.
 
 ## The object tree
 
@@ -457,6 +476,7 @@ Home Connect grants 1000 requests to its REST API per day per application and ac
 | `unauthorized_client: client not authorized for this oauth flow (grant_type)`                | The application uses another OAuth flow — register a new one with Device Flow.                                                                                              |
 | `invalid_client`                                                                             | The Client Secret was rejected — check it.                                                                                                                                  |
 | `access_denied`                                                                              | The account was refused — check it in the Home Connect app (SingleKey ID, accepted terms of use) and that it is the one entered in the developer portal.                    |
+| App access: "no sign-in link is open — request a new one"                                    | The sign-in page is older than an hour, was used already, or the adapter restarted since — open a new sign-in page.                                                         |
 | In China                                                                                     | Home Connect in China (`api.home-connect.cn`) is not supported.                                                                                                             |
 | An appliance stays grey                                                                      | It is switched off or has no network. Its data points stay and keep their last values.                                                                                      |
 | A write does nothing                                                                         | The appliance permits no remote operation right now (`status.remoteControlActive`), or the program option does not belong to the selected program.                          |
@@ -466,7 +486,7 @@ Home Connect grants 1000 requests to its REST API per day per application and ac
 
 When an appliance does not do what it should, open the instance settings, tab **Expert**, pick the appliance and download its diagnostics report. It holds what Home Connect answered for this appliance (also a fresh read of its status, settings and programs while it is connected), the events of the live stream, the appliance's datapoints with their values and the adapter's recent log lines. Attach the file to an issue with the form **Report a device** — the card links to it.
 
-The report is made only when you ask for it, stays in memory until the download and writes nothing. Serial numbers, the names you gave your appliances and your sign-in data stand in it as placeholders.
+The report is made only when you ask for it, stays in memory until the download and writes nothing. Serial numbers, the names you gave your appliances and your sign-in data stand in it as placeholders. It names the access in use and, for the app access, the form of the address you pasted — never the address.
 
 ## Support
 

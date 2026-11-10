@@ -27,11 +27,11 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 - Node.js >= 22
 - js-controller >= 7.2.5
 - Admin >= 8.3.5
-- A free Home Connect developer account (for a Client ID and Client Secret)
+- A free Home Connect developer account (for a Client ID and Client Secret) — or, with the app access (beta), the account of your Home Connect app
 
 ## Configuration
 
-The adapter signs in with an application of your own in the free Home Connect Developer Program, linked to the Home Connect account of your app.
+**Access to Home Connect** chooses how the adapter signs in: **Home Connect developer access** — an application of your own in the free Home Connect Developer Program, linked to the Home Connect account of your app (the steps below) — or **Home Connect app (beta)** (see below).
 
 1. Create a free developer account at [developer.home-connect.com](https://developer.home-connect.com/user/register). As **Default Home Connect Account for Testing** enter the e-mail address of your Home Connect app account — exactly as in the app, in **lower case**. This links the two accounts.
 2. [Register an application](https://developer.home-connect.com/applications/add):
@@ -61,6 +61,16 @@ The panel shows what Home Connect answered and what to do about it; `auth.lastEr
 | `access_denied` | The account was refused | Check that the account works in the Home Connect app (SingleKey ID, accepted terms of use) and that it is the one entered in the developer portal |
 
 After moving to a new ioBroker system the stored login cannot be read — sign in once more. Home Connect in China (`api.home-connect.cn`) is not supported.
+
+### Home Connect app (beta)
+
+With **Home Connect app (beta)** the adapter signs in the way the Home Connect app does, with the account you use in the app — no developer account, no Client ID. It uses the public sign-in of the Home Connect app, which Home Connect can change at any time; the developer access stays the documented way.
+
+1. Choose **Home Connect app (beta)** under **Access to Home Connect** and save.
+2. Press **Open sign-in page** in the panel and sign in with the account of your Home Connect app.
+3. The browser ends on a Home Connect page that may show a QR code — copy the full address from the address bar into **Address of the page the sign-in ended on** and press **Finish sign-in**.
+
+A sign-in page stays valid for an hour, and a restart forgets it. Switching the access needs a new sign-in. The values of the app sign-in (the app's public client, its return address, the permissions and the forms of the address) come from [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause). This is a beta — please attach the diagnostics report when you report a problem.
 
 ## Updating from 1.x
 
@@ -143,6 +153,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: an ajar door counts as open, no longer as closed
 - (krobipd) Fixed: the diagnostics report blanks the sign-in link and its code, and names Home Connect's last refusal of the sign-in
 - (krobipd) Changed: the login is kept as an encrypted file in the instance's data folder; the datapoint auth.session is removed, an existing login moves along
+- (krobipd) New: app access (beta) — sign in with the account of your Home Connect app instead of a developer account, chosen in the settings
 - (krobipd) Changed: the adapter requires Admin 8.3.5 or newer now
 
 <!--

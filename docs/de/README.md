@@ -9,7 +9,16 @@ Jeder Wert kommt in einer Form an, mit der sich direkt arbeiten lässt: Ein/Aus 
 - Node.js >= 22
 - js-controller >= 7.2.5
 - Admin >= 8.3.5
-- Ein kostenloses Home-Connect-Entwicklerkonto für Client ID und Client Secret
+- Ein kostenloses Home-Connect-Entwicklerkonto für Client ID und Client Secret — oder, mit dem App-Zugang (Beta), das Konto der Home Connect App
+
+## Entwicklerzugang oder Home Connect App (Beta)
+
+Die Einstellung **Zugang zu Home Connect** wählt, wie sich der Adapter anmeldet:
+
+- **Home Connect Entwicklerzugang** — der dokumentierte Weg: eine eigene Anwendung im kostenlosen Home Connect Developer Program, mit Client ID und Client Secret. Sie wird einmal eingerichtet, siehe nächstes Kapitel.
+- **Home Connect App (Beta)** — meldet sich so an wie die Home Connect App, mit dem Konto, das du in der App verwendest; kein Entwicklerkonto, keine Client ID. Der App-Zugang nutzt die öffentliche Anmeldung der Home Connect App, die Home Connect jederzeit ändern kann — der Entwicklerzugang bleibt der dokumentierte Weg.
+
+Beide Wege liefern denselben Objektbaum und dieselben Befehle, und der Adapter hält in beiden die dokumentierten Anfragegrenzen ein. Ein Wechsel von einem zum anderen verwirft die gespeicherte Anmeldung und braucht eine neue. Die Werte, die die App-Anmeldung braucht — die öffentliche Kennung der App, ihre Rücksprungadresse, die Berechtigungen und die Formen der Adresse, auf der die Anmeldung endet — stammen aus [Home Connect NG](https://github.com/renaudallard/homeassistant_homeconnect) (BSD-2-Clause).
 
 ## Zugangsdaten bei Home Connect anlegen
 
@@ -29,6 +38,16 @@ Solange der Link wartet, erneuert er sich alle fünf Minuten. Bestätigt eine St
 Angemeldet wird einmal. Der Adapter erneuert seinen Zugang selbst; eine neue Anmeldung ist nur nötig, wenn der Zugriff im Home-Connect-Konto widerrufen wurde, wenn Home Connect die Anwendung ablehnt (deaktiviert, gelöscht, neues Secret) oder wenn die ioBroker-Daten auf ein anderes System umgezogen sind — dort ist die gespeicherte Anmeldung nicht lesbar, und das Log sagt das.
 
 Lehnt Home Connect die Anmeldung ab, zeigt das Panel die Antwort und was zu tun ist; `auth.lastError` hält die Antwort fest (siehe Fehlersuche).
+
+## Mit der Home Connect App anmelden (Beta)
+
+1. Unter **Zugang zu Home Connect** die **Home Connect App (Beta)** wählen und speichern — die Instanz startet mit dem App-Zugang neu.
+2. Im Anmelde-Panel **Anmeldeseite öffnen** drücken. Ein neuer Browser-Tab öffnet die Anmeldung von Home Connect; dort mit dem Konto der Home Connect App anmelden.
+3. Danach endet der Browser auf einer Home-Connect-Seite, die eventuell einen QR-Code zeigt. Diesen ignorieren, die vollständige Adresse aus der Adresszeile des Browsers kopieren, in das Feld **Adresse der Seite, auf der die Anmeldung endete** einfügen und **Anmeldung abschließen** drücken.
+
+Das Panel zeigt die Antwort des Adapters. Eine Anmeldeseite gilt eine Stunde, und ein Neustart des Adapters vergisst sie — dann eine neue öffnen. Dieselbe Adresse zweimal einzufügen geht nicht: Home Connect nimmt jeden Code einmal an. Nach der Anmeldung erneuert der Adapter seinen Zugang selbst, wie beim Entwicklerzugang; **Anmeldung zurücksetzen** vergisst die Anmeldung.
+
+Die eingefügte Adresse steht in keiner Logzeile und in keinem Bericht. Das ist eine Beta: Funktioniert etwas nicht, bitte den Diagnosebericht (siehe unten) an die Meldung anhängen — er nennt den verwendeten Zugang.
 
 ## Der Objektbaum
 
@@ -457,6 +476,7 @@ Home Connect gewährt je Anwendung und Konto 1000 Anfragen an seine REST-API pro
 | `unauthorized_client: client not authorized for this oauth flow (grant_type)`                | Die Anwendung nutzt ein anderes OAuth-Verfahren — eine neue mit Device Flow registrieren.                                                                                      |
 | `invalid_client`                                                                             | Das Client Secret wurde abgelehnt — prüfen.                                                                                                                                    |
 | `access_denied`                                                                              | Das Konto wurde abgelehnt — in der Home-Connect-App prüfen (SingleKey ID, akzeptierte Nutzungsbedingungen) und ob es das im Entwicklerportal eingetragene Konto ist.           |
+| App-Zugang: „no sign-in link is open — request a new one“                                    | Die Anmeldeseite ist älter als eine Stunde, wurde schon verwendet, oder der Adapter wurde seitdem neu gestartet — eine neue Anmeldeseite öffnen.                               |
 | In China                                                                                     | Home Connect in China (`api.home-connect.cn`) wird nicht unterstützt.                                                                                                          |
 | Ein Gerät bleibt grau                                                                        | Es ist ausgeschaltet oder ohne Netz. Seine Datenpunkte bleiben mit ihren letzten Werten stehen.                                                                                |
 | Ein Schreibvorgang bewirkt nichts                                                            | Das Gerät lässt gerade keine Fernbedienung zu (`status.remoteControlActive`), oder die Option gehört nicht zum gewählten Programm.                                             |
@@ -466,7 +486,7 @@ Home Connect gewährt je Anwendung und Konto 1000 Anfragen an seine REST-API pro
 
 Tut ein Gerät nicht, was es soll: Instanz-Einstellungen öffnen, Reiter **Experte**, Gerät wählen und den Diagnosebericht herunterladen. Er enthält, was Home Connect für dieses Gerät geantwortet hat (bei einem verbundenen Gerät auch frisch gelesen: Status, Einstellungen und Programme), die Ereignisse des Live-Stroms, die Datenpunkte des Geräts mit ihren Werten und die letzten Logzeilen des Adapters. Die Datei an ein Issue mit dem Formular **Gerät melden** anhängen — die Karte verlinkt es.
 
-Der Bericht entsteht nur auf Anforderung, bleibt bis zum Herunterladen im Speicher und schreibt nichts. Seriennummern, die Namen deiner Geräte und deine Anmeldedaten stehen darin nur als Platzhalter.
+Der Bericht entsteht nur auf Anforderung, bleibt bis zum Herunterladen im Speicher und schreibt nichts. Seriennummern, die Namen deiner Geräte und deine Anmeldedaten stehen darin nur als Platzhalter. Er nennt den verwendeten Zugang und beim App-Zugang die Form der eingefügten Adresse — nie die Adresse selbst.
 
 ## Unterstützung
 
