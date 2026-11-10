@@ -139,6 +139,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: a sign-in that cannot reach Home Connect no longer tells you to check the Client ID
 - (krobipd) Fixed: a value that ends in a number takes the adapter's own label only within its own family — a hob power level of 9.0 no longer shows "Wash & dry 90'"
 - (krobipd) Fixed: the program statistics of an oven no longer name a dish another oven series numbers the same way — the adapter learns those programs from the finished run
+- (krobipd) Improved: a hob's cooking zone, power level, joined zones, frying sensor level and PowerMove levels get their own names, explanations and value labels in every language
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

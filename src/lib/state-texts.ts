@@ -635,6 +635,13 @@ const STATE_TEXTS: Readonly<Record<string, StateText>> = {
     name: "setCookingLightingBrightness",
     desc: "lightingBrightnessDesc",
   },
+  "Cooking.Hob.Option.FryingSensorLevel": { name: "optHobFryingSensorLevel", desc: "hobFryingSensorLevelDesc" },
+  "Cooking.Hob.Option.JoinZone": { name: "optHobJoinZone", desc: "hobJoinZoneDesc" },
+  "Cooking.Hob.Option.PowerLevel": { name: "optHobPowerLevel", desc: "hobPowerLevelDesc" },
+  "Cooking.Hob.Option.PowerMoveModeValueFront": { name: "optHobPowerMoveFront", desc: "hobPowerMoveFrontDesc" },
+  "Cooking.Hob.Option.PowerMoveModeValueMiddle": { name: "optHobPowerMoveMiddle", desc: "hobPowerMoveMiddleDesc" },
+  "Cooking.Hob.Option.PowerMoveModeValueRear": { name: "optHobPowerMoveRear", desc: "hobPowerMoveRearDesc" },
+  "Cooking.Hob.Option.ZoneSelector": { name: "optHobZoneSelector", desc: "hobZoneSelectorDesc" },
   "Cooking.Hob.Setting.Ventilation": { name: "setHobVentilation", desc: "setHobVentilationDesc" },
   "Cooking.Hood.Setting.ColorTemperature": { name: "setHoodColorTemperature", desc: "colorTemperatureDesc" },
   "Cooking.Hood.Setting.ColorTemperaturePercent": {

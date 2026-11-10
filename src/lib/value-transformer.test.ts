@@ -957,6 +957,28 @@ describe("keys the extra-data opt-in delivers", () => {
     // The explanation belongs to the adapter either way.
     expect(typeof t.common.desc).toBe("object");
   });
+
+  // Zone, level, joined zones, frying level and the PowerMove levels arrive as options of the one hob program
+  // (aiohomeconnect PR #203, ekutner/home-connect-hass #547/#553); without an own entry they carried the cloud's name
+  // in whatever language it answered and no explanation at all.
+  it.each([
+    ["Cooking.Hob.Option.ZoneSelector", "Cooking.Hob.EnumType.ZoneSelector.FrontLeft", "Kochzone"],
+    ["Cooking.Hob.Option.PowerLevel", "Cooking.Hob.EnumType.PowerLevel.90", "Leistungsstufe"],
+    ["Cooking.Hob.Option.JoinZone", false, "Zonen verbunden"],
+    ["Cooking.Hob.Option.FryingSensorLevel", "Cooking.Hob.EnumType.FryingSensorLevel.Level03", "Bratsensor-Stufe"],
+    ["Cooking.Hob.Option.PowerMoveModeValueFront", "Cooking.Hob.EnumType.PowerLevel.Off", "PowerMove-Stufe vorne"],
+    ["Cooking.Hob.Option.PowerMoveModeValueMiddle", "Cooking.Hob.EnumType.PowerLevel.50", "PowerMove-Stufe Mitte"],
+    ["Cooking.Hob.Option.PowerMoveModeValueRear", "Cooking.Hob.EnumType.PowerLevel.90", "PowerMove-Stufe hinten"],
+  ])("names the hob option %s itself and explains it", (key, value, de) => {
+    const t = transformItem({ key, value, name: "Cooking zone" });
+    expect(t.common.name).toMatchObject({ de });
+    expect(t.nameSource).toBe("i18n");
+    const desc = t.common.desc as Record<string, string>;
+    for (const lang of ["en", "de", "fr", "it", "nl", "pl", "pt", "ru", "uk", "zh-cn", "es"]) {
+      expect(desc[lang], `desc/${lang}`).toBeTruthy();
+      expect(desc[lang]).not.toMatch(/Desc$/);
+    }
+  });
 });
 
 describe("every table entry explains its datapoint", () => {
