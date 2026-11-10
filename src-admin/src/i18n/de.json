@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "Der Anmelde-Code ist abgelaufen, bevor er bestätigt wurde — fordere einen neuen Anmelde-Link an.",
   "hc_problem_loginRevoked": "Die gespeicherte Anmeldung gilt nicht mehr — melde dich neu an.",
   "hc_problem_scope": "Die Anwendung darf die angefragten Berechtigungen nicht nutzen — prüfe sie im Entwicklerportal.",
-  "hc_problem_other": "Home Connect hat die Anmeldung abgelehnt — prüfe oben Client ID und Client Secret."
+  "hc_problem_other": "Home Connect hat die Anmeldung abgelehnt — prüfe oben Client ID und Client Secret.",
+  "hc_appSignInNeeded": "Anmeldung nötig: Anmeldeseite öffnen und mit dem Konto der Home Connect App anmelden.",
+  "hc_appSignInSteps": "Auf der geöffneten Seite mit dem Konto der Home Connect App anmelden (bei Bedarf mit dem Knopf erneut öffnen). Danach endet der Browser auf einer Home-Connect-Seite, die eventuell einen QR-Code zeigt — diesen ignorieren, die vollständige Adresse aus der Adresszeile des Browsers kopieren und unten einfügen.",
+  "hc_appPasteLabel": "Adresse der Seite, auf der die Anmeldung endete",
+  "hc_appFinish": "Anmeldung abschließen",
+  "hc_appProblem": "Home Connect hat die Anmeldung abgelehnt — Anmeldeseite öffnen und erneut anmelden."
 }

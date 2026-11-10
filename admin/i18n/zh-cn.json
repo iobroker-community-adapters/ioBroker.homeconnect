@@ -729,5 +729,10 @@
   "setTheaterMode": "开关门时内灯渐变",
   "setTheaterModeDesc": "开关门时内灯逐渐亮起和熄灭。",
   "tabMain": "配置",
-  "tabExpert": "专家"
+  "tabExpert": "专家",
+  "label_accessMode": "Home Connect 访问方式",
+  "help_accessMode": "开发者访问：使用您在 Home Connect 开发者计划中自己的应用。Home Connect 应用（测试版）：使用您的 Home Connect 应用账户。切换访问方式需要重新登录。",
+  "accessMode_api": "Home Connect 开发者访问",
+  "accessMode_app": "Home Connect 应用（测试版）",
+  "appAccessInfo": "应用访问为测试版：适配器像 Home Connect 应用一样登录，使用您在应用中使用的账户——无需开发者账户，也无需 Client ID。请先保存设置，然后在下方登录。\n如有问题，请在报告中附上诊断报告（“专家”选项卡）。"
 }

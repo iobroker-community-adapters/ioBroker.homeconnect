@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "登录代码在确认前已过期——请申请新的登录链接。",
   "hc_problem_loginRevoked": "保存的登录已失效——请重新登录。",
   "hc_problem_scope": "该应用无权使用所请求的权限——请在开发者门户中检查。",
-  "hc_problem_other": "Home Connect 拒绝了登录——请检查上方的 Client ID 和 Client Secret。"
+  "hc_problem_other": "Home Connect 拒绝了登录——请检查上方的 Client ID 和 Client Secret。",
+  "hc_appSignInNeeded": "需要登录：打开登录页面，并使用您的 Home Connect 应用账户登录。",
+  "hc_appSignInSteps": "在打开的页面上使用您的 Home Connect 应用账户登录（如有需要，可用按钮重新打开）。之后浏览器会停在一个可能显示二维码的 Home Connect 页面——请忽略二维码，从浏览器地址栏复制完整地址并粘贴到下方。",
+  "hc_appPasteLabel": "登录结束时所在页面的地址",
+  "hc_appFinish": "完成登录",
+  "hc_appProblem": "Home Connect 拒绝了登录——请打开登录页面并重新登录。"
 }

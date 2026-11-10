@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "The sign-in code expired before it was confirmed — request a new sign-in link.",
   "hc_problem_loginRevoked": "The stored login is no longer valid — sign in again.",
   "hc_problem_scope": "The application may not use the requested permissions — check it in the developer portal.",
-  "hc_problem_other": "Home Connect refused the sign-in — check the Client ID and Client Secret above."
+  "hc_problem_other": "Home Connect refused the sign-in — check the Client ID and Client Secret above.",
+  "hc_appSignInNeeded": "Sign-in needed: open the sign-in page and sign in with the account of your Home Connect app.",
+  "hc_appSignInSteps": "Sign in on the page that opened, with the account of your Home Connect app (open it again with the button if needed). The browser then ends on a Home Connect page that may show a QR code — ignore it, copy the full address from the browser's address bar and paste it below.",
+  "hc_appPasteLabel": "Address of the page the sign-in ended on",
+  "hc_appFinish": "Finish sign-in",
+  "hc_appProblem": "Home Connect refused the sign-in — open the sign-in page and sign in again."
 }

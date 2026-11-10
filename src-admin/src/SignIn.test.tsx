@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type React from "react";
 import { I18n } from "@iobroker/gui-components";
 import type { ConfigGenericProps } from "@iobroker/json-config";
 
@@ -28,16 +31,21 @@ interface Panel {
   componentWillUnmount(): void;
   runTest(): Promise<void>;
   runAction(command: "requestSignIn" | "resetLogin"): Promise<void>;
+  openAppPage(): Promise<void>;
+  finishAppSignIn(): Promise<void>;
+  renderItem(): React.JSX.Element;
   setState: ReturnType<typeof vi.fn>;
+  state: Record<string, unknown>;
 }
 
-function makePanel(socket: Socket): Panel {
+function makePanel(socket: Socket, options: { data?: Record<string, unknown>; alive?: boolean } = {}): Panel {
   const props = {
     oContext: { adapterName: "homeconnect", instance: 0, socket },
     schema: {},
-    data: {},
+    data: options.data ?? {},
     attr: "signIn",
     themeType: "light",
+    alive: options.alive ?? false,
   } as unknown as ConfigGenericProps;
   const panel = new SignIn(props) as unknown as Panel;
   panel.setState = vi.fn();
@@ -55,6 +63,150 @@ function makeSocket(): Socket {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+/** The part of the panel's state a test sets before it renders. */
+type PanelState = { url?: string; signedIn?: boolean; connected?: boolean; lastError?: string; pasted?: string };
+
+/**
+ * A panel in the given sign-in state, rendered once (its setState is a spy, so nothing re-renders).
+ *
+ * @param data the instance settings the panel reads (`accessMode`)
+ * @param state the sign-in state to render
+ * @returns the rendered panel
+ */
+function renderPanel(data: Record<string, unknown>, state: PanelState): Panel {
+  const panel = makePanel(makeSocket(), { data, alive: true });
+  panel.state = { ...panel.state, ...state };
+  render(panel.renderItem());
+  return panel;
+}
+
+/** The sign-in page the adapter publishes in the app access — a code in it must never show as a device-flow code. */
+const APP_LINK =
+  "https://api.home-connect.com/security/oauth/authorize?client_id=X&redirect_uri=https%3A%2F%2Fqr.home-connect.com%2Fauthorize%2Fprod%2F&user_code=ABCD-1234";
+
+describe("SignIn — 2026-11-10: the Home Connect app access (beta)", () => {
+  it("app mode shows the paste field and no user code", () => {
+    renderPanel({ accessMode: "app" }, { url: APP_LINK });
+    expect(screen.getByTestId("hc-app-paste")).toBeInTheDocument();
+    expect(screen.getByTestId("hc-app-link")).toHaveAttribute("href", APP_LINK);
+    expect(screen.queryByTestId("hc-user-code")).toBeNull();
+    expect(screen.queryByText(I18n.t("hc_signInPrompt"))).toBeNull();
+  });
+
+  it('app mode derives "sign-in needed" from the states', () => {
+    renderPanel({ accessMode: "app" }, { url: "", signedIn: false, lastError: "Unknown" });
+    expect(screen.getByText(I18n.t("hc_appSignInNeeded"))).toBeInTheDocument();
+    expect(screen.getByTestId("hc-app-open")).toBeEnabled();
+    expect(screen.queryByTestId("hc-request-link")).toBeNull();
+    expect(screen.queryByTestId("hc-app-paste")).toBeNull();
+  });
+
+  it("a refusal in app mode points to a new sign-in, never to the developer portal", () => {
+    renderPanel({ accessMode: "app" }, { url: "", signedIn: false, lastError: "invalid_grant: Refresh token expired" });
+    expect(screen.getByText(I18n.t("hc_appProblem"))).toBeInTheDocument();
+    expect(screen.getByText(I18n.t("hc_problemAnswer", "invalid_grant: Refresh token expired"))).toBeInTheDocument();
+    expect(screen.queryByText(I18n.t("hc_problem_loginRevoked"))).toBeNull();
+  });
+
+  it("the open button asks appSignInLink and opens the answer in a new tab", async () => {
+    const socket = makeSocket();
+    socket.sendTo.mockReturnValue(Promise.resolve({ result: APP_LINK }));
+    const tab = { opener: {} as unknown };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    await panel.openAppPage();
+    expect(socket.sendTo).toHaveBeenCalledWith("homeconnect.0", "appSignInLink", {});
+    expect(open).toHaveBeenCalledWith(APP_LINK, "_blank");
+    expect(tab.opener).toBeNull();
+    expect(panel.setState).toHaveBeenCalledWith({ url: APP_LINK });
+    expect(panel.setState).toHaveBeenLastCalledWith({ acting: false });
+  });
+
+  it("a blocked tab still leaves the page as a link in the panel", async () => {
+    const socket = makeSocket();
+    socket.sendTo.mockReturnValue(Promise.resolve({ result: APP_LINK }));
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    await panel.openAppPage();
+    expect(panel.setState).toHaveBeenCalledWith({ url: APP_LINK });
+  });
+
+  it("the finish button sends appSignInComplete with the pasted address", async () => {
+    const socket = makeSocket();
+    socket.sendTo.mockReturnValue(Promise.resolve({ result: "Signed in to Home Connect." }));
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    panel.state = { ...panel.state, pasted: "https://qr.home-connect.com/authorize/prod/?code=abc&state=s" };
+    await panel.finishAppSignIn();
+    expect(socket.sendTo).toHaveBeenCalledWith("homeconnect.0", "appSignInComplete", {
+      address: "https://qr.home-connect.com/authorize/prod/?code=abc&state=s",
+    });
+    expect(panel.setState).toHaveBeenCalledWith({
+      actionResult: { ok: true, text: "Signed in to Home Connect." },
+      pasted: "",
+    });
+    expect(panel.setState).toHaveBeenLastCalledWith({ acting: false });
+  });
+
+  it("an error answer is shown verbatim and keeps what was pasted", async () => {
+    const socket = makeSocket();
+    socket.sendTo.mockReturnValue(Promise.resolve({ error: "no sign-in link is open — request a new one" }));
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    panel.state = { ...panel.state, pasted: "https://qr.home-connect.com/authorize/prod/?code=abc" };
+    await panel.finishAppSignIn();
+    expect(panel.setState).toHaveBeenCalledWith({
+      actionResult: { ok: false, text: "no sign-in link is open — request a new one" },
+    });
+    expect(panel.setState).not.toHaveBeenCalledWith(expect.objectContaining({ pasted: "" }));
+  });
+
+  it("an open-page refusal is shown verbatim and opens no tab", async () => {
+    const socket = makeSocket();
+    socket.sendTo.mockReturnValue(
+      Promise.resolve({ error: "The instance runs with the developer access — save the settings first." }),
+    );
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    await panel.openAppPage();
+    expect(open).not.toHaveBeenCalled();
+    expect(panel.setState).toHaveBeenCalledWith({
+      actionResult: { ok: false, text: "The instance runs with the developer access — save the settings first." },
+    });
+    expect(panel.setState).toHaveBeenLastCalledWith({ acting: false });
+  });
+
+  it("typing into the paste field keeps a draft; finishing waits for something pasted", () => {
+    const panel = renderPanel({ accessMode: "app" }, { url: APP_LINK, pasted: "" });
+    expect(screen.getByTestId("hc-app-finish")).toBeDisabled();
+    const input = screen.getByTestId("hc-app-paste").querySelector("input");
+    expect(input).not.toBeNull();
+    fireEvent.change(input!, { target: { value: "https://qr.home-connect.com/authorize/prod/?code=abc" } });
+    expect(panel.setState).toHaveBeenCalledWith({ pasted: "https://qr.home-connect.com/authorize/prod/?code=abc" });
+  });
+
+  it("an answer after the close renders nothing", async () => {
+    const socket = makeSocket();
+    const late = deferred<{ result: string }>();
+    socket.sendTo.mockReturnValue(late.promise);
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const panel = makePanel(socket, { data: { accessMode: "app" }, alive: true });
+    const opening = panel.openAppPage();
+    panel.setState.mockClear();
+    panel.componentWillUnmount();
+    late.resolve({ result: APP_LINK });
+    await opening;
+    expect(panel.setState).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("the developer access renders as before: the code, no paste field", () => {
+    renderPanel({}, { url: "https://api.home-connect.com/security/oauth/device_verify?user_code=ABCD-1234" });
+    expect(screen.getByTestId("hc-user-code")).toHaveTextContent("ABCD-1234");
+    expect(screen.queryByTestId("hc-app-paste")).toBeNull();
+    expect(screen.queryByTestId("hc-app-open")).toBeNull();
+  });
 });
 
 describe("SignIn — 2026-09-24: nothing happens after the panel closed", () => {

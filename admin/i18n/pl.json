@@ -729,5 +729,10 @@
   "setTheaterMode": "Łagodne światło przy drzwiach",
   "setTheaterModeDesc": "Oświetlenie wnętrza łagodnie rozjaśnia się i przygasa przy otwieraniu i zamykaniu drzwi.",
   "tabMain": "Konfiguracja",
-  "tabExpert": "Ekspert"
+  "tabExpert": "Ekspert",
+  "label_accessMode": "Dostęp do Home Connect",
+  "help_accessMode": "Dostęp deweloperski: z własną aplikacją w programie deweloperskim Home Connect. Aplikacja Home Connect (beta): z kontem Twojej aplikacji Home Connect. Zmiana dostępu wymaga ponownego logowania.",
+  "accessMode_api": "Dostęp deweloperski Home Connect",
+  "accessMode_app": "Aplikacja Home Connect (beta)",
+  "appAccessInfo": "Dostęp przez aplikację jest w wersji beta: adapter loguje się tak jak aplikacja Home Connect, kontem używanym w aplikacji — bez konta deweloperskiego i bez Client ID. Najpierw zapisz ustawienia, a potem zaloguj się poniżej.\nJeśli coś nie działa, dołącz raport diagnostyczny (karta Ekspert) do zgłoszenia."
 }

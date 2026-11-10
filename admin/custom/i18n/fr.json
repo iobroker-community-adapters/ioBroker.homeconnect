@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "Le code de connexion a expiré avant d'être confirmé — demandez un nouveau lien de connexion.",
   "hc_problem_loginRevoked": "La connexion enregistrée n'est plus valable — reconnectez-vous.",
   "hc_problem_scope": "L'application n'a pas le droit d'utiliser les autorisations demandées — vérifiez-la dans le portail développeur.",
-  "hc_problem_other": "Home Connect a refusé la connexion — vérifiez ci-dessus le Client ID et le Client Secret."
+  "hc_problem_other": "Home Connect a refusé la connexion — vérifiez ci-dessus le Client ID et le Client Secret.",
+  "hc_appSignInNeeded": "Connexion requise : ouvrez la page de connexion et connectez-vous avec le compte de votre application Home Connect.",
+  "hc_appSignInSteps": "Connectez-vous sur la page ouverte avec le compte de votre application Home Connect (rouvrez-la avec le bouton si nécessaire). Le navigateur aboutit ensuite sur une page Home Connect qui peut afficher un code QR : ignorez-le, copiez l'adresse complète depuis la barre d'adresse du navigateur et collez-la ci-dessous.",
+  "hc_appPasteLabel": "Adresse de la page sur laquelle la connexion s'est terminée",
+  "hc_appFinish": "Terminer la connexion",
+  "hc_appProblem": "Home Connect a refusé la connexion — ouvrez la page de connexion et connectez-vous à nouveau."
 }

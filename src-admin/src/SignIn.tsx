@@ -1,6 +1,6 @@
 import React from "react";
 
-import { Box, Button, Typography } from "@mui/material";
+import { Box, Button, TextField, Typography } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
@@ -37,6 +37,8 @@ interface SignInState extends ConfigGenericState {
   confirmReset: boolean;
   /** The last sign-in action's answer — the adapter's own words. */
   actionResult: { ok: boolean; text: string } | null;
+  /** The app access: what the user pasted so far (a draft of the panel's own — no setting, never saved). */
+  pasted: string;
 }
 
 /**
@@ -81,6 +83,11 @@ export function isRefusal(text: string): boolean {
  * no link — a button to request one. A refusal by Home Connect shows what to do, in the admin's
  * language, with Home Connect's own words below it. "Test connection" asks the running adapter for a
  * real request to Home Connect; "Reset sign-in" forgets the login and starts a new one.
+ *
+ * The app access (beta, setting `accessMode: "app"`): without an open sign-in page a button asks the adapter for
+ * one (`appSignInLink`) and opens it in a new tab; with one open, the page as a link, a field for the address the
+ * sign-in ended on and a button that hands it to the adapter (`appSignInComplete` with `{ address }`). The adapter's
+ * answer stands below, word for word.
  */
 export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInState> {
   private urlId = "";
@@ -106,7 +113,18 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
       acting: false,
       confirmReset: false,
       actionResult: null,
+      pasted: "",
     };
+  }
+
+  /**
+   * Whether the settings choose the Home Connect app access — the form's value, so the panel follows the selection
+   * before it is saved (the adapter answers for the access it runs with and says so).
+   *
+   * @returns true for the app access (beta)
+   */
+  private appMode(): boolean {
+    return ConfigGeneric.getValue(this.props.data, "accessMode") === "app";
   }
 
   private readonly onUrl = (_id: string, state: ioBroker.State | null | undefined): void => {
@@ -190,9 +208,10 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
    * the click left the button busy until the page was reloaded).
    *
    * @param command the message command
+   * @param message the message body
    * @returns the answer, or `{ ok: false, text }` for no answer or a failing socket
    */
-  private async ask(command: string): Promise<{ ok: boolean; text: string }> {
+  private async ask(command: string, message: Record<string, unknown> = {}): Promise<{ ok: boolean; text: string }> {
     const ctx = this.props.oContext;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -203,7 +222,7 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
         ctx.socket.sendTo<{ result?: unknown; error?: unknown } | null | undefined>(
           `${ctx.adapterName}.${ctx.instance}`,
           command,
-          {},
+          message,
         ),
         timeout,
       ]);
@@ -247,11 +266,51 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
     this.setState({ acting: false });
   }
 
+  /**
+   * The app access: ask the adapter for a sign-in page and open it in a new tab. The page also shows as a link in
+   * the panel (a browser that blocks the tab leaves the user that link); the new tab gets no handle on the admin.
+   */
+  private async openAppPage(): Promise<void> {
+    this.setState({ acting: true, actionResult: null, confirmReset: false });
+    const result = await this.ask("appSignInLink");
+    if (this.unmounted) {
+      return;
+    }
+    if (result.ok) {
+      this.setState({ url: result.text });
+      const tab = window.open(result.text, "_blank");
+      if (tab) {
+        tab.opener = null;
+      }
+    } else {
+      this.setState({ actionResult: result });
+    }
+    this.setState({ acting: false });
+  }
+
+  /** The app access: hand the pasted address to the adapter; a sign-in that worked empties the field. */
+  private async finishAppSignIn(): Promise<void> {
+    this.setState({ acting: true, actionResult: null, confirmReset: false });
+    const result = await this.ask("appSignInComplete", { address: this.state.pasted });
+    if (this.unmounted) {
+      return;
+    }
+    if (result.ok) {
+      this.setState({ actionResult: result, pasted: "" });
+    } else {
+      this.setState({ actionResult: result });
+    }
+    this.setState({ acting: false });
+  }
+
   private renderProblem(): React.JSX.Element | null {
     if (this.state.signedIn || !isRefusal(this.state.lastError)) {
       return null;
     }
     const { code, description } = parseRefusal(this.state.lastError);
+    // The developer access's hints point to the Client ID and the developer portal — the app access has neither,
+    // its way out of every refusal is a new sign-in.
+    const hint = this.appMode() ? I18n.t("hc_appProblem") : I18n.t(`hc_problem_${signInProblem(code, description)}`);
     return (
       <Box
         sx={{ mb: 2, color: "error.main" }}
@@ -259,7 +318,7 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <ErrorOutlineIcon />
-          <Typography>{I18n.t(`hc_problem_${signInProblem(code, description)}`)}</Typography>
+          <Typography>{hint}</Typography>
         </Box>
         <Typography
           variant="body2"
@@ -287,6 +346,9 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
           <Typography>{I18n.t("hc_signedInNoStream")}</Typography>
         </Box>
       );
+    }
+    if (this.appMode()) {
+      return this.renderAppSignIn();
     }
     if (this.state.url) {
       const code = userCodeOf(this.state.url);
@@ -345,6 +407,69 @@ export default class SignIn extends ConfigGeneric<ConfigGenericProps, SignInStat
           data-testid="hc-request-link"
         >
           {I18n.t("hc_requestLink")}
+        </Button>
+      </Box>
+    );
+  }
+
+  /**
+   * The app access while not signed in: "sign-in needed" comes from the states alone (no login, no open page) —
+   * with a page open, its link, the field for the address the sign-in ended on and the button to finish.
+   *
+   * @returns the app access's sign-in steps
+   */
+  private renderAppSignIn(): React.JSX.Element {
+    const alive = this.props.alive === true;
+    if (!this.state.url) {
+      return (
+        <Box>
+          <Typography sx={{ mb: 1 }}>{I18n.t("hc_appSignInNeeded")}</Typography>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<LoginIcon />}
+            disabled={!alive || this.state.acting}
+            onClick={() => void this.openAppPage()}
+            data-testid="hc-app-open"
+          >
+            {I18n.t("hc_openSignIn")}
+          </Button>
+        </Box>
+      );
+    }
+    return (
+      <Box>
+        <Typography sx={{ mb: 1 }}>{I18n.t("hc_appSignInSteps")}</Typography>
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center", mb: 2 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<LoginIcon />}
+            href={this.state.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="hc-app-link"
+          >
+            {I18n.t("hc_openSignIn")}
+          </Button>
+        </Box>
+        <TextField
+          fullWidth
+          size="small"
+          label={I18n.t("hc_appPasteLabel")}
+          value={this.state.pasted}
+          onChange={e => this.setState({ pasted: e.target.value })}
+          data-testid="hc-app-paste"
+        />
+        <Button
+          sx={{ mt: 1 }}
+          variant="contained"
+          color="primary"
+          disabled={!alive || this.state.acting || this.state.pasted.trim() === ""}
+          onClick={() => void this.finishAppSignIn()}
+          data-testid="hc-app-finish"
+        >
+          {I18n.t("hc_appFinish")}
         </Button>
       </Box>
     );

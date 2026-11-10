@@ -729,5 +729,10 @@
   "setTheaterMode": "Éclairage progressif à la porte",
   "setTheaterModeDesc": "L'éclairage intérieur s'allume et s'éteint progressivement à l'ouverture et à la fermeture de la porte.",
   "tabMain": "Configuration",
-  "tabExpert": "Expert"
+  "tabExpert": "Expert",
+  "label_accessMode": "Accès à Home Connect",
+  "help_accessMode": "Accès développeur : avec une application à vous dans le programme développeur de Home Connect. Application Home Connect (bêta) : avec le compte de votre application Home Connect. Changer d'accès nécessite une nouvelle connexion.",
+  "accessMode_api": "Accès développeur Home Connect",
+  "accessMode_app": "Application Home Connect (bêta)",
+  "appAccessInfo": "L'accès par l'application est une bêta : l'adaptateur se connecte comme le fait l'application Home Connect, avec le compte que vous utilisez dans l'application — sans compte développeur ni Client ID. Enregistrez d'abord les paramètres, puis connectez-vous ci-dessous.\nSi quelque chose ne fonctionne pas, joignez le rapport de diagnostic (onglet Expert) à votre signalement."
 }

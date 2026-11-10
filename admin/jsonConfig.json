@@ -11,6 +11,43 @@
           "text": "headerCredentials",
           "size": 3
         },
+        "accessMode": {
+          "type": "select",
+          "label": "label_accessMode",
+          "help": "help_accessMode",
+          "options": [
+            {
+              "label": "accessMode_api",
+              "value": "api"
+            },
+            {
+              "label": "accessMode_app",
+              "value": "app"
+            }
+          ],
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 8,
+          "lg": 6,
+          "xl": 6
+        },
+        "_appAccessInfo": {
+          "type": "staticText",
+          "text": "appAccessInfo",
+          "hidden": "data.accessMode !== 'app'",
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12,
+          "style": {
+            "fontSize": 14,
+            "marginBottom": 16,
+            "whiteSpace": "pre-line"
+          }
+        },
         "_credentialsInfo": {
           "type": "staticText",
           "text": "credentialsInfo",
@@ -23,7 +60,8 @@
             "fontSize": 14,
             "marginBottom": 16,
             "whiteSpace": "pre-line"
-          }
+          },
+          "hidden": "data.accessMode === 'app'"
         },
         "_registerLink": {
           "type": "staticLink",
@@ -36,7 +74,8 @@
           "sm": 6,
           "md": 4,
           "lg": 3,
-          "xl": 3
+          "xl": 3,
+          "hidden": "data.accessMode === 'app'"
         },
         "_addAppLink": {
           "type": "staticLink",
@@ -49,7 +88,8 @@
           "sm": 6,
           "md": 4,
           "lg": 3,
-          "xl": 3
+          "xl": 3,
+          "hidden": "data.accessMode === 'app'"
         },
         "_portalLink": {
           "type": "staticLink",
@@ -62,7 +102,8 @@
           "sm": 6,
           "md": 4,
           "lg": 3,
-          "xl": 3
+          "xl": 3,
+          "hidden": "data.accessMode === 'app'"
         },
         "clientID": {
           "type": "text",
@@ -72,7 +113,8 @@
           "sm": 12,
           "md": 8,
           "lg": 6,
-          "xl": 6
+          "xl": 6,
+          "hidden": "data.accessMode === 'app'"
         },
         "clientSecret": {
           "type": "password",
@@ -82,7 +124,8 @@
           "sm": 12,
           "md": 8,
           "lg": 6,
-          "xl": 6
+          "xl": 6,
+          "hidden": "data.accessMode === 'app'"
         },
         "_headerSignin": {
           "type": "header",

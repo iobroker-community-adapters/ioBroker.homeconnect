@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "El código de inicio de sesión caducó antes de confirmarse; solicita un nuevo enlace de inicio de sesión.",
   "hc_problem_loginRevoked": "El inicio de sesión guardado ya no es válido; inicia sesión de nuevo.",
   "hc_problem_scope": "La aplicación no puede usar los permisos solicitados; compruébala en el portal de desarrolladores.",
-  "hc_problem_other": "Home Connect rechazó el inicio de sesión; comprueba arriba el Client ID y el Client Secret."
+  "hc_problem_other": "Home Connect rechazó el inicio de sesión; comprueba arriba el Client ID y el Client Secret.",
+  "hc_appSignInNeeded": "Es necesario iniciar sesión: abra la página de inicio de sesión e inicie sesión con la cuenta de su aplicación Home Connect.",
+  "hc_appSignInSteps": "Inicie sesión en la página que se abrió con la cuenta de su aplicación Home Connect (vuelva a abrirla con el botón si es necesario). Después, el navegador termina en una página de Home Connect que puede mostrar un código QR: ignórelo, copie la dirección completa de la barra de direcciones del navegador y péguela abajo.",
+  "hc_appPasteLabel": "Dirección de la página en la que terminó el inicio de sesión",
+  "hc_appFinish": "Finalizar inicio de sesión",
+  "hc_appProblem": "Home Connect rechazó el inicio de sesión: abra la página de inicio de sesión y vuelva a iniciar sesión."
 }

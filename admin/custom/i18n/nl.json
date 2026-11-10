@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "De aanmeldcode is verlopen voordat hij werd bevestigd — vraag een nieuwe aanmeldlink aan.",
   "hc_problem_loginRevoked": "De opgeslagen aanmelding is niet meer geldig — meld je opnieuw aan.",
   "hc_problem_scope": "De applicatie mag de gevraagde rechten niet gebruiken — controleer haar in het ontwikkelaarsportaal.",
-  "hc_problem_other": "Home Connect heeft de aanmelding geweigerd — controleer hierboven de Client ID en het Client Secret."
+  "hc_problem_other": "Home Connect heeft de aanmelding geweigerd — controleer hierboven de Client ID en het Client Secret.",
+  "hc_appSignInNeeded": "Aanmelden nodig: open de aanmeldpagina en meld je aan met het account van je Home Connect-app.",
+  "hc_appSignInSteps": "Meld je op de geopende pagina aan met het account van je Home Connect-app (open hem zo nodig opnieuw met de knop). De browser eindigt daarna op een Home Connect-pagina die mogelijk een QR-code toont — negeer die, kopieer het volledige adres uit de adresbalk van de browser en plak het hieronder.",
+  "hc_appPasteLabel": "Adres van de pagina waarop het aanmelden eindigde",
+  "hc_appFinish": "Aanmelden afronden",
+  "hc_appProblem": "Home Connect heeft de aanmelding geweigerd — open de aanmeldpagina en meld je opnieuw aan."
 }

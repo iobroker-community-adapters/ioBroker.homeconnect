@@ -729,5 +729,10 @@
   "setTheaterMode": "Interior light fades at the door",
   "setTheaterModeDesc": "The interior light fades up and down while the door opens and closes.",
   "tabMain": "Configuration",
-  "tabExpert": "Expert"
+  "tabExpert": "Expert",
+  "label_accessMode": "Access to Home Connect",
+  "help_accessMode": "Developer access: with an application of your own in the Home Connect developer program. Home Connect app (beta): with the account of your Home Connect app. Switching the access needs a new sign-in.",
+  "accessMode_api": "Home Connect developer access",
+  "accessMode_app": "Home Connect app (beta)",
+  "appAccessInfo": "The app access is a beta: the adapter signs in the way the Home Connect app does, with the account you use in the app — no developer account, no Client ID. Save the settings first, then sign in below.\nIf something does not work, please attach the diagnostics report (tab Expert) to your report."
 }

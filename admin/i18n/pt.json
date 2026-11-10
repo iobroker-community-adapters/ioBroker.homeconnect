@@ -729,5 +729,10 @@
   "setTheaterMode": "Luz interior gradual na porta",
   "setTheaterModeDesc": "A luz interior acende e apaga gradualmente ao abrir e fechar a porta.",
   "tabMain": "Configuração",
-  "tabExpert": "Especialista"
+  "tabExpert": "Especialista",
+  "label_accessMode": "Acesso à Home Connect",
+  "help_accessMode": "Acesso de programador: com uma aplicação própria no programa de programadores da Home Connect. Aplicação Home Connect (beta): com a conta da sua aplicação Home Connect. Mudar o acesso exige um novo início de sessão.",
+  "accessMode_api": "Acesso de programador Home Connect",
+  "accessMode_app": "Aplicação Home Connect (beta)",
+  "appAccessInfo": "O acesso pela aplicação é uma beta: o adaptador inicia sessão como a aplicação Home Connect, com a conta que usa na aplicação — sem conta de programador nem Client ID. Guarde primeiro as definições e depois inicie sessão abaixo.\nSe algo não funcionar, anexe o relatório de diagnóstico (separador Especialista) ao seu relato."
 }

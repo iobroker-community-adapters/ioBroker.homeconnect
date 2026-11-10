@@ -729,5 +729,10 @@
   "setTheaterMode": "Binnenlicht dimt bij de deur",
   "setTheaterModeDesc": "Het binnenlicht dimt op en af terwijl de deur opent en sluit.",
   "tabMain": "Configuratie",
-  "tabExpert": "Expert"
+  "tabExpert": "Expert",
+  "label_accessMode": "Toegang tot Home Connect",
+  "help_accessMode": "Ontwikkelaarstoegang: met een eigen applicatie in het Home Connect-ontwikkelaarsprogramma. Home Connect-app (bèta): met het account van je Home Connect-app. Wisselen van toegang vraagt een nieuwe aanmelding.",
+  "accessMode_api": "Home Connect-ontwikkelaarstoegang",
+  "accessMode_app": "Home Connect-app (bèta)",
+  "appAccessInfo": "De app-toegang is een bèta: de adapter meldt zich aan zoals de Home Connect-app dat doet, met het account dat je in de app gebruikt — geen ontwikkelaarsaccount, geen Client ID. Sla eerst de instellingen op en meld je daarna hieronder aan.\nWerkt er iets niet, voeg dan het diagnoserapport (tabblad Expert) bij je melding."
 }

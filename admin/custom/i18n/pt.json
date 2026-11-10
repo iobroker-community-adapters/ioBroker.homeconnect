@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "O código de início de sessão expirou antes de ser confirmado — peça uma nova ligação de início de sessão.",
   "hc_problem_loginRevoked": "O início de sessão guardado já não é válido — inicie sessão de novo.",
   "hc_problem_scope": "A aplicação não pode usar as permissões pedidas — verifique-a no portal de programadores.",
-  "hc_problem_other": "A Home Connect recusou o início de sessão — verifique acima o Client ID e o Client Secret."
+  "hc_problem_other": "A Home Connect recusou o início de sessão — verifique acima o Client ID e o Client Secret.",
+  "hc_appSignInNeeded": "Início de sessão necessário: abra a página de início de sessão e entre com a conta da sua aplicação Home Connect.",
+  "hc_appSignInSteps": "Entre na página aberta com a conta da sua aplicação Home Connect (se necessário, abra-a novamente com o botão). Depois, o navegador termina numa página da Home Connect que pode mostrar um código QR — ignore-o, copie o endereço completo da barra de endereços do navegador e cole-o abaixo.",
+  "hc_appPasteLabel": "Endereço da página em que o início de sessão terminou",
+  "hc_appFinish": "Concluir início de sessão",
+  "hc_appProblem": "A Home Connect recusou o início de sessão — abra a página de início de sessão e entre novamente."
 }

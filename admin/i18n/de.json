@@ -729,5 +729,10 @@
   "setTheaterMode": "Innenlicht dimmt an der Tür",
   "setTheaterModeDesc": "Das Innenlicht wird beim Öffnen und Schließen der Tür auf- und abgedimmt.",
   "tabMain": "Konfiguration",
-  "tabExpert": "Experte"
+  "tabExpert": "Experte",
+  "label_accessMode": "Zugang zu Home Connect",
+  "help_accessMode": "Entwicklerzugang: mit einer eigenen Anwendung im Home Connect Developer Program. Home Connect App (Beta): mit dem Konto der Home Connect App. Ein Wechsel des Zugangs braucht eine neue Anmeldung.",
+  "accessMode_api": "Home Connect Entwicklerzugang",
+  "accessMode_app": "Home Connect App (Beta)",
+  "appAccessInfo": "Der App-Zugang ist eine Beta: Der Adapter meldet sich so an wie die Home Connect App, mit dem Konto, das in der App verwendet wird — kein Entwicklerkonto, keine Client-ID. Zuerst die Einstellungen speichern, dann unten anmelden.\nFunktioniert etwas nicht, bitte den Diagnosebericht (Reiter Experte) an die Meldung anhängen."
 }

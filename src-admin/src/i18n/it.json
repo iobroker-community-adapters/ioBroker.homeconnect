@@ -24,5 +24,10 @@
   "hc_problem_codeExpired": "Il codice di accesso è scaduto prima della conferma — richiedi un nuovo link di accesso.",
   "hc_problem_loginRevoked": "L'accesso salvato non è più valido — accedi di nuovo.",
   "hc_problem_scope": "L'applicazione non può usare i permessi richiesti — controllala nel portale sviluppatori.",
-  "hc_problem_other": "Home Connect ha rifiutato l'accesso — controlla sopra Client ID e Client Secret."
+  "hc_problem_other": "Home Connect ha rifiutato l'accesso — controlla sopra Client ID e Client Secret.",
+  "hc_appSignInNeeded": "Accesso necessario: apri la pagina di accesso e accedi con l'account della tua app Home Connect.",
+  "hc_appSignInSteps": "Accedi nella pagina aperta con l'account della tua app Home Connect (se necessario riaprila con il pulsante). Il browser termina poi su una pagina di Home Connect che può mostrare un codice QR: ignoralo, copia l'indirizzo completo dalla barra degli indirizzi del browser e incollalo qui sotto.",
+  "hc_appPasteLabel": "Indirizzo della pagina su cui è terminato l'accesso",
+  "hc_appFinish": "Completa l'accesso",
+  "hc_appProblem": "Home Connect ha rifiutato l'accesso: apri la pagina di accesso e accedi di nuovo."
 }

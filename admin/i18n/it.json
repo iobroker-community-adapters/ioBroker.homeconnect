@@ -729,5 +729,10 @@
   "setTheaterMode": "Luce interna graduale allo sportello",
   "setTheaterModeDesc": "La luce interna si accende e si spegne gradualmente all'apertura e chiusura dello sportello.",
   "tabMain": "Configurazione",
-  "tabExpert": "Esperto"
+  "tabExpert": "Esperto",
+  "label_accessMode": "Accesso a Home Connect",
+  "help_accessMode": "Accesso sviluppatore: con una tua applicazione nel programma sviluppatori di Home Connect. App Home Connect (beta): con l'account della tua app Home Connect. Cambiare l'accesso richiede un nuovo accesso.",
+  "accessMode_api": "Accesso sviluppatore Home Connect",
+  "accessMode_app": "App Home Connect (beta)",
+  "appAccessInfo": "L'accesso tramite app è una beta: l'adattatore accede come fa l'app Home Connect, con l'account che usi nell'app — senza account sviluppatore né Client ID. Salva prima le impostazioni, poi accedi qui sotto.\nSe qualcosa non funziona, allega il rapporto di diagnostica (scheda Esperto) alla tua segnalazione."
 }
