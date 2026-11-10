@@ -26,7 +26,7 @@ Control and monitor your Bosch, Siemens, NEFF and Gaggenau home appliances throu
 
 - Node.js >= 22
 - js-controller >= 7.2.5
-- Admin >= 8.2.0
+- Admin >= 8.3.5
 - A free Home Connect developer account (for a Client ID and Client Secret)
 
 ## Configuration
@@ -143,6 +143,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: an ajar door counts as open, no longer as closed
 - (krobipd) Fixed: the diagnostics report blanks the sign-in link and its code, and names Home Connect's last refusal of the sign-in
 - (krobipd) Changed: the login is kept as an encrypted file in the instance's data folder; the datapoint auth.session is removed, an existing login moves along
+- (krobipd) Changed: the adapter requires Admin 8.3.5 or newer now
 
 <!--
     Placeholder for the next version (at the beginning of the line): 
