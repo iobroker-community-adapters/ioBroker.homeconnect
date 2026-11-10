@@ -19,6 +19,7 @@ import { EVENTS_PATH, EventStream, type StreamPlace } from "./lib/event-stream";
 import { errText } from "./lib/err-text";
 import { isRecord } from "./lib/pure-helpers";
 import { looksLikeClientId } from "./lib/sign-in-help";
+import { readDataFile, removeDataFile, setAsideDataFile, writeDataFile } from "./lib/data-file";
 import { migrateNativeKeys } from "./lib/native-key-migration";
 import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { categorize, restLogKey } from "./lib/log-dedup";
@@ -42,6 +43,12 @@ import { TrafficRecorder } from "./lib/diagnostics/traffic-recorder";
 const DEFAULT_BASE_URL = "https://api.home-connect.com";
 /** Pause REST this long after a 429 that carries no Retry-After header. */
 const RATE_PAUSE_FALLBACK_MS = 60_000;
+/** The datapoint that held the stored login up to 2.0.0-alpha — moved into the login file at start, then deleted. */
+const SESSION_STATE = "auth.session";
+/** The stored login's file in the instance's data folder. */
+const LOGIN_FILE = "login.json";
+/** The name an unreadable login file is kept under instead of being overwritten by the next sign-in. */
+const LOGIN_FILE_ASIDE = "login.unreadable.json";
 /** The host every request goes to — the counterparts of src/lib/api-limits.json match it. */
 const API_HOST = new URL(DEFAULT_BASE_URL).host;
 /**
@@ -279,6 +286,10 @@ class Homeconnect extends utils.Adapter {
   private readonly budget = new RequestBudget(counterparts);
   /** Where the places of the last day outlive a restart (request-budget.ts); empty until onReady knows it. */
   private budgetFile = "";
+  /** The instance's data folder ("" while it is unknown). */
+  private dataDir = "";
+  /** A login the move out of `auth.session` could not write into the file — this run still signs in with it. */
+  private unmovedSession: string | undefined;
   /** The hand-over that follows a request's end within {@link HAND_OVER_EVERY_MS}, while one is due. */
   private handOverTimer: ioBroker.Timeout | undefined;
   /** When the next place of a command or a read frees, as the latest long hold measured it ({@link noteLongHold}). */
@@ -382,6 +393,9 @@ class Homeconnect extends utils.Adapter {
       this.ownStatesRead = true;
       // Before the first request: the day a previous process spent still counts — Home Connect counts per account.
       this.takeOverRequestBudget();
+      // Before the sign-in: a login still in the datapoint auth.session moves into its file, once.
+      this.dataDir = this.findDataFolder();
+      await this.moveSessionToFile();
       // Whatever goes offline at a stop goes offline at the start too: after a
       // crash, a kill or a power cut the teardown never ran, and nothing else
       // would correct a green marker until a sign-in succeeds — which can take
@@ -507,11 +521,6 @@ class Homeconnect extends utils.Adapter {
         await this.extendObject("auth", patch);
         own.wrote("auth", patch);
       }
-      patch = text("session", "sessionDesc");
-      if (!own.covers("auth.session", patch)) {
-        await this.extendObject("auth.session", patch);
-        own.wrote("auth.session", patch);
-      }
       patch = text("verificationUrl", "verificationUrlDesc");
       if (!own.covers("auth.verificationUrl", patch)) {
         await this.extendObject("auth.verificationUrl", patch);
@@ -636,6 +645,20 @@ class Homeconnect extends utils.Adapter {
       this.armRatePause(res.retryAfterMs ?? RATE_PAUSE_FALLBACK_MS);
     }
     return res;
+  }
+
+  /**
+   * The instance's data folder (`common.dataFolder`, so a backup carries it).
+   *
+   * @returns its absolute path, or "" when it cannot be found
+   */
+  private findDataFolder(): string {
+    try {
+      return utils.getAbsoluteInstanceDataDir(this);
+    } catch (e) {
+      this.log.debug(`Could not find the instance's data folder: ${errText(e)}`);
+      return "";
+    }
   }
 
   /**
@@ -864,7 +887,7 @@ class Homeconnect extends utils.Adapter {
     return {
       log: this.log,
       loadRefreshToken: () => this.loadRefreshToken(),
-      saveToken: token => this.saveToken(token),
+      saveToken: token => Promise.resolve().then(() => this.saveToken(token)),
       setVerificationUrl: async url => {
         await this.setStateRemembered("auth.verificationUrl", { val: url, ack: true });
       },
@@ -875,9 +898,7 @@ class Homeconnect extends utils.Adapter {
       setProblem: async text => {
         await this.setStateIfChanged("auth.lastError", { val: text, ack: true });
       },
-      clearStoredLogin: async () => {
-        await this.setStateRemembered("auth.session", { val: "", ack: true });
-      },
+      clearStoredLogin: () => this.clearStoredLogin(),
       notify: message => this.notifyUser(message),
       onSignedIn: () => this.onAuthenticated(),
       setTimer: (cb, ms) => this.setTimeout(cb, ms),
@@ -888,14 +909,83 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
-   * Read the refresh token out of `auth.session`, handling both our own encrypted
+   * The stored login lives as a file in the instance's data folder (fleet standard, Werkbank round 173 R173-13: a
+   * secret the adapter creates is never a datapoint; every access goes through the fleet master `data-file.ts`). Up to
+   * 2.0.0-alpha it stood in the datapoint `auth.session`: its value moves into the file once — the previous adapter
+   * generation's cleartext JSON encrypted on the way — and the datapoint is deleted. A file that already holds a login is
+   * newer and stays. When the file cannot be written, the datapoint stays for the next start and this run keeps the login
+   * in memory.
+   */
+  private async moveSessionToFile(): Promise<void> {
+    const held = this.stateMirror.held(this.objectMirror.fullId(SESSION_STATE))?.val;
+    const session = typeof held === "string" ? held : "";
+    if (session.length > 0 && this.storedSession() === undefined) {
+      try {
+        this.writeSession(extractRefreshToken(session) ? this.encrypt(session) : session);
+      } catch (e) {
+        this.unmovedSession = session;
+        this.log.warn(
+          `Could not move the stored Home Connect login into the instance's data folder (${errText(e)}) — it stays where it is until the next start.`,
+        );
+        return;
+      }
+    }
+    if (this.objectMirror.has(SESSION_STATE)) {
+      await this.delObjectAsync(SESSION_STATE);
+      this.objectMirror.forget(SESSION_STATE);
+      this.stateMirror.forget(this.objectMirror.fullId(SESSION_STATE), false);
+    }
+  }
+
+  /**
+   * The login text in the login file. A file that cannot be read is set aside — kept for a look instead of being
+   * overwritten by the next sign-in — and counts as no login, like a file of another form.
+   *
+   * @returns the stored (encrypted) login text, or undefined
+   */
+  private storedSession(): string | undefined {
+    if (!this.dataDir) {
+      return undefined;
+    }
+    const read = readDataFile(this.dataDir, LOGIN_FILE);
+    if (read.error !== undefined) {
+      let kept = "";
+      try {
+        setAsideDataFile(this.dataDir, LOGIN_FILE, LOGIN_FILE_ASIDE);
+        kept = ` — the file was kept as ${LOGIN_FILE_ASIDE}`;
+      } catch (e) {
+        this.log.debug(`Could not set the unreadable login file aside: ${errText(e)}`);
+      }
+      this.log.warn(
+        `The stored Home Connect login could not be read (${read.error})${kept}; a new sign-in is required.`,
+      );
+      return undefined;
+    }
+    const session = isRecord(read.value) ? read.value.session : undefined;
+    return typeof session === "string" && session.length > 0 ? session : undefined;
+  }
+
+  /**
+   * Store the encrypted login text in the login file.
+   *
+   * @param session the encrypted login text
+   * @throws {Error} when the data folder is unknown or the file cannot be written
+   */
+  private writeSession(session: string): void {
+    if (!this.dataDir) {
+      throw new Error("the instance's data folder is unknown");
+    }
+    writeDataFile(this.dataDir, LOGIN_FILE, { session });
+  }
+
+  /**
+   * Read the refresh token out of the login file, handling both our own encrypted
    * format and the previous adapter's cleartext JSON (so a version update keeps the login).
    *
    * @returns the refresh token, or undefined if none is stored
    */
   private async loadRefreshToken(): Promise<string | undefined> {
-    const state = await this.readState("auth.session");
-    const raw = typeof state?.val === "string" ? state.val : "";
+    const raw = this.storedSession() ?? this.unmovedSession ?? "";
     // Fast exit for the common "never signed in" case. (Both readers below would
     // also return undefined for "", so this is clarity, not a guard.)
     if (raw.length === 0) {
@@ -934,17 +1024,31 @@ class Homeconnect extends utils.Adapter {
     this.log.info(
       "The Home Connect access was changed in the settings — the stored login belongs to the other access, a new sign-in is required.",
     );
-    await this.setStateRemembered("auth.session", { val: "", ack: true });
+    await this.clearStoredLogin();
     return false;
   }
 
   /**
-   * Persist a freshly obtained token, encrypted.
+   * Persist a freshly obtained token, encrypted, in the login file.
    *
    * @param token the token to store
    */
-  private async saveToken(token: StoredToken): Promise<void> {
-    await this.setStateRemembered("auth.session", { val: this.encrypt(JSON.stringify(token)), ack: true });
+  private saveToken(token: StoredToken): void {
+    this.writeSession(this.encrypt(JSON.stringify(token)));
+    this.unmovedSession = undefined;
+  }
+
+  /**
+   * Forget the stored login: the file, and a login the move could not take out of `auth.session` yet.
+   */
+  private async clearStoredLogin(): Promise<void> {
+    if (this.dataDir) {
+      removeDataFile(this.dataDir, LOGIN_FILE);
+    }
+    if (this.unmovedSession !== undefined) {
+      this.unmovedSession = undefined;
+      await this.setStateRemembered(SESSION_STATE, { val: "", ack: true });
+    }
   }
 
   /**

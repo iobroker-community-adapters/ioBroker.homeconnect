@@ -105,6 +105,16 @@ export class ObjectMirror {
   }
 
   /**
+   * Whether the start-up read or a write since holds the object.
+   *
+   * @param id a relative or full id
+   * @returns true for a held object
+   */
+  has(id: string): boolean {
+    return this.objects.has(this.fullId(id));
+  }
+
+  /**
    * Forget one object — after a non-recursive deletion; what lies below it stays.
    *
    * @param id a relative or full id

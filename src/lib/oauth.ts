@@ -173,12 +173,12 @@ export function needsRefresh(
 }
 
 /**
- * Pull a usable refresh token out of whatever sits in `auth.session`. Handles both
+ * Pull a usable refresh token out of the stored login text. Handles both
  * our own {@link StoredToken} (`refreshToken`) and the previous adapter's raw
  * Home Connect JSON (`refresh_token`), so a version update keeps the login without
  * a new device-flow prompt.
  *
- * @param raw the decrypted `auth.session` string (may be empty/garbage)
+ * @param raw the decrypted stored login text (may be empty/garbage)
  * @returns the refresh token, or undefined if none can be found
  */
 export function extractRefreshToken(raw: string | null | undefined): string | undefined {

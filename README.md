@@ -142,6 +142,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Improved: a hob's cooking zone, power level, joined zones, frying sensor level and PowerMove levels get their own names, explanations and value labels in every language
 - (krobipd) Fixed: an ajar door counts as open, no longer as closed
 - (krobipd) Fixed: the diagnostics report blanks the sign-in link and its code, and names Home Connect's last refusal of the sign-in
+- (krobipd) Changed: the login is kept as an encrypted file in the instance's data folder; the datapoint auth.session is removed, an existing login moves along
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

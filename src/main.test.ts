@@ -543,14 +543,6 @@ describe("Homeconnect onReady", () => {
     });
   });
 
-  it("forgets the stored login when the controller asks", async () => {
-    const ctx = setup();
-    ctx.i.states.set("auth.session", { val: "enc:abc", ack: true });
-    await ctx.i.onReady();
-    await (ctx.auths[0].port.clearStoredLogin as () => Promise<void>)();
-    expect(ctx.i.states.get("auth.session")).toEqual({ val: "", ack: true });
-  });
-
   it("reports a failing start-up instead of dying on an unhandled rejection", async () => {
     const ctx = setup();
     (ctx.i as unknown as { setStateChangedAsync: ReturnType<typeof vi.fn> }).setStateChangedAsync.mockRejectedValueOnce(
@@ -561,91 +553,174 @@ describe("Homeconnect onReady", () => {
   });
 });
 
+// The login is a secret the adapter creates: a file in the instance's data folder, never a datapoint (fleet standard,
+// Werkbank round 173 R173-13). Up to 2.0.0-alpha it stood in auth.session — it moves once.
 describe("Homeconnect stored login", () => {
-  it("stores the token encrypted, never as readable JSON", async () => {
+  let loginFile = "";
+  beforeEach(async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    dataFolder.path = mkdtempSync(join(tmpdir(), "hc-main-login-"));
+    loginFile = join(dataFolder.path, "login.json");
+  });
+  afterEach(async () => {
+    const { rmSync } = await import("node:fs");
+    rmSync(dataFolder.path, { recursive: true, force: true });
+    dataFolder.path = "";
+  });
+  const stored = async (): Promise<unknown> => {
+    const { existsSync, readFileSync } = await import("node:fs");
+    return existsSync(loginFile)
+      ? (JSON.parse(readFileSync(loginFile, "utf8")) as { session: unknown }).session
+      : undefined;
+  };
+  const keep = async (session: string): Promise<void> => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(loginFile, JSON.stringify({ session }));
+  };
+  /**
+   * The manifest object of the datapoint that held the login up to 2.0.0-alpha.
+   *
+   * @param ctx the test context
+   * @param val the value it holds, if any
+   */
+  const sessionObject = (ctx: Ctx, val?: unknown): void => {
+    ctx.i.objects.set("auth.session", {
+      type: "state",
+      common: { type: "string", read: true, write: false },
+      native: {},
+    });
+    if (val !== undefined) {
+      ctx.i.states.set("auth.session", { val, ack: true });
+    }
+  };
+
+  it("stores the token encrypted in its data folder, never in a datapoint and never as readable JSON", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     await ctx.auths[0].port.saveToken({ accessToken: "AT", refreshToken: "RT", accessExpires: 1, scope: "" } as never);
 
-    const stored = ctx.i.states.get("auth.session")?.val as string;
-    // The refresh token is a long-lived credential to the user's appliances. In
-    // cleartext it is readable by anything that can read the object DB.
-    expect(stored).not.toContain("RT");
-    expect(() => JSON.parse(stored)).toThrow();
-    expect(stored).toBe(ctx.i.encrypt('{"accessToken":"AT","refreshToken":"RT","accessExpires":1,"scope":""}'));
+    const session = (await stored()) as string;
+    // The refresh token is a long-lived credential to the user's appliances.
+    expect(session).not.toContain("RT");
+    expect(session).toBe(ctx.i.encrypt('{"accessToken":"AT","refreshToken":"RT","accessExpires":1,"scope":""}'));
+    expect(ctx.i.states.has("auth.session")).toBe(false);
   });
 
   it("reads back its own encrypted token", async () => {
     const ctx = setup();
+    await keep(ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "SECRET" })));
     await ctx.i.onReady();
-    ctx.i.states.set("auth.session", {
-      val: ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "SECRET" })),
-      ack: true,
-    });
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("SECRET");
   });
 
-  it("knows a session the start-up read did not find is absent, without asking the database", async () => {
+  it("forgets the stored login when the controller asks", async () => {
     const ctx = setup();
-    // A fresh installation: the read-only object exists, its state does not yet.
-    ctx.i.objects.set("auth.session", {
-      type: "state",
-      common: { type: "string", read: true, write: false },
-      native: {},
-    });
+    await keep("enc:abc");
     await ctx.i.onReady();
-    ctx.i.getStateAsync.mockClear();
+    await (ctx.auths[0].port.clearStoredLogin as () => Promise<void>)();
+    expect(await stored()).toBeUndefined();
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
-    const reads = ctx.i.getStateAsync.mock.calls as unknown[][];
-    expect(reads.filter(([id]) => String(id).endsWith("auth.session"))).toEqual([]);
   });
 
-  it("reads its read-only session from the start-up read, never one by one from the database", async () => {
+  it("moves the login out of auth.session into its file once, and deletes the datapoint", async () => {
     const ctx = setup();
-    // The manifest's auth.session is read-only: the adapter is its only writer.
-    ctx.i.objects.set("auth.session", {
-      type: "state",
-      common: { type: "string", read: true, write: false },
-      native: {},
-    });
-    ctx.i.states.set("auth.session", {
-      val: ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "HELD" })),
-      ack: true,
-    });
+    const session = ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "HELD" }));
+    sessionObject(ctx, session);
     await ctx.i.onReady();
+    expect(await stored()).toBe(session);
+    expect(ctx.i.delObjectAsync).toHaveBeenCalledWith("auth.session");
+    expect(ctx.i.objects.has("auth.session")).toBe(false);
     ctx.i.getStateAsync.mockClear();
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("HELD");
+    // from the start-up read, never one by one from the database
     const reads = ctx.i.getStateAsync.mock.calls as unknown[][];
     expect(reads.filter(([id]) => String(id).endsWith("auth.session"))).toEqual([]);
   });
 
-  it("keeps the previous adapter's cleartext login across the update", async () => {
+  it("moves the previous adapter's cleartext login encrypted", async () => {
     const ctx = setup();
+    // The old generation stored plain JSON. Without this path every existing user has to sign in again after updating.
+    sessionObject(ctx, JSON.stringify({ refresh_token: "LEGACY" }));
     await ctx.i.onReady();
-    // The old generation stored plain JSON. Without this path every existing user
-    // has to run the device flow again after updating.
-    ctx.i.states.set("auth.session", { val: JSON.stringify({ refresh_token: "LEGACY" }), ack: true });
+    expect(await stored()).toBe(ctx.i.encrypt(JSON.stringify({ refresh_token: "LEGACY" })));
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("LEGACY");
   });
 
-  it("reports no login for an empty, missing or undecryptable session", async () => {
+  it("keeps a login file that is already there over the datapoint, and still deletes the datapoint", async () => {
+    const ctx = setup();
+    const newer = ctx.i.encrypt(JSON.stringify({ refreshToken: "NEWER" }));
+    await keep(newer);
+    sessionObject(ctx, ctx.i.encrypt(JSON.stringify({ refreshToken: "OLDER" })));
+    await ctx.i.onReady();
+    expect(await stored()).toBe(newer);
+    expect(ctx.i.objects.has("auth.session")).toBe(false);
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("NEWER");
+  });
+
+  it("deletes an empty auth.session without writing a file", async () => {
+    const ctx = setup();
+    sessionObject(ctx);
+    await ctx.i.onReady();
+    expect(await stored()).toBeUndefined();
+    expect(ctx.i.objects.has("auth.session")).toBe(false);
+  });
+
+  it("keeps the datapoint and this run's login when the file cannot be written", async () => {
+    const ctx = setup();
+    const { rmSync } = await import("node:fs");
+    rmSync(dataFolder.path, { recursive: true, force: true });
+    dataFolder.path = "";
+    sessionObject(ctx, ctx.i.encrypt(JSON.stringify({ refreshToken: "KEPT" })));
+    await ctx.i.onReady();
+    expect(ctx.i.delObjectAsync).not.toHaveBeenCalledWith("auth.session");
+    expect(ctx.i.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not move the stored Home Connect login into the instance's data folder"),
+    );
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBe("KEPT");
+    // a token that cannot be stored is reported by the controller, never lost in silence
+    await expect(
+      ctx.auths[0].port.saveToken({ accessToken: "A", refreshToken: "R", accessExpires: 1, scope: "" } as never),
+    ).rejects.toThrow("data folder");
+    // a reset forgets the unmoved login too, so the next start does not move it back
+    await (ctx.auths[0].port.clearStoredLogin as () => Promise<void>)();
+    expect(ctx.i.states.get("auth.session")).toEqual({ val: "", ack: true });
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
+  });
+
+  it("reports no login for a missing, empty or undecryptable file", async () => {
     const ctx = setup();
     await ctx.i.onReady();
     const load = ctx.auths[0].port.loadRefreshToken as () => Promise<string | undefined>;
 
     await expect(load()).resolves.toBeUndefined();
-    ctx.i.states.set("auth.session", { val: "", ack: true });
+    await keep("");
     await expect(load()).resolves.toBeUndefined();
-    // A session written by a different instance secret: decrypt throws, and an
+    // A login written with a different instance secret: decrypt throws, and an
     // escaping throw here would abort onReady before the device flow could run.
-    ctx.i.states.set("auth.session", { val: "gAAAAA-not-ours", ack: true });
+    await keep("gAAAAA-not-ours");
     await expect(load()).resolves.toBeUndefined();
     // Unreadable is not absent: the user learns why a sign-in is asked for again.
     expect(ctx.i.log.warn).toHaveBeenCalledWith(
       "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) — a new sign-in is required.",
     );
-    ctx.i.states.set("auth.session", { val: 42, ack: true });
-    await expect(load()).resolves.toBeUndefined();
+  });
+
+  it("sets a login file that is no JSON aside — kept for a look, never overwritten by the next sign-in", async () => {
+    const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+    writeFileSync(loginFile, "{half a fil");
+    const ctx = setup();
+    await ctx.i.onReady();
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
+    expect(existsSync(loginFile)).toBe(false);
+    expect(readFileSync(join(dataFolder.path, "login.unreadable.json"), "utf8")).toBe("{half a fil");
+    expect(ctx.i.log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^The stored Home Connect login could not be read \(no JSON: .+\) — the file was kept as login\.unreadable\.json; a new sign-in is required\.$/,
+      ),
+    );
+    await ctx.auths[0].port.saveToken({ accessToken: "A", refreshToken: "R", accessExpires: 1, scope: "" } as never);
+    expect(readFileSync(join(dataFolder.path, "login.unreadable.json"), "utf8")).toBe("{half a fil");
   });
 });
 
@@ -3027,7 +3102,6 @@ describe("findings of the 2026-09-04 audit", () => {
     // owns its datapoints, so it writes name and explanation itself.
     for (const id of [
       "auth",
-      "auth.session",
       "auth.verificationUrl",
       "auth.signedIn",
       "info",
@@ -4114,7 +4188,7 @@ describe("Homeconnect writes an object only when it changes (tooling round 61)",
     await ctx.i.readOwnObjects();
     ctx.i.extendObject.mockClear();
     await ctx.i.refreshManifestObjects();
-    expect(extended(ctx)).toHaveLength(10);
+    expect(extended(ctx)).toHaveLength(9);
     expect(ctx.i.log.debug).toHaveBeenCalledWith(expect.stringContaining("Could not read the own objects"));
   });
 });
@@ -4352,6 +4426,25 @@ describe("Homeconnect app access (beta)", () => {
     (["debug", "info", "warn", "error"] as const).flatMap(level =>
       ctx.i.log[level].mock.calls.map(call => String(call[0])),
     );
+  beforeEach(async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    dataFolder.path = mkdtempSync(join(tmpdir(), "hc-main-app-"));
+  });
+  afterEach(async () => {
+    const { rmSync } = await import("node:fs");
+    rmSync(dataFolder.path, { recursive: true, force: true });
+    dataFolder.path = "";
+  });
+  /**
+   * Put a stored login into the login file, as an earlier run left it.
+   *
+   * @param session the stored (encrypted or legacy) login text
+   */
+  const keepLogin = async (session: string): Promise<void> => {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(dataFolder.path, "login.json"), JSON.stringify({ session }));
+  };
 
   it("signs in through the app's client without a Client ID", async () => {
     const ctx = setup(APP_SETTINGS);
@@ -4375,37 +4468,30 @@ describe("Homeconnect app access (beta)", () => {
 
   it("drops a stored login of the other access — a new sign-in on the chosen way follows", async () => {
     const ctx = setup(APP_SETTINGS);
-    ctx.i.states.set("auth.session", {
-      val: ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "DEV-RT", mode: "api" })),
-      ack: true,
-    });
+    await keepLogin(ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "DEV-RT", mode: "api" })));
     await ctx.i.onReady();
     await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
-    expect(ctx.i.states.get("auth.session")).toEqual({ val: "", ack: true });
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dataFolder.path, "login.json"))).toBe(false);
     expect(ctx.i.log.info).toHaveBeenCalledWith(
       "The Home Connect access was changed in the settings — the stored login belongs to the other access, a new sign-in is required.",
     );
   });
 
   it("takes a login without a mode as one of the developer access", async () => {
+    // the previous adapter generation's cleartext login, moved out of auth.session at the update
     const legacy = setup(APP_SETTINGS);
     legacy.i.states.set("auth.session", { val: JSON.stringify({ refresh_token: "LEGACY" }), ack: true });
     await legacy.i.onReady();
     await expect(legacy.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
 
     const api = setup();
-    api.i.states.set("auth.session", {
-      val: api.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "RT" })),
-      ack: true,
-    });
+    await keepLogin(api.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "RT" })));
     await api.i.onReady();
     await expect(api.auths[0].port.loadRefreshToken()).resolves.toBe("RT");
 
     const app = setup(APP_SETTINGS);
-    app.i.states.set("auth.session", {
-      val: app.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "APP-RT", mode: "app" })),
-      ack: true,
-    });
+    await keepLogin(app.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "APP-RT", mode: "app" })));
     await app.i.onReady();
     await expect(app.auths[0].port.loadRefreshToken()).resolves.toBe("APP-RT");
   });

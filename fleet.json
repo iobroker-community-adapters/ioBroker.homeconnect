@@ -5,7 +5,6 @@
     "_note": "Names: the instance objects of the manifest. Descriptions: since v1.15.0 EVERY datapoint carries an understandable explanation.",
     "name": {
       "auth": "authChannel",
-      "auth.session": "session",
       "auth.verificationUrl": "verificationUrl",
       "auth.signedIn": "signedIn",
       "auth.lastError": "lastError",
@@ -16,7 +15,6 @@
       "info.devicesAllOnline": "devicesAllOnline"
     },
     "desc": {
-      "auth.session": "sessionDesc",
       "auth.signedIn": "signedInDesc",
       "auth.lastError": "lastErrorDesc",
       "auth.verificationUrl": "verificationUrlDesc",

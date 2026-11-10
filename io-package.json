@@ -304,43 +304,6 @@
       "native": {}
     },
     {
-      "_id": "auth.session",
-      "type": "state",
-      "common": {
-        "role": "text",
-        "name": {
-          "en": "Stored login",
-          "de": "Gespeicherter Login",
-          "ru": "Сохранённый вход",
-          "pt": "Início de sessão guardado",
-          "nl": "Opgeslagen aanmelding",
-          "fr": "Connexion enregistrée",
-          "it": "Accesso salvato",
-          "es": "Inicio de sesión guardado",
-          "pl": "Zapisane logowanie",
-          "uk": "Збережений вхід",
-          "zh-cn": "已保存的登录"
-        },
-        "type": "string",
-        "read": true,
-        "write": false,
-        "desc": {
-          "en": "The encrypted account login the adapter reuses after a restart. Not meant to be edited.",
-          "de": "Der verschlüsselte Konto-Login, den der Adapter nach einem Neustart wiederverwendet. Nicht zum Bearbeiten gedacht.",
-          "ru": "Зашифрованный вход в учётную запись, который адаптер использует повторно после перезапуска. Не предназначен для редактирования.",
-          "pt": "O início de sessão cifrado da conta que o adaptador reutiliza após um reinício. Não se destina a ser editado.",
-          "nl": "De versleutelde accountaanmelding die de adapter na een herstart opnieuw gebruikt. Niet bedoeld om te bewerken.",
-          "fr": "La connexion chiffrée au compte que l'adaptateur réutilise après un redémarrage. Non destinée à être modifiée.",
-          "it": "L'accesso cifrato all'account che l'adattatore riutilizza dopo un riavvio. Non pensato per essere modificato.",
-          "es": "El inicio de sesión cifrado de la cuenta que el adaptador reutiliza tras un reinicio. No está pensado para editarse.",
-          "pl": "Zaszyfrowane logowanie do konta, które adapter wykorzystuje ponownie po restarcie. Nie do edycji.",
-          "uk": "Зашифрований вхід до облікового запису, який адаптер повторно використовує після перезапуску. Не призначений для редагування.",
-          "zh-cn": "适配器重启后重复使用的加密账户登录信息。不应编辑。"
-        }
-      },
-      "native": {}
-    },
-    {
       "_id": "auth.verificationUrl",
       "type": "state",
       "common": {

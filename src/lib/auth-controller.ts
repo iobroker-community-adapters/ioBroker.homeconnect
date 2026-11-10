@@ -146,7 +146,7 @@ export interface AuthPort {
    * "" once signed in.
    */
   setProblem(text: string): Promise<void>;
-  /** Forget the stored login (`auth.session`). */
+  /** Forget the stored login (the login file in the instance's data folder). */
   clearStoredLogin(): Promise<void>;
   /** Called after every successful sign-in (initial or re-auth): wire up the adapter. */
   onSignedIn(): Promise<void>;
