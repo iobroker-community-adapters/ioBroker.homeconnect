@@ -619,6 +619,24 @@ describe("expandBshItem — doors and the derived programRunning", () => {
     expect(locked[1]?.value).toBe(true);
   });
 
+  // An ajar door is not closed: the Home Connect app knows the value and names it "Ajar" (app 12.6.0, key catalogue
+  // BSH.Common.EnumType.DoorState.Ajar; Ressourcen/homeconnect/app-analyse), a washer or dryer reports it locally.
+  it("counts an ajar door as open and not locked", () => {
+    const ajar = expandBshItem(
+      { key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Ajar" },
+      true,
+    );
+    expect(ajar.map(s => [s.id, s.value])).toEqual([
+      ["door", true],
+      ["doorLocked", false],
+    ]);
+    const compartment = expandBshItem(
+      { key: "Refrigeration.Common.Status.Door.Freezer", value: "BSH.Common.EnumType.DoorState.Ajar" },
+      false,
+    );
+    expect(compartment[0]?.value).toBe(true);
+  });
+
   it("gives a number the catalogue's detailed role by the unit it shows", () => {
     expect(numberRole("min", false)).toBe("time.span");
     expect(numberRole("s", true)).toBe("level.timer");

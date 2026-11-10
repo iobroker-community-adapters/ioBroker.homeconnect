@@ -324,8 +324,19 @@ function itemLabel(
   return { name: humanizeId(id), nameSource: "derived", desc };
 }
 
-/** The common door status key, carrying Open/Closed/Locked. */
+/** The common door status key, carrying Open/Closed/Locked (and Ajar, which the Home Connect app knows). */
 const DOOR_STATE_KEY = "BSH.Common.Status.DoorState";
+
+/**
+ * Whether a door value means the door is open. An ajar door is not closed (app 12.6.0 key catalogue:
+ * `BSH.Common.EnumType.DoorState.Ajar`, "Ajar").
+ *
+ * @param short the short door value (`open`, `ajar`, `closed`, `locked`)
+ * @returns whether the door counts as open
+ */
+function doorIsOpen(short: string): boolean {
+  return short === "open" || short === "ajar";
+}
 /** The operation state key — source of the derived `programRunning` boolean. */
 const OPERATION_STATE_KEY = "BSH.Common.Status.OperationState";
 
@@ -400,7 +411,7 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
           id: "door",
           common: { ...booleanCommon(tName("doorOpen"), "sensor.door", false), desc: tName("doorOpenDesc") },
           nameSource: "i18n",
-          value: short === undefined ? undefined : short === "open",
+          value: short === undefined ? undefined : doorIsOpen(short),
         },
       ];
       if (lockableDoor) {
@@ -427,7 +438,7 @@ export function expandBshItem(item: BshItem, lockableDoor: boolean): Transformed
           desc: tName("doorCompartmentOpenDesc"),
         },
         nameSource: "i18n",
-        value: short === undefined ? undefined : short === "open",
+        value: short === undefined ? undefined : doorIsOpen(short),
       },
     ];
   }
