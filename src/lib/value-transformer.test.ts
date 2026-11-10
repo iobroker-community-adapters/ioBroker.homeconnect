@@ -620,7 +620,7 @@ describe("expandBshItem — doors and the derived programRunning", () => {
   });
 
   // An ajar door is not closed: the Home Connect app knows the value and names it "Ajar" (app 12.6.0, key catalogue
-  // BSH.Common.EnumType.DoorState.Ajar; Ressourcen/homeconnect/app-analyse), a washer or dryer reports it locally.
+  // BSH.Common.EnumType.DoorState.Ajar), a washer or dryer reports it locally.
   it("counts an ajar door as open and not locked", () => {
     const ajar = expandBshItem(
       { key: "BSH.Common.Status.DoorState", value: "BSH.Common.EnumType.DoorState.Ajar" },

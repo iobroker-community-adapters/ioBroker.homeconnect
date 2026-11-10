@@ -35,8 +35,8 @@ describe("valueLabel", () => {
   });
 });
 
-// The values of the hob options, as the Home Connect app names them (app 12.6.0, key catalogue and resources,
-// Ressourcen/homeconnect/app-analyse): zones by position, levels in tenths up to 12.0, two boosts, frying levels 1–5.
+// The values of the hob options, as the Home Connect app names them (app 12.6.0, key catalogue and resources):
+// zones by position, levels in tenths up to 12.0, two boosts, frying levels 1–5.
 describe("hob values", () => {
   it("labels the cooking zones by their position", () => {
     expect(ownValueLabel("Cooking.Hob.EnumType.ZoneSelector.FrontLeft", "de")).toBe("Vorne links");

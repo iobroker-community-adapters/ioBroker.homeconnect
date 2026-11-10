@@ -8,8 +8,8 @@
  *
  * Source of the values (client, redirect, scopes, the three forms of the pasted address): Home Connect NG
  * (renaudallard/homeassistant_homeconnect, BSD-2-Clause, commit 67fbb08, `custom_components/homeconnect/const.py:54,68,
- * 75-86`, `auth.py:100-194`); the same client, redirect and scopes stand in the Home Connect app 12.6.0 itself
- * (Ressourcen/homeconnect/app-analyse-2026-11-10.md). The code is our own.
+ * 75-86`, `auth.py:100-194`); the same client, redirect and scopes stand in the Home Connect app 12.6.0 itself.
+ * The code is our own.
  */
 import { createHash, randomBytes } from "node:crypto";
 
