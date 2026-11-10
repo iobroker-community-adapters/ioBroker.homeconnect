@@ -7,9 +7,15 @@
 // expired or rejected sign-in link is replaced automatically for at most
 // SIGN_IN_WINDOW_MS, then the sign-in pauses until the panel asks for a new
 // link; a configuration refusal waits 5 minutes.
+//
+// In the app access (beta) there is no device flow — Home Connect refuses it for the app's client. A missing or lost
+// login waits for the user: the panel asks for the sign-in page (`appSignInLink`), the person signs in in the browser
+// and pastes the address of the end page back (`completeAppSignIn`), which is exchanged once with PKCE.
 
-import { needsRefresh, OAuthError, REFRESH_CHECK_INTERVAL_MS } from "./oauth";
-import type { HomeConnectAuth, DeviceAuthorization, StoredToken } from "./oauth";
+import { randomBytes } from "node:crypto";
+import { needsRefresh, OAuthError, REFRESH_CHECK_INTERVAL_MS, storedMode } from "./oauth";
+import type { HomeConnectAuth, DeviceAuthorization, StoredToken, TokenMode } from "./oauth";
+import { appAuthorizeUrl, codeFrom, makeVerifier, type PastedForm } from "./app-client";
 import { errText } from "./err-text";
 import { refusalText, signInHint } from "./sign-in-help";
 
@@ -36,6 +42,42 @@ export const SIGN_IN_WINDOW_MS = 60 * 60_000;
 /** The notification and the log line when a sign-in is needed — without the code, which changes every 5 minutes. */
 export const SIGN_IN_REQUIRED =
   "Home Connect sign-in required — open the adapter settings and follow the sign-in link shown there.";
+/** The notification and the log line when the app access (beta) needs a sign-in. */
+export const APP_SIGN_IN_REQUIRED =
+  "Home Connect sign-in required — open the adapter settings, open the sign-in page and paste the address it ends on.";
+
+/** A step of the app sign-in that cannot go on — its message is the answer for the settings panel. */
+export class AppSignInError extends Error {
+  /**
+   * @param message what the panel shows
+   */
+  constructor(message: string) {
+    super(message);
+    this.name = "AppSignInError";
+  }
+}
+
+/** How the controller signs in, and where the app's sign-in page lives. */
+export interface AuthOptions {
+  /** `api` (developer access, device flow — the default) or `app` (the Home Connect app's client, beta). */
+  mode?: TokenMode;
+  /** The API base URL the app's sign-in page is built on. */
+  baseUrl?: string;
+}
+
+/** What the diagnostics report learns about the current token — times and kind, never a token. */
+export interface TokenInfo {
+  /** The way the token was obtained. */
+  mode: TokenMode;
+  /** The granted scopes. */
+  scope: string;
+  /** When the access token was issued (ISO), when its lifetime is known. */
+  issuedAt?: string;
+  /** When the access token expires (ISO). */
+  expiresAt: string;
+  /** Whether the lifetime was assumed (no usable `expires_in`). */
+  lifetimeAssumed: boolean;
+}
 
 /**
  * Device-flow poll answers that END the current code: the OAuth error codes of
@@ -152,15 +194,55 @@ export class AuthController {
    * wait for the answer loses the only valid key.
    */
   private readonly inflight = new Set<Promise<unknown>>();
+  /** The way this instance signs in. */
+  private readonly mode: TokenMode;
+  /** The API base URL of the app's sign-in page. */
+  private readonly baseUrl: string;
+  /** The open app sign-in: its PKCE verifier (memory only) and when the link was made. */
+  private appPending: { verifier: string; createdAt: number } | undefined;
+  /** How the last pasted address carried its code — for the diagnostics report, never the code. */
+  private pastedForm: PastedForm | undefined;
 
   /**
    * @param auth the configured OAuth flow driver
    * @param port the injected adapter capabilities
+   * @param options the sign-in way and the base URL of the app's sign-in page
    */
   constructor(
     private readonly auth: HomeConnectAuth,
     private readonly port: AuthPort,
-  ) {}
+    options: AuthOptions = {},
+  ) {
+    this.mode = options.mode ?? "api";
+    this.baseUrl = options.baseUrl ?? "https://api.home-connect.com";
+  }
+
+  /** How the last pasted address carried its code, if one was pasted. */
+  get lastPastedForm(): PastedForm | undefined {
+    return this.pastedForm;
+  }
+
+  /**
+   * What the diagnostics report learns about the current token — kind and times, never a token value.
+   *
+   * @returns the token's description, or undefined while not signed in
+   */
+  tokenInfo(): TokenInfo | undefined {
+    const token = this.token;
+    if (!token) {
+      return undefined;
+    }
+    return {
+      mode: storedMode(token),
+      scope: token.scope,
+      issuedAt:
+        token.accessLifetimeMs !== undefined
+          ? new Date(token.accessExpires - token.accessLifetimeMs).toISOString()
+          : undefined,
+      expiresAt: new Date(token.accessExpires).toISOString(),
+      lifetimeAssumed: token.lifetimeAssumed === true,
+    };
+  }
 
   /** The current access token, or undefined while not signed in. */
   get accessToken(): string | undefined {
@@ -257,7 +339,7 @@ export class AuthController {
           this.port.log.warn(
             `Stored login is no longer valid (${errText(e)}) — ${signInHint(e.oauthError, e.description)} A new sign-in is required.`,
           );
-          // fall through to the device flow
+          // fall through to a new sign-in
         } else {
           const delay = this.nextRefreshBackoff();
           this.port.log.warn(
@@ -268,7 +350,130 @@ export class AuthController {
         }
       }
     }
+    await this.needSignIn();
+  }
+
+  /**
+   * A new sign-in is needed: the device flow in the developer access; in the app access the controller waits for the
+   * user — Home Connect refuses the device flow for the app's client.
+   */
+  private async needSignIn(): Promise<void> {
+    if (this.mode === "app") {
+      await this.awaitAppSignIn();
+      return;
+    }
     await this.runDeviceFlow();
+  }
+
+  /**
+   * The app access waits for the user to sign in in the browser: not connected, the notification and the info line
+   * once per episode, no timer and no request. An open sign-in link stays.
+   */
+  private async awaitAppSignIn(): Promise<void> {
+    if (this.stopped) {
+      return;
+    }
+    await this.port.setConnected(false);
+    if (!this.appPending) {
+      await this.port.setVerificationUrl("");
+    }
+    if (!this.signInAnnounced) {
+      this.port.log.info(APP_SIGN_IN_REQUIRED);
+      this.port.notify(APP_SIGN_IN_REQUIRED);
+      this.signInAnnounced = true;
+    }
+  }
+
+  /**
+   * The app access: publish a fresh sign-in page (PKCE, login prompt) and hold its verifier in memory. A new link
+   * replaces an open one; a link lives {@link SIGN_IN_WINDOW_MS}; a restart forgets it.
+   *
+   * @returns the address of the sign-in page
+   * @throws {AppSignInError} in the developer access, while stopping or when already signed in
+   */
+  async appSignInLink(): Promise<string> {
+    this.requireApp();
+    if (this.token) {
+      throw new AppSignInError('Already signed in — use "Reset sign-in" to sign in with another account.');
+    }
+    const verifier = makeVerifier();
+    const link = appAuthorizeUrl(
+      this.baseUrl,
+      verifier,
+      randomBytes(16).toString("base64url"),
+      randomBytes(16).toString("base64url"),
+    );
+    this.appPending = { verifier, createdAt: this.now() };
+    await this.port.setVerificationUrl(link);
+    return link;
+  }
+
+  /**
+   * The app access: take the address the user pasted, exchange its code once with the open link's verifier and sign
+   * in. Nothing of the address reaches a log line.
+   *
+   * @param pasted what the panel sent (unchecked)
+   * @returns the answer for the panel
+   * @throws {AppSignInError} with the reason when no link is open, the address carries no code, or Home Connect refused
+   *   or did not answer
+   */
+  async completeAppSignIn(pasted: unknown): Promise<string> {
+    this.requireApp();
+    const pending = this.appPending;
+    if (!pending || this.now() - pending.createdAt >= SIGN_IN_WINDOW_MS) {
+      if (pending) {
+        this.appPending = undefined;
+        await this.port.setVerificationUrl("");
+      }
+      throw new AppSignInError("no sign-in link is open — request a new one");
+    }
+    const found = codeFrom(pasted);
+    if ("refused" in found) {
+      throw new AppSignInError(found.refused);
+    }
+    this.pastedForm = found.form;
+    // One exchange per link: a second paste while this one runs (a double click) finds no open link — a code is
+    // accepted once, the second exchange would only bring back a refusal over the sign-in that just succeeded.
+    this.appPending = undefined;
+    try {
+      await this.track((async () => this.applyToken(await this.auth.exchangeCode(found.code, pending.verifier)))());
+    } catch (e) {
+      if (e instanceof OAuthError && isOutage(e)) {
+        // The code never reached Home Connect, or its answer never came back: the link stays (unless a newer one
+        // replaced it meanwhile), the user pastes again.
+        this.appPending ??= pending;
+        this.port.log.debug(`the sign-in code exchange got no answer: status ${e.status ?? 0}`);
+        throw new AppSignInError("Home Connect did not answer — paste the address again in a moment.");
+      }
+      if (!this.appPending) {
+        await this.port.setVerificationUrl("");
+      }
+      if (e instanceof OAuthError) {
+        await this.reportRefusal(e);
+        this.port.log.warn(`Home Connect refused the sign-in: ${e.oauthError ?? `status ${e.status ?? 0}`}.`);
+        throw new AppSignInError(`Home Connect refused the sign-in: ${e.message.replace(/^[^:]*: /, "")}`);
+      }
+      throw e;
+    }
+    this.appPending = undefined;
+    await this.port.setVerificationUrl("");
+    this.port.log.info("Home Connect: signed in (app access).");
+    await this.signedIn();
+    return "Signed in to Home Connect.";
+  }
+
+  /**
+   * Refuse an app sign-in step outside the app access or while stopping.
+   *
+   * @throws {AppSignInError} with the reason
+   */
+  private requireApp(): void {
+    if (this.stopped) {
+      throw new AppSignInError("The adapter is stopping.");
+    }
+    if (this.mode !== "app") {
+      throw new AppSignInError("The instance runs with the developer access — save the settings first.");
+    }
   }
 
   /**
@@ -355,6 +560,11 @@ export class AuthController {
     if (this.stopped) {
       return "The adapter is stopping.";
     }
+    if (this.mode === "app") {
+      throw new AppSignInError(
+        "The instance uses the Home Connect app access — open the sign-in page instead of requesting a link.",
+      );
+    }
     if (this.token) {
       return 'Already signed in — use "Reset sign-in" to sign in with another account.';
     }
@@ -387,6 +597,12 @@ export class AuthController {
     await this.port.clearStoredLogin();
     await this.port.setConnected(false);
     this.port.log.info("Home Connect login reset — a new sign-in follows.");
+    if (this.mode === "app") {
+      this.signInAnnounced = false;
+      this.appPending = undefined;
+      await this.awaitAppSignIn();
+      return "Signed out — open the sign-in page to sign in again.";
+    }
     return this.requestSignIn();
   }
 
@@ -651,7 +867,7 @@ export class AuthController {
             );
             this.token = undefined;
             this.episodeStartedAt = undefined;
-            void this.guard(() => this.runDeviceFlow());
+            void this.guard(() => this.needSignIn());
           } else if (this.stopped) {
             // Failed on the way out: no warning about an attempt that never comes.
             this.port.log.debug(`refresh failed after stop: ${errText(e)}`);

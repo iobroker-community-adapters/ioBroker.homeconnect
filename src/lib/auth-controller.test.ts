@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { AuthController, type AuthPort, SLOW_DOWN_STEP_MS, AUTH_RETRY_MS } from "./auth-controller";
+import {
+  AuthController,
+  type AuthPort,
+  SLOW_DOWN_STEP_MS,
+  AUTH_RETRY_MS,
+  APP_SIGN_IN_REQUIRED,
+  AppSignInError,
+  SIGN_IN_WINDOW_MS,
+} from "./auth-controller";
 import { HomeConnectAuth, type FormPostResult, type StoredToken } from "./oauth";
+import { APP_CLIENT_ID, challengeOf } from "./app-client";
 
 const TOKEN_BODY = { access_token: "AT", refresh_token: "RT", expires_in: 86_400, scope: "Monitor Control" };
 const DEVICE_BODY = {
@@ -113,14 +122,17 @@ class FakeAuthPort implements AuthPort {
  * Build a controller with a queued-response OAuth transport and fake timers.
  *
  * @param results the queued form-POST results, consumed in call order
+ * @param mode the developer access (device flow) or the app access (beta)
  * @returns the harness pieces
  */
-function harness(results: FormPostResult[]): Harness {
+function harness(results: FormPostResult[], mode: "api" | "app" = "api"): Harness {
   const clock = { t: 1_700_000_000_000 };
   const calls: Array<{ path: string; form: Record<string, string> }> = [];
   let i = 0;
   const auth = new HomeConnectAuth(
-    { clientId: "cid", clientSecret: "sec", baseUrl: "https://api.home-connect.com" },
+    mode === "app"
+      ? { clientId: APP_CLIENT_ID, baseUrl: "https://api.home-connect.com", flow: "app" }
+      : { clientId: "cid", clientSecret: "sec", baseUrl: "https://api.home-connect.com" },
     (path, form) => {
       calls.push({ path, form });
       const r = results[i++];
@@ -134,7 +146,8 @@ function harness(results: FormPostResult[]): Harness {
   const timers: Array<{ cb: () => void; ms: number; handle: object; interval: boolean }> = [];
   const logs: Array<{ level: string; msg: string }> = [];
   const port = new FakeAuthPort(timers, logs, clock);
-  return { ctl: new AuthController(auth, port), timers, logs, clock, calls, port };
+  const ctl = new AuthController(auth, port, { mode, baseUrl: "https://api.home-connect.com" });
+  return { ctl, timers, logs, clock, calls, port };
 }
 
 /**
@@ -1109,5 +1122,194 @@ describe("AuthController hints by Home Connect's words (needle run 2026-09-26)",
     firePending(h);
     await flush();
     expect(h.logs.find(l => l.level === "warn")?.msg).toContain("Home Connect does not know this Client ID");
+  });
+});
+
+// The app access (beta): the person signs in in the browser and pastes the address of the end page back; the adapter
+// exchanges the code once. Home Connect refuses the device flow for the app's client, so no path of the app mode ever
+// reaches it.
+describe("AuthController in the app access (beta)", () => {
+  const PASTED = "https://qr.home-connect.com/authorize/prod/?code=THE-CODE&state=x";
+  const sentTo = (h: Harness, path: string): number => h.calls.filter(c => c.path === path).length;
+
+  it("never starts the device flow without a stored login — one notification, no timer, no refusal", async () => {
+    const h = harness([], "app");
+    await h.ctl.start();
+    expect(h.calls).toEqual([]);
+    expect(h.port.connected).toEqual([false]);
+    expect(h.port.problems).toEqual([]);
+    expect(h.port.notifications).toEqual([APP_SIGN_IN_REQUIRED]);
+    expect(h.logs.filter(l => l.level === "info").map(l => l.msg)).toEqual([APP_SIGN_IN_REQUIRED]);
+    expect(h.timers).toEqual([]);
+  });
+
+  it("waits for the user when the stored login is refused at start", async () => {
+    const h = harness([fail(400, { error: "invalid_grant", error_description: "token revoked" })], "app");
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    expect(sentTo(h, "/security/oauth/device_authorization")).toBe(0);
+    expect(h.timers).toEqual([]);
+    expect(h.port.notifications).toEqual([APP_SIGN_IN_REQUIRED]);
+    expect(h.port.problems).toEqual(["invalid_grant: token revoked"]);
+  });
+
+  it("waits for the user when the login is lost at runtime — one notification however often the check runs", async () => {
+    const h = harness(
+      [ok(TOKEN_BODY), fail(400, { error: "invalid_grant" }), fail(400, { error: "invalid_grant" })],
+      "app",
+    );
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    expect(await h.ctl.refreshNow()).toBe(false);
+    await flush();
+    expect(h.ctl.accessToken).toBeUndefined();
+    // without a token the periodic check asks nothing any more
+    for (let n = 0; n < 3; n++) {
+      h.timers.find(t => t.interval)?.cb();
+      await flush();
+    }
+    expect(await h.ctl.refreshNow()).toBe(false);
+    expect(sentTo(h, "/security/oauth/device_authorization")).toBe(0);
+    expect(h.port.notifications).toEqual([APP_SIGN_IN_REQUIRED]);
+    expect(h.timers.filter(t => !t.interval)).toEqual([]);
+  });
+
+  it("keeps the login after a transient refresh failure, as in the developer access", async () => {
+    const h = harness([ok(TOKEN_BODY), fail(503, {})], "app");
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    expect(await h.ctl.refreshNow()).toBe(false);
+    expect(h.ctl.accessToken).toBe("AT");
+    expect(h.port.notifications).toEqual([]);
+  });
+
+  it("publishes the sign-in page with PKCE and the login prompt", async () => {
+    const h = harness([], "app");
+    await h.ctl.start();
+    const link = await h.ctl.appSignInLink();
+    expect(link).toContain("code_challenge=");
+    expect(link).toContain("prompt=login");
+    expect(h.port.urls.at(-1)).toBe(link);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("never starts the device flow on a request for a new link", async () => {
+    const h = harness([], "app");
+    await h.ctl.start();
+    await expect(h.ctl.requestSignIn()).rejects.toThrow(AppSignInError);
+    await expect(h.ctl.requestSignIn()).rejects.toThrow("open the sign-in page instead");
+    expect(h.calls).toEqual([]);
+  });
+
+  it("exchanges the pasted code once with the link's verifier and signs in", async () => {
+    const h = harness([ok(TOKEN_BODY)], "app");
+    await h.ctl.start();
+    const link = await h.ctl.appSignInLink();
+    const answer = await h.ctl.completeAppSignIn(PASTED);
+    expect(answer).toBe("Signed in to Home Connect.");
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]?.form).toMatchObject({ grant_type: "authorization_code", code: "THE-CODE" });
+    // the verifier belongs to the published challenge
+    expect(link).toContain(`code_challenge=${challengeOf(h.calls[0]?.form.code_verifier ?? "")}`);
+    expect(h.port.savedTokens.at(-1)?.mode).toBe("app");
+    expect(h.port.signedIn).toBe(1);
+    expect(h.port.urls.at(-1)).toBe("");
+    expect(h.ctl.lastPastedForm).toBe("parameter");
+    expect(h.ctl.tokenInfo()).toMatchObject({ mode: "app", scope: "Monitor Control", lifetimeAssumed: false });
+    expect(JSON.stringify(h.ctl.tokenInfo())).not.toContain("AT");
+  });
+
+  it("says no sign-in link is open without one — after a restart the verifier is gone", async () => {
+    const h = harness([], "app");
+    await h.ctl.start();
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow("no sign-in link is open — request a new one");
+    expect(h.calls).toEqual([]);
+  });
+
+  it("lets an open link expire after an hour", async () => {
+    const h = harness([], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    h.clock.t += SIGN_IN_WINDOW_MS;
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow("no sign-in link is open — request a new one");
+    expect(h.calls).toEqual([]);
+  });
+
+  it("refuses a pasted address without a code and keeps the open link", async () => {
+    const h = harness([ok(TOKEN_BODY)], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    await expect(h.ctl.completeAppSignIn("https://singlekey-id.com/login?foo=1")).rejects.toThrow("carries no code");
+    await expect(h.ctl.completeAppSignIn("https://x/?error=access_denied")).rejects.toThrow("access_denied");
+    expect(h.calls).toEqual([]);
+    await expect(h.ctl.completeAppSignIn(PASTED)).resolves.toBe("Signed in to Home Connect.");
+  });
+
+  it("reports a used code in Home Connect's words, drops the link and stays signed out", async () => {
+    const h = harness([fail(400, { error: "invalid_grant", error_description: "code already used" })], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow("invalid_grant (code already used)");
+    expect(h.port.problems).toEqual(["invalid_grant: code already used"]);
+    expect(h.port.urls.at(-1)).toBe("");
+    expect(h.ctl.accessToken).toBeUndefined();
+    expect(h.port.signedIn).toBe(0);
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow("no sign-in link is open");
+  });
+
+  it("keeps the open link when Home Connect does not answer the exchange", async () => {
+    const h = harness([fail(0, { error: "network_error" }), ok(TOKEN_BODY)], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow("did not answer");
+    expect(h.port.problems).toEqual([]);
+    await expect(h.ctl.completeAppSignIn(PASTED)).resolves.toBe("Signed in to Home Connect.");
+  });
+
+  it("exchanges a code once when the address is pasted twice at the same time", async () => {
+    const h = harness([ok(TOKEN_BODY)], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    const [first, second] = await Promise.allSettled([
+      h.ctl.completeAppSignIn(PASTED),
+      h.ctl.completeAppSignIn(PASTED),
+    ]);
+    expect(first).toEqual({ status: "fulfilled", value: "Signed in to Home Connect." });
+    expect(second).toMatchObject({
+      status: "rejected",
+      reason: { message: "no sign-in link is open — request a new one" },
+    });
+    expect(h.calls).toHaveLength(1);
+    expect(h.port.problems).toEqual([""]);
+    expect(h.ctl.accessToken).toBe("AT");
+  });
+
+  it("exchanges with the verifier of the newest link", async () => {
+    const h = harness([ok(TOKEN_BODY)], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    const second = await h.ctl.appSignInLink();
+    await h.ctl.completeAppSignIn(PASTED);
+    expect(second).toContain(`code_challenge=${challengeOf(h.calls[0]?.form.code_verifier ?? "")}`);
+  });
+
+  it("signs out on a reset and points at the sign-in page, without the device flow", async () => {
+    const h = harness([ok(TOKEN_BODY)], "app");
+    h.port.refreshToken = "OLD";
+    await h.ctl.start();
+    const answer = await h.ctl.resetLogin();
+    expect(answer).toBe("Signed out — open the sign-in page to sign in again.");
+    expect(h.port.cleared).toBe(1);
+    expect(h.ctl.accessToken).toBeUndefined();
+    expect(h.port.connected.at(-1)).toBe(false);
+    expect(h.calls).toHaveLength(1);
+    expect(h.port.notifications).toEqual([APP_SIGN_IN_REQUIRED]);
+  });
+
+  it("refuses the app sign-in in the developer access", async () => {
+    const h = harness([ok(DEVICE_BODY)]);
+    await h.ctl.start();
+    await expect(h.ctl.appSignInLink()).rejects.toThrow(AppSignInError);
+    await expect(h.ctl.completeAppSignIn(PASTED)).rejects.toThrow(AppSignInError);
   });
 });

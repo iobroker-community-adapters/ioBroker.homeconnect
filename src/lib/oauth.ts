@@ -1,10 +1,13 @@
-// Home Connect OAuth 2 — headless Device Flow + token refresh.
-// Wire details (endpoints, params, timings) follow the official API documentation
-// (api-docs.home-connect.com, Authorization and Rate Limiting).
+// Home Connect OAuth 2 — headless Device Flow + token refresh, and for the app access (beta) the code exchange of an
+// Authorization Code sign-in with PKCE under the Home Connect app's public client (H-11; forms after Home Connect NG
+// `auth.py:293-335`, see app-client.ts). Wire details of the developer access (endpoints, params, timings) follow the
+// official API documentation (api-docs.home-connect.com, Authorization and Rate Limiting).
 //
 // This module is pure orchestration: HTTP is injected as a `FormPoster`, so the
 // flows are unit-testable without a network or an adapter instance. Token
 // encryption/persistence is the caller's job (the adapter uses `encrypt()`).
+
+import { APP_REDIRECT_URI } from "./app-client";
 
 /** OAuth endpoint paths, relative to the API base URL. */
 export const DEVICE_AUTH_PATH = "/security/oauth/device_authorization";
@@ -22,9 +25,12 @@ export const REFRESH_CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 min
  */
 const ASSUMED_LIFETIME_S = 86_400;
 
+/** Which way the adapter signs in: the developer access (device flow) or the Home Connect app's client (beta). */
+export type TokenMode = "api" | "app";
+
 /** Static OAuth application credentials + region base URL. */
 export interface OAuthConfig {
-  /** Home Connect developer application client ID. */
+  /** Home Connect developer application client ID — in the app flow the app's public client (`APP_CLIENT_ID`). */
   clientId: string;
   /**
    * Home Connect developer application client secret — sent only when set. The device flow's
@@ -34,6 +40,11 @@ export interface OAuthConfig {
   clientSecret?: string;
   /** Region base URL, e.g. "https://api.home-connect.com". */
   baseUrl: string;
+  /**
+   * The sign-in: `device` (developer access, the default) or `app` (Authorization Code with PKCE under the app's
+   * client — Home Connect refuses the device flow for that client, and no client secret is ever sent).
+   */
+  flow?: "device" | "app";
 }
 
 /** A token as we persist it: absolute expiry, so it survives an adapter restart. */
@@ -54,6 +65,18 @@ export interface StoredToken {
   accessLifetimeMs?: number;
   /** True when the token response carried no usable `expires_in` and a default was assumed. */
   lifetimeAssumed?: boolean;
+  /** The way the token was obtained. Absent on a token stored by an older version — that one is `api`. */
+  mode?: TokenMode;
+}
+
+/**
+ * The way a stored token was obtained.
+ *
+ * @param token the stored token
+ * @returns its mode; a token without one comes from the developer access
+ */
+export function storedMode(token: StoredToken): TokenMode {
+  return token.mode === "app" ? "app" : "api";
 }
 
 /** Result of a form POST: the caller (or a test) supplies parsed JSON + status. */
@@ -187,10 +210,11 @@ export function extractRefreshToken(raw: string | null | undefined): string | un
  *
  * @param body the parsed JSON body from the token endpoint
  * @param now current epoch-ms, for the absolute expiry
+ * @param mode the way the token was obtained
  * @returns the normalized stored token
  * @throws {OAuthError} if the body is not a well-formed token response
  */
-export function toStoredToken(body: unknown, now: number): StoredToken {
+export function toStoredToken(body: unknown, now: number, mode: TokenMode = "api"): StoredToken {
   if (body === null || typeof body !== "object") {
     throw new OAuthError("Token response is not an object");
   }
@@ -214,6 +238,7 @@ export function toStoredToken(body: unknown, now: number): StoredToken {
     scope: typeof scope === "string" ? scope : "",
     accessLifetimeMs: expiresIn * 1000,
     ...(usable ? {} : { lifetimeAssumed: true }),
+    mode,
   };
 }
 
@@ -240,6 +265,7 @@ export class HomeConnectAuth {
    * @throws {OAuthError} on a malformed or error response
    */
   async startDeviceFlow(): Promise<DeviceAuthorization> {
+    this.requireFlow("device");
     const res = await this.post(DEVICE_AUTH_PATH, {
       client_id: this.config.clientId,
       scope: "IdentifyAppliance Monitor Settings Control",
@@ -287,6 +313,7 @@ export class HomeConnectAuth {
    * @throws {OAuthError} on every answer that is not pending or slow_down
    */
   async pollForToken(deviceCode: string): Promise<StoredToken | "pending" | "slow_down"> {
+    this.requireFlow("device");
     const res = await this.post(TOKEN_PATH, {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
       device_code: deviceCode,
@@ -294,7 +321,7 @@ export class HomeConnectAuth {
       ...this.secret(),
     });
     if (res.ok) {
-      return toStoredToken(res.body, this.now());
+      return toStoredToken(res.body, this.now(), "api");
     }
     const { code, description } = this.oauthErrorOf(res.body);
     if (code === "authorization_pending") {
@@ -322,11 +349,11 @@ export class HomeConnectAuth {
    * @throws {OAuthError} if the refresh is rejected (e.g. invalid_grant)
    */
   async refresh(refreshToken: string): Promise<StoredToken> {
-    const res = await this.post(TOKEN_PATH, {
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      ...this.secret(),
-    });
+    // The app's client names itself on a refresh (NG auth.py:320-335); the developer access stays as it always was.
+    const form: Record<string, string> = this.isApp()
+      ? { grant_type: "refresh_token", client_id: this.config.clientId, refresh_token: refreshToken }
+      : { grant_type: "refresh_token", refresh_token: refreshToken, ...this.secret() };
+    const res = await this.post(TOKEN_PATH, form);
     if (!res.ok) {
       const { code, description } = this.oauthErrorOf(res.body);
       throw new OAuthError(
@@ -336,7 +363,58 @@ export class HomeConnectAuth {
         res.status,
       );
     }
-    return toStoredToken(res.body, this.now());
+    return toStoredToken(res.body, this.now(), this.isApp() ? "app" : "api");
+  }
+
+  /**
+   * Exchange the one-time code of an app sign-in for a token (Authorization Code with PKCE, the app flow only).
+   *
+   * @param code the code out of the pasted address
+   * @param verifier the PKCE verifier the sign-in link was made with
+   * @returns the stored token
+   * @throws {OAuthError} if the exchange is refused (a used or foreign code: `invalid_grant`) or the answer is malformed
+   */
+  async exchangeCode(code: string, verifier: string): Promise<StoredToken> {
+    this.requireFlow("app");
+    const res = await this.post(TOKEN_PATH, {
+      grant_type: "authorization_code",
+      client_id: this.config.clientId,
+      redirect_uri: APP_REDIRECT_URI,
+      code,
+      code_verifier: verifier,
+    });
+    if (!res.ok) {
+      const { code: error, description } = this.oauthErrorOf(res.body);
+      throw new OAuthError(
+        `Sign-in code exchange failed: ${describe(error, description, res.status)}`,
+        error,
+        description,
+        res.status,
+      );
+    }
+    return toStoredToken(res.body, this.now(), "app");
+  }
+
+  /**
+   * Whether this driver signs in with the app's client.
+   *
+   * @returns true in the app flow
+   */
+  private isApp(): boolean {
+    return this.config.flow === "app";
+  }
+
+  /**
+   * Refuse a step of the other flow before any request — the device flow is closed to the app's client, and a code
+   * exchange belongs to the app flow alone.
+   *
+   * @param flow the flow the step belongs to
+   * @throws {OAuthError} when this driver runs the other flow
+   */
+  private requireFlow(flow: "device" | "app"): void {
+    if ((flow === "app") !== this.isApp()) {
+      throw new OAuthError(`This sign-in step belongs to the ${flow} flow, not to the configured one.`);
+    }
   }
 
   /**

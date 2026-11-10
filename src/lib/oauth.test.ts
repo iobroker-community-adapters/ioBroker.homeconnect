@@ -11,7 +11,9 @@ import {
   type FormPoster,
   type FormPostResult,
   type StoredToken,
+  storedMode,
 } from "./oauth";
+import { APP_CLIENT_ID, APP_REDIRECT_URI } from "./app-client";
 
 const NOW = 1_700_000_000_000;
 const CONFIG = { clientId: "cid", clientSecret: "secret", baseUrl: "https://api.home-connect.com" };
@@ -77,6 +79,7 @@ describe("pure helpers", () => {
         accessExpires: NOW + 86_400_000,
         scope: "Monitor Control",
         accessLifetimeMs: 86_400_000,
+        mode: "api",
       });
     });
     it("throws on a malformed response", () => {
@@ -132,6 +135,7 @@ describe("HomeConnectAuth.pollForToken", () => {
       accessExpires: NOW + 86_400_000,
       scope: "Monitor Control",
       accessLifetimeMs: 86_400_000,
+      mode: "api",
     });
     expect(calls[0]).toMatchObject({
       path: TOKEN_PATH,
@@ -172,6 +176,85 @@ describe("HomeConnectAuth.refresh", () => {
     const { post } = fakePoster([fail(400, { error: "invalid_grant" })]);
     const auth = new HomeConnectAuth(CONFIG, post, () => NOW);
     await expect(auth.refresh("OLD")).rejects.toMatchObject({ name: "OAuthError", oauthError: "invalid_grant" });
+  });
+});
+
+// The app access (beta): Authorization Code with PKCE under the Home Connect app's public client (H-11). The forms follow
+// Home Connect NG field by field (auth.py:293-335); the device flow is refused for this client (probe 2026-11-10: 400
+// unauthorized_client "client not authorized for this oauth flow (grant_type)").
+describe("HomeConnectAuth in the app flow", () => {
+  const APP = { clientId: APP_CLIENT_ID, baseUrl: "https://api.home-connect.com", flow: "app" as const };
+
+  it("exchanges the code with exactly the app's form, without a secret", async () => {
+    const { post, calls } = fakePoster([ok(TOKEN_BODY)]);
+    const auth = new HomeConnectAuth({ ...APP, clientSecret: "never" }, post, () => NOW);
+    const token = await auth.exchangeCode("c", "v");
+    expect(calls).toEqual([
+      {
+        path: TOKEN_PATH,
+        form: {
+          grant_type: "authorization_code",
+          client_id: APP_CLIENT_ID,
+          redirect_uri: APP_REDIRECT_URI,
+          code: "c",
+          code_verifier: "v",
+        },
+      },
+    ]);
+    expect(token).toMatchObject({ accessToken: "AT", refreshToken: "RT", mode: "app" });
+  });
+
+  it("refreshes with the client id and nothing else", async () => {
+    const { post, calls } = fakePoster([ok(TOKEN_BODY)]);
+    const auth = new HomeConnectAuth({ ...APP, clientSecret: "never" }, post, () => NOW);
+    const token = await auth.refresh("r");
+    expect(calls[0]?.form).toEqual({ grant_type: "refresh_token", client_id: APP_CLIENT_ID, refresh_token: "r" });
+    expect(token.mode).toBe("app");
+  });
+
+  it("leaves the refresh of the device flow as it is", async () => {
+    const plain = fakePoster([ok(TOKEN_BODY)]);
+    await new HomeConnectAuth({ ...CONFIG, clientSecret: undefined }, plain.post, () => NOW).refresh("r");
+    expect(plain.calls[0]?.form).toEqual({ grant_type: "refresh_token", refresh_token: "r" });
+    const withSecret = fakePoster([ok(TOKEN_BODY)]);
+    await new HomeConnectAuth(CONFIG, withSecret.post, () => NOW).refresh("r");
+    expect(withSecret.calls[0]?.form).toEqual({
+      grant_type: "refresh_token",
+      refresh_token: "r",
+      client_secret: "secret",
+    });
+  });
+
+  it("never starts the device flow for the app client", async () => {
+    const { post, calls } = fakePoster([]);
+    const auth = new HomeConnectAuth(APP, post, () => NOW);
+    await expect(auth.startDeviceFlow()).rejects.toThrow(OAuthError);
+    await expect(auth.pollForToken("DC")).rejects.toThrow(OAuthError);
+    expect(calls).toEqual([]);
+  });
+
+  it("never exchanges a code in the device flow", async () => {
+    const { post, calls } = fakePoster([]);
+    await expect(new HomeConnectAuth(CONFIG, post, () => NOW).exchangeCode("c", "v")).rejects.toThrow(OAuthError);
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a used code with Home Connect's code and words", async () => {
+    const { post } = fakePoster([fail(400, { error: "invalid_grant", error_description: "code already used" })]);
+    const auth = new HomeConnectAuth(APP, post, () => NOW);
+    await expect(auth.exchangeCode("c", "v")).rejects.toMatchObject({
+      name: "OAuthError",
+      oauthError: "invalid_grant",
+      description: "code already used",
+      status: 400,
+    });
+  });
+
+  it("counts a stored token without a mode as one of the developer access", () => {
+    const base: StoredToken = { accessToken: "a", refreshToken: "r", accessExpires: 1, scope: "" };
+    expect(storedMode(base)).toBe("api");
+    expect(storedMode({ ...base, mode: "app" })).toBe("app");
+    expect(storedMode({ ...base, mode: "api" })).toBe("api");
   });
 });
 
