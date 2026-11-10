@@ -74,7 +74,7 @@ krobi's decisions for this adapter. The register with his verbatim words lives i
 - **H-08** Every known event of the appliance type exists from the first start on (the cloud cannot list them), documented in README/docs; each event is a plain boolean datapoint `events.<event>` in the channel `events`, no channel per event.
 - **H-09** Moving from community 1.6.x keeps rooms, functions and aliases — they move to the successor datapoint.
 - **H-10** An unconfirmed sign-in link is renewed for at most one hour; then no new code is asked for until a new link is requested in the panel or the instance restarts.
-- **H-11** There is no shared Client ID; every user creates his own in the Home Connect developer portal.
+- **H-11** In the developer access every user creates his own Client ID in the Home Connect developer portal; the app access (beta) uses the public client of the Home Connect app; there is no shared Client ID of the adapter, that is no developer account of its own at BSH.
 - **H-12** The sign-in part of the settings stays a React panel (live with the sign-in state, feedback at the button); the other settings are jsonConfig.
 - **H-13** An appliance answering 'not ready' after being switched on is read again by the adapter after 30, 60 and 120 s; giving up is logged on debug only.
 - **H-14** When a Home Connect quota blocks, the log says which limit and for how long, in one line, without overdoing it.
