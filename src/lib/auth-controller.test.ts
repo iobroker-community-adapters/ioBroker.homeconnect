@@ -1215,8 +1215,21 @@ describe("AuthController in the app access (beta)", () => {
     expect(h.port.signedIn).toBe(1);
     expect(h.port.urls.at(-1)).toBe("");
     expect(h.ctl.lastPastedForm).toBe("parameter");
-    expect(h.ctl.tokenInfo()).toMatchObject({ mode: "app", scope: "Monitor Control", lifetimeAssumed: false });
+    expect(h.ctl.tokenInfo()).toMatchObject({ mode: "app", scopes: ["Monitor", "Control"], lifetimeAssumed: false });
     expect(JSON.stringify(h.ctl.tokenInfo())).not.toContain("AT");
+  });
+
+  it("lists no scope in the report for a token answer without one, and splits on any whitespace", async () => {
+    const h = harness([ok({ ...TOKEN_BODY, scope: undefined })], "app");
+    await h.ctl.start();
+    await h.ctl.appSignInLink();
+    await h.ctl.completeAppSignIn(PASTED);
+    expect(h.ctl.tokenInfo()?.scopes).toEqual([]);
+    const spaced = harness([ok({ ...TOKEN_BODY, scope: " Monitor\tControl  Settings " })], "app");
+    await spaced.ctl.start();
+    await spaced.ctl.appSignInLink();
+    await spaced.ctl.completeAppSignIn(PASTED);
+    expect(spaced.ctl.tokenInfo()?.scopes).toEqual(["Monitor", "Control", "Settings"]);
   });
 
   it("says no sign-in link is open without one — after a restart the verifier is gone", async () => {

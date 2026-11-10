@@ -4580,7 +4580,7 @@ describe("Homeconnect app access (beta)", () => {
     await ctx.i.onReady();
     ctx.auths[0].tokenInfo.mockReturnValue({
       mode: "app",
-      scope: "Monitor Control",
+      scopes: ["Monitor", "Control"],
       issuedAt: "2026-11-10T10:00:00.000Z",
       expiresAt: "2026-11-11T10:00:00.000Z",
       lifetimeAssumed: false,
@@ -4593,7 +4593,12 @@ describe("Homeconnect app access (beta)", () => {
     ).reportHost();
     expect(host.config()).toMatchObject({ accessMode: "app", clientIdSet: false });
     expect(host.adapterState()).toMatchObject({
-      token: { mode: "app", issuedAt: "2026-11-10T10:00:00.000Z", expiresAt: "2026-11-11T10:00:00.000Z" },
+      token: {
+        mode: "app",
+        scopes: ["Monitor", "Control"],
+        issuedAt: "2026-11-10T10:00:00.000Z",
+        expiresAt: "2026-11-11T10:00:00.000Z",
+      },
       pastedForm: "handedOver",
     });
     expect(JSON.stringify(host.adapterState())).not.toContain('"AT"');

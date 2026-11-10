@@ -69,8 +69,8 @@ export interface AuthOptions {
 export interface TokenInfo {
   /** The way the token was obtained. */
   mode: TokenMode;
-  /** The granted scopes. */
-  scope: string;
+  /** The granted scopes, one entry each (RFC 6749 §3.3: the token answer lists them space-delimited). */
+  scopes: string[];
   /** When the access token was issued (ISO), when its lifetime is known. */
   issuedAt?: string;
   /** When the access token expires (ISO). */
@@ -234,7 +234,7 @@ export class AuthController {
     }
     return {
       mode: storedMode(token),
-      scope: token.scope,
+      scopes: token.scope.split(/\s+/).filter(part => part.length > 0),
       issuedAt:
         token.accessLifetimeMs !== undefined
           ? new Date(token.accessExpires - token.accessLifetimeMs).toISOString()
