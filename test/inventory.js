@@ -1180,8 +1180,10 @@ function apiLimits() {
 }
 
 // Round 100: whether a counted call belongs to a declared counterpart — round 171: the one rule of test/fleet-suites.js
-// (host, hostPattern, network, port, kind, method, pathPattern, bodyPattern), which also judges every limit
-const { fits } = require("./fleet-suites.js");
+// (host, hostPattern, network, port, kind, method, pathPattern, bodyPattern), which also judges every limit. Round 172
+// (govee 2026-11-08): a test that fits calls reads them through its limitCalls, which joins each HTTP call's body —
+// readCalls() carries none, and a counterpart declared by its bodyPattern was never reached
+const { fits, limitCalls } = require("./fleet-suites.js");
 
 /**
  * Round 101 (krobi 2026-10-07 15:54): a value the adapter can be told for a writable state — another entry of `states`,
@@ -2070,8 +2072,8 @@ tests.integration(ADAPTER_DIR, {
         const declared = apiLimits();
         const unknown = [
           ...new Set(
-            readCalls()
-              .filter(c => !c.kind.startsWith("hang-") && !declared.some(d => fits(c, d.match)))
+            limitCalls(RESOURCE_DIR, readCalls(), false)
+              .filter(c => !declared.some(d => fits(c, d.match)))
               .map(c => `${c.kind} ${c.host}:${c.port}`),
           ),
         ];
@@ -2321,7 +2323,7 @@ tests.integration(ADAPTER_DIR, {
       // src/lib/api-limits.json declares is called at least once in this run (every suite so far, the commands of this
       // one last); one that only credentials or a protocol the fixtures lack would reach needs its fixture
       it("reaches every counterpart it declares", function () {
-        const calls = readCalls().filter(c => !c.kind.startsWith("hang-"));
+        const calls = limitCalls(RESOURCE_DIR, readCalls(), false);
         const unreached = apiLimits()
           .filter(d => !calls.some(c => fits(c, d.match)))
           .map(d => d.name);
@@ -3046,8 +3048,8 @@ after(function () {
     typeof apiLimits === "function" && fs.existsSync(API_LIMITS)
       ? [
           ...new Set(
-            readCalls()
-              .filter(c => !c.kind.startsWith("hang-") && !apiLimits().some(d => fits(c, d.match)))
+            limitCalls(RESOURCE_DIR, readCalls(), false)
+              .filter(c => !apiLimits().some(d => fits(c, d.match)))
               .map(channel),
           ),
         ]
