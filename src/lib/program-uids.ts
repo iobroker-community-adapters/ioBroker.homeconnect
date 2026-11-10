@@ -1,10 +1,13 @@
-// Generated from the appliances' own descriptions (FeatureMapping / DeviceDescription of 25 real
+// Built from the appliances' own descriptions (FeatureMapping / DeviceDescription of 25 real
 // appliances: openHAB homeconnectdirect test data, chris-mc1/homeconnect_local_hass issues #14, #104,
 // #179, #201, vemboy200/homeconnect_local_hass #9, eifel-tech/ioBroker.cloudless-homeconnect #68 and
 // further appliance descriptions collected from user reports), research 2026-09-28. The numbers are the appliance
-// family's own and differ between types (and between series of one type — their blocks do not overlap),
-// so the table is per appliance type. A local name is shortened to the cloud's program key only where the
-// type catalogue has that key and no other program of the same appliance shortens to it.
+// family's own and differ between types, so the table is per appliance type. Two series of one type can fill the
+// same block with different programs: the oven dish programs from 12288 on are Dish.Recommendation.Konv.* on a
+// NEFF B47CS22G0 and Dish.Automatic.Conv.* on a BOSCH HRG7784B1 (Kessel test profile oven-tls.zip) — 12296 is a
+// white loaf in a tin on one and a vegetable stew on the other. Such a block is left out; the adapter learns its
+// numbers from finished runs. A local name is shortened to the cloud's program key only where the type catalogue
+// has that key and no other program of the same appliance shortens to it.
 
 /** Appliance type → program number → program key. */
 export const PROGRAM_UIDS: Readonly<Record<string, Readonly<Record<number, string>>>> = {
@@ -203,28 +206,6 @@ export const PROGRAM_UIDS: Readonly<Record<string, Readonly<Record<number, strin
     8237: "Cooking.Oven.Program.HeatingMode.DoughProving",
     9226: "Cooking.Oven.Program.Cleaning.EasyClean",
     9727: "Cooking.Oven.Program.Dish.SubsequentCooking",
-    12288: "Cooking.Oven.Program.Dish.Recommendation.Konv.RuehrteigSpringOderKastenform",
-    12289: "Cooking.Oven.Program.Dish.Recommendation.Konv.Biskuit6Eier",
-    12290: "Cooking.Oven.Program.Dish.Recommendation.Konv.Biskuitrolle",
-    12291: "Cooking.Oven.Program.Dish.Recommendation.Konv.HefeteigBlechkuchenMitTrockenemBelag",
-    12293: "Cooking.Oven.Program.Dish.Recommendation.Konv.HefekranzOderZopf500G",
-    12294: "Cooking.Oven.Program.Dish.Recommendation.Konv.KleingebaeckBlaetterteig",
-    12295: "Cooking.Oven.Program.Dish.Recommendation.Konv.Muffins1Ebene",
-    12296: "Cooking.Oven.Program.Dish.Recommendation.Konv.WeissbrotInKastenform",
-    12297: "Cooking.Oven.Program.Dish.Recommendation.Konv.AufbackbroetchenOderBaguetteVorgebacken",
-    12298: "Cooking.Oven.Program.Dish.Recommendation.Konv.PizzaTiefgekuehltMitDuennemBoden1Stueck",
-    12299: "Cooking.Oven.Program.Dish.Recommendation.Konv.PommesFritesTiefgekuehlt1Ebene",
-    12300: "Cooking.Oven.Program.Dish.Recommendation.Konv.KartoffelgratinAusRohenKartoffeln",
-    12301: "Cooking.Oven.Program.Dish.Recommendation.Konv.Backofenkartoffeln",
-    12302: "Cooking.Oven.Program.Dish.Recommendation.Konv.LasagneFrisch",
-    12303: "Cooking.Oven.Program.Dish.Recommendation.Konv.SchweinebratenDurchwachsenOhneSchwarte",
-    12304: "Cooking.Oven.Program.Dish.Recommendation.Konv.Hackbraten1Kg",
-    12305: "Cooking.Oven.Program.Dish.Recommendation.Konv.RoastbeefMedium15Kg",
-    12306: "Cooking.Oven.Program.Dish.Recommendation.Konv.RinderSchmorbraten",
-    12307: "Cooking.Oven.Program.Dish.Recommendation.Konv.LammkeuleOhneKnochen",
-    12308: "Cooking.Oven.Program.Dish.Recommendation.Konv.HaehnchenGanz",
-    12309: "Cooking.Oven.Program.Dish.Recommendation.Konv.Haehnchenkeulen",
-    12310: "Cooking.Oven.Program.Dish.Recommendation.Konv.GansGanz34Kg",
   },
   Washer: {
     28673: "LaundryCare.Washer.Program.Cotton",

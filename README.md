@@ -138,6 +138,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: ten error answers in a row hold further requests for up to ten minutes, as Home Connect itself would block them — across a restart too; an answer without an error ends the series
 - (krobipd) Fixed: a sign-in that cannot reach Home Connect no longer tells you to check the Client ID
 - (krobipd) Fixed: a value that ends in a number takes the adapter's own label only within its own family — a hob power level of 9.0 no longer shows "Wash & dry 90'"
+- (krobipd) Fixed: the program statistics of an oven no longer name a dish another oven series numbers the same way — the adapter learns those programs from the finished run
 
 <!--
     Placeholder for the next version (at the beginning of the line): 
