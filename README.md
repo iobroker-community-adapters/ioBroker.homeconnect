@@ -141,6 +141,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: the program statistics of an oven no longer name a dish another oven series numbers the same way — the adapter learns those programs from the finished run
 - (krobipd) Improved: a hob's cooking zone, power level, joined zones, frying sensor level and PowerMove levels get their own names, explanations and value labels in every language
 - (krobipd) Fixed: an ajar door counts as open, no longer as closed
+- (krobipd) Fixed: the diagnostics report blanks the sign-in link and its code, and names Home Connect's last refusal of the sign-in
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

@@ -1339,12 +1339,13 @@ class Homeconnect extends utils.Adapter {
           limitPlaceFreesInS: this.longHoldUntil > now ? Math.ceil((this.longHoldUntil - now) / 1000) : 0,
           errorStreak: this.errorSeries(now).held,
           lastReconnectSync: this.lastReconnectSync > 0 ? new Date(this.lastReconnectSync).toISOString() : undefined,
-          signInLastError: this.stateMirror.held("auth.lastError")?.val,
+          signInLastError: this.stateMirror.held(this.objectMirror.fullId("auth.lastError"))?.val,
         };
       },
       applianceState: id => this.sync?.reportState(id) ?? {},
       secrets: () => {
-        const link = this.stateMirror.held("auth.verificationUrl")?.val;
+        // the mirror holds the own states by full id
+        const link = this.stateMirror.held(this.objectMirror.fullId("auth.verificationUrl"))?.val;
         const userCode = typeof link === "string" ? /[?&](?:user_)?code=([^&]+)/.exec(link)?.[1] : undefined;
         return [
           this.authCtl?.accessToken ?? "",

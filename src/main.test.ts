@@ -4295,6 +4295,24 @@ describe("Homeconnect diagnostics report", () => {
     expect(secrets).toEqual(expect.arrayContaining(["AT", CLIENT_ID, "sec"]));
   });
 
+  it("reads the sign-in link and Home Connect's last refusal from the own states for the report", async () => {
+    const ctx = await ready();
+    const port = ctx.auths[0].port as {
+      setVerificationUrl(url: string): Promise<void>;
+      setProblem(text: string): Promise<void>;
+    };
+    await port.setVerificationUrl("https://verify.example/?user_code=WXYZ-1234");
+    await port.setProblem("invalid_client: client unknown");
+    const host = (
+      ctx.i as unknown as { reportHost(): { secrets(): string[]; adapterState(): Record<string, unknown> } }
+    ).reportHost();
+    // the link and its code are blanked in the report, and the refusal is told
+    expect(host.secrets()).toEqual(
+      expect.arrayContaining(["https://verify.example/?user_code=WXYZ-1234", "WXYZ-1234"]),
+    );
+    expect(host.adapterState()).toMatchObject({ signInLastError: "invalid_client: client unknown" });
+  });
+
   it("a 429 during the live read pauses every request like any other 429", async () => {
     const ctx = await ready();
     httpMock.getJson.mockResolvedValueOnce(failResult(429, { retryAfterMs: 30_000 }));
