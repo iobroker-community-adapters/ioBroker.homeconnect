@@ -26,8 +26,8 @@ Module._extensions[".json"] = function pressedLoad(module, filename) {
   for (const counterpart of module.exports.counterparts) {
     for (const limit of counterpart.limits) {
       // the window key of test/fleet-suites.js limitKey()
-      const key =
-        limit.concurrent === true ? "concurrent" : `${limit.seconds}${limit.errors === true ? " errors" : ""}`;
+      const errors = limit.errors === "successive" ? " successive errors" : limit.errors === true ? " errors" : "";
+      const key = limit.concurrent === true ? "concurrent" : `${limit.seconds}${errors}`;
       const max = press[counterpart.name]?.[key];
       if (typeof max === "number") {
         limit.max = max;

@@ -81,7 +81,8 @@ const byHook = () => {
 const record = (entry, hook = byHook()) =>
   fs.appendFileSync(log, `${JSON.stringify(hook ? { ...entry, hook } : entry)}\n`);
 // 3. It counts every call to a counterpart with its time — each HTTP request, each fetch, each UDP datagram, each raw TCP
-//    connection — one JSON line per call in RESOURCE_PROBE_DIR/<pid>.calls, against the limits the adapter declares in
+//    connection and each write on it (a corked batch once, round 172) — one JSON line per call in
+//    RESOURCE_PROBE_DIR/<pid>.calls, against the limits the adapter declares in
 //    src/lib/api-limits.json (round 100, krobi 2026-10-07 10:14: API limits are defined in the adapter and checked).
 const calls = path.join(dir, `${process.pid}.calls`);
 // The process's pulse (round 124, red-proof run 2026-10-16): a process blocked on a call that never ends writes no
@@ -144,10 +145,8 @@ const requestOf = (method, pathname) => ({
 //     Connect's 10 event channels, counts from the send to that end; round 171).
 const bodies = path.join(dir, `${process.pid}.bodies`);
 const closedLog = path.join(dir, `${process.pid}.closed`);
-const noteBody = (n, body) => {
-  if (n === undefined || body === undefined || body === null) {
-    return;
-  }
+// the first 1024 characters of a body as a text, or undefined
+const bodyText = body => {
   const text =
     typeof body === "string"
       ? body
@@ -156,8 +155,15 @@ const noteBody = (n, body) => {
         : body instanceof URLSearchParams
           ? body.toString()
           : undefined;
-  if (text !== undefined && text !== "") {
-    fs.appendFileSync(bodies, `${JSON.stringify({ n, body: text.slice(0, 1024) })}\n`);
+  return text === undefined || text === "" ? undefined : text.slice(0, 1024);
+};
+const noteBody = (n, body) => {
+  if (n === undefined || body === undefined || body === null) {
+    return;
+  }
+  const text = bodyText(body);
+  if (text !== undefined) {
+    fs.appendFileSync(bodies, `${JSON.stringify({ n, body: text })}\n`);
   }
 };
 const ended = new Set();
@@ -207,7 +213,8 @@ const closeTracked = (n, response) => {
 //    answer reaches the adapter ANSWER_DELAY_MS late: a fixture answers within milliseconds, and a limiter that frees its
 //    place after the send would hold one call too many unseen. 20 ms lies above a timer's lateness (0–3 ms, 20 timers
 //    of 150 ms on the development Mac, 2026-11-05). Round 171: with the answer's status (`{ t, n, status }`) — an error
-//    window counts the calls answered with 400 and up (Home Connect: "Error Limit (10 per 10 minutes)").
+//    window counts the calls answered with 400 and up (`errors: true`), a series window the unbroken series of them
+//    (`errors: "successive"`, round 172 — Home Connect: "10 successive requests … which result in an error").
 const answeredLog = path.join(dir, `${process.pid}.answered`);
 const ANSWER_DELAY_MS = process.env.INVENTORY_COUNTED === "1" ? 20 : 0;
 const answered = (n, status) => {
@@ -337,7 +344,10 @@ const silenceIfHung = socket => {
 //    RESOURCE_PROBE_DIR holds `500`, `429`, `empty` or `drift`, HTTP answers the adapter gets (fetch and http/https) are
 //    replaced — that status with an empty body (429 with `retry-after: 97`), an empty 200, or the real answer with its
 //    JSON drifted: of every object's keys the first of each three is gone, the second null, the third of another type.
-//    A 429 and `500all` (round 125, D21: a series of errors) replace every answer. A 500, an empty 200 and drift replace the first answer to each request (method,
+//    A 429 and `500all` (round 125, D21: a series of errors) replace every answer. `500press` (round 172, R172-21: the
+//    error press) replaces the answer of every call that fits a `match` in RESOURCE_PROBE_DIR/press-errors — read with
+//    test/counterparts.js, the one reading of test/fleet-suites.js, body included, so an http call is judged at its
+//    answer — and lets every other call through (a login keeps its answer). A 500, an empty 200 and drift replace the first answer to each request (method,
 //    host, port, path) of a process under that fault and let the repeat through: a wrong answer to every call stops a login-first adapter
 //    at its login, and it never asks for data (homeconnect retried its token for a minute, red-proof run 2026-10-16).
 //    Every request of the adapter is noted in RESOURCE_PROBE_DIR/<pid>.requests with the fault it met; the call itself
@@ -350,7 +360,17 @@ const faultWord = () => {
     return "";
   }
 };
-const FAULTS = new Set(["500", "429", "empty", "drift", "500all"]);
+const FAULTS = new Set(["500", "429", "empty", "drift", "500all", "500press"]);
+// R172-21: the counterparts an error press presses — their `match`, written by test/fleet-suites.js
+const pressErrors = path.join(dir, "press-errors");
+const pressedCall = call => {
+  try {
+    const { fits } = require(path.join(__dirname, "counterparts.js"));
+    return JSON.parse(fs.readFileSync(pressErrors, "utf8")).some(match => fits(call, match));
+  } catch {
+    return false; // no list or no reading: no 500 — the press verdict names the window that never filled
+  }
+};
 const requests = path.join(dir, `${process.pid}.requests`);
 const answeredWrong = new Set();
 // a long number in a path is a time or a counter, not another request
@@ -359,12 +379,16 @@ const requestKey = (method, host, port, pathname) =>
     /\d{6,}/g,
     "#",
   );
-// the fault this request meets ("" for none), noted with the request
-const faultFor = key => {
+// the fault this request meets ("" for none), noted with the request; `call` (host, port, method, path, body) for
+// `500press`
+/** @type {(key: string, call?: { host?: string, port?: unknown, method?: string, path?: string, body?: string }) => string} */
+const faultFor = (key, call = undefined) => {
   const mode = faultWord();
   let met = "";
   if (mode === "429" || mode === "500all") {
     met = mode;
+  } else if (mode === "500press") {
+    met = call !== undefined && pressedCall(call) ? mode : "";
   } else if (FAULTS.has(mode) && !answeredWrong.has(`${mode} ${key}`)) {
     answeredWrong.add(`${mode} ${key}`);
     met = mode;
@@ -406,7 +430,7 @@ const driftText = text => {
     return text; // not JSON — it goes on as it came
   }
 };
-const faultStatus = mode => (mode === "500" || mode === "500all" ? 500 : mode === "429" ? 429 : 200);
+const faultStatus = mode => (["500", "500all", "500press"].includes(mode) ? 500 : mode === "429" ? 429 : 200);
 /** @type {(mode: string) => Record<string, string>} */
 // round 171 (limits audit #26): 97 s — a fixed one-minute fallback after any 429 waits too short and shows it
 const faultHeaders = mode => (mode === "429" ? { "retry-after": "97" } : {});
@@ -518,6 +542,11 @@ const socketWrite = /** @type {Native} */ (net.Socket.prototype.write);
 // Round 104 (krobi 2026-10-07 10:14: API limits are defined in the adapter and checked): every
 // write on such a connection is a call of kind `tcp-write` — a device protocol on one socket (YNCA, NUT, MQTT) sends its
 // commands there, and until now only the connections were counted, so no command limit was ever judged.
+// Round 172 (govee 2026-11-08): a corked batch — the writes between cork() and the uncork() that empties it — leaves as
+// one write and counts once; mqtt-packet 9 writes one CONNECT in 13 pieces under cork (a SUBSCRIBE in 6, a PUBLISH in 5),
+// and counting each piece put one connection at 21 calls, a number a library update could change without one more
+// message on the wire.
+const batched = new WeakSet();
 /** @this {net.Socket} */
 function causeWrite(...args) {
   if (open.has(this) && down()) {
@@ -526,12 +555,25 @@ function causeWrite(...args) {
   }
   silenceIfHung(this);
   const target = targets.get(this);
-  if (target !== undefined && open.has(this) && rawOut.has(this)) {
+  if (target !== undefined && open.has(this) && rawOut.has(this) && !batched.has(this)) {
     count("tcp-write", target.host, target.port);
+    if (this.writableCorked > 0) {
+      batched.add(this);
+    }
   }
   return socketWrite.apply(this, args);
 }
 net.Socket.prototype.write = causeWrite;
+const socketUncork = /** @type {Native} */ (net.Socket.prototype.uncork);
+/** @this {net.Socket} */
+function endBatch(...args) {
+  const out = socketUncork.apply(this, args);
+  if (this.writableCorked === 0) {
+    batched.delete(this);
+  }
+  return out;
+}
+net.Socket.prototype.uncork = endBatch;
 // Round 107: TLS started on a connection that is already open (STARTTLS, `tls.connect({ socket })`) — the TLS socket
 // writes and reads through the native handle of the one below, so it takes over that one's record: its writes are
 // calls, its data is an answer, and it is cut, silenced and hung like it.
@@ -618,6 +660,8 @@ for (const mod of [require("node:http"), require("node:https")]) {
       }
       try {
         const req = original.apply(this, args);
+        // R172-21: the body the error press judges a call by
+        let sent;
         if (n !== undefined) {
           // section 10: the body as the adapter writes it, and the end of the call
           const write = req.write;
@@ -626,6 +670,7 @@ for (const mod of [require("node:http"), require("node:https")]) {
           const note = chunk => {
             if (!noted && chunk !== undefined && typeof chunk !== "function") {
               noted = true;
+              sent = bodyText(chunk);
               noteBody(n, chunk);
             }
           };
@@ -639,16 +684,26 @@ for (const mod of [require("node:http"), require("node:https")]) {
           };
           req.once("close", () => closed(n));
         }
-        const mode =
-          outermost && host !== undefined && !keep.has(Number(port)) && !byHook()
-            ? faultFor(requestKey(method, String(host).replace(/:\d+$/, ""), port, pathname))
-            : "";
-        if (mode) {
+        const faulty = outermost && host !== undefined && !keep.has(Number(port)) && !byHook();
+        const key = faulty ? requestKey(method, String(host).replace(/:\d+$/, ""), port, pathname) : "";
+        // R172-21: the error press judges a call by its counterpart, its body included — so at its answer
+        const late = faulty && faultWord() === "500press";
+        const mode = faulty && !late ? faultFor(key) : "";
+        if (mode || late) {
           const emit = req.emit;
           req.emit = function faultEmit(event, ...rest) {
-            return event === "response"
-              ? emit.call(this, event, faultResponse(mode, rest[0]))
-              : emit.call(this, event, ...rest);
+            if (event !== "response") {
+              return emit.call(this, event, ...rest);
+            }
+            const met = late
+              ? faultFor(key, {
+                  host: String(host).replace(/:\d+$/, ""),
+                  port,
+                  ...requestOf(method, pathname),
+                  body: sent,
+                })
+              : mode;
+            return emit.call(this, event, met ? faultResponse(met, rest[0]) : rest[0]);
           };
         }
         if (n !== undefined) {
@@ -824,16 +879,15 @@ const cutFetch = (...args) => {
     closed(n);
     return Promise.reject(new TypeError("fetch failed", { cause: refused() }));
   }
+  const fetchMethod = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET");
   const mode =
     target !== undefined && !keep.has(/** @type {number} */ (targetPort)) && !byHook()
-      ? faultFor(
-          requestKey(
-            args[1]?.method ?? (args[0] instanceof Request ? args[0].method : "GET"),
-            target,
-            targetPort,
-            targetPath,
-          ),
-        )
+      ? faultFor(requestKey(fetchMethod, target, targetPort, targetPath), {
+          host: target,
+          port: targetPort,
+          ...requestOf(fetchMethod, targetPath),
+          body: bodyText(args[1]?.body),
+        })
       : "";
   if (mode) {
     if (mode !== "drift") {

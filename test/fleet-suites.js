@@ -41,9 +41,11 @@
 //                                       template's suite "a command nobody answers stays unconfirmed")
 //   "every limit holds when it is pressed" (round 171) every window of every counterpart in src/lib/api-limits.json
 //                                       once more with a lowered maximum (press-hook.js: half the most calls one lane
-//                                       held before), one counted installation per window of a counterpart, restarted
-//                                       like the host: no lane above the lowered maximum, one lane at it, every process
-//                                       loaded the declaration
+//                                       held in the calibration, round 172 — the same play with the declared table),
+//                                       one counted installation per window of a counterpart; the play: a start, one
+//                                       command to every writable datapoint, the counterparts gone and back, a restart
+//                                       like the host's: no lane above the lowered maximum, one lane at it, every
+//                                       process loaded the declaration
 //   "the whole run"                     (no start, round 157) D4 nothing is written after the unload callback in any stop
 //                                       of the run (resource probe) · D17 no datagram to 255.255.255.255, and every own
 //                                       address it names to others is the chosen one (network hook, section 8) · round
@@ -51,6 +53,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert");
+// round 172 (R172-21): which counterpart a call belongs to — one reading, shared with test/network-hook.js
+const { privateHost, fits } = require("./counterparts.js");
 
 // D7: how long the run stays watched after its start is done — several cycles of every fleet poll.
 const QUIET_WINDOW_MS = 60000;
@@ -711,7 +715,22 @@ function protocolHarness(harness) {
         inner = false;
       }
     };
-    harness.startAdapterAndWait = (...args) => begin(startAndWait, args);
+    // Round 172 (R172-19, lab run 20261108-131719-662636-hand): @iobroker/testing refuses a start while the adapter runs
+    // or once it has stopped ("already been used") inside startAdapter, and startAdapterAndWait never passes the refusal
+    // on — the press installation after the calibration waited 120 s for a process that never started. It fails here.
+    const startOrRefuse = (...args) => {
+      const refused = harness.isAdapterRunning?.()
+        ? "the adapter is already running"
+        : harness.didAdapterStop?.()
+          ? "this harness has already been used"
+          : "";
+      return refused
+        ? Promise.reject(
+            new Error(`@iobroker/testing refuses this start (${refused}) — start a stopped instance as the host does`),
+          )
+        : startAndWait(...args);
+    };
+    harness.startAdapterAndWait = (...args) => begin(startOrRefuse, args);
     harness.startAdapter = (...args) => (inner ? startOnly(...args) : begin(startOnly, args));
     harness.stopAdapter = (...args) => timed("stop", {}, stop(...args));
   }
@@ -1178,74 +1197,18 @@ const PRESS_DEADLINE_MS = 120000;
 const PRESS_QUIET_MS = SETTLE_MS;
 
 /**
- * Round 171: whether a host never leaves the user's network — RFC 1918 (10/8, 172.16/12, 192.168/16), RFC 1122 loopback
- * (127/8, ::1), RFC 3927 link-local (169.254/16, fe80::/10), RFC 4193 unique local (fc00::/7), RFC 2365 and RFC 5771
- * scoped multicast (239/8, 224.0.0.0/24), RFC 919 limited broadcast, RFC 6762 `.local` and RFC 6761 `localhost` names.
- * RFC 1918 §3: such an address is not reachable from the Internet, so a counterpart declared `network: "private"` never
- * takes a cloud's calls.
- *
- * @param {string} host the host a call went to
- */
-function privateHost(host) {
-  const name = String(host)
-    .toLowerCase()
-    .replace(/^\[|\]$/g, "");
-  if (/\.local\.?$/.test(name)) {
-    return true;
-  }
-  // RFC 6761 §6.3: `localhost` and every name under it is the loopback
-  if (/(?:^|\.)localhost\.?$/.test(name)) {
-    return true;
-  }
-  const v4 = /^(?:::ffff:)?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(name);
-  if (v4) {
-    const [a, b, c] = v4.slice(1, 4).map(Number);
-    return (
-      a === 10 ||
-      a === 127 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254) ||
-      a === 239 ||
-      (a === 224 && b === 0 && c === 0) ||
-      name.endsWith("255.255.255.255")
-    );
-  }
-  return name === "::1" || /^f[cd][0-9a-f]{0,2}:/.test(name) || /^fe[89ab][0-9a-f]?:/.test(name);
-}
-
-/**
- * Round 100: whether a counted call belongs to a declared counterpart — every field of `match` must fit. Round 107:
- * `hostPattern`, an anchored regular expression. Round 171: `network: "private"` (privateHost), `method` and the anchored
- * `pathPattern` of an HTTP call, and `bodyPattern` over the first 1024 characters of its body (network hook, section 10)
- * — an upstream that limits one endpoint (Home Connect: 5 program starts a minute) is declared as its own counterpart.
- *
- * @param {{ host?: string, method?: string, path?: string, body?: string }} call a counted call
- * @param {Record<string, string | number>} match the counterpart's `match`
- */
-function fits(call, match) {
-  return Object.entries(match).every(([key, value]) => {
-    if (key === "hostPattern") {
-      return new RegExp(String(value)).test(String(call.host));
-    }
-    if (key === "pathPattern" || key === "bodyPattern") {
-      const text = key === "pathPattern" ? call.path : call.body;
-      return typeof text === "string" && new RegExp(String(value)).test(text);
-    }
-    if (key === "network") {
-      return value === "private" && privateHost(String(call.host));
-    }
-    return call[key] === value;
-  });
-}
-
-/**
  * Round 171: the window a limit counts in — its `seconds`, "<seconds> errors" for the calls answered with an error in it
- * (`errors: true`, Home Connect's "Error Limit (10 per 10 minutes)"), or "concurrent" for calls open at the same time.
+ * (`errors: true`), or "concurrent" for calls open at the same time. Round 172 (homeconnect 2026-11-08 10:43): "<seconds>
+ * successive errors" for an unbroken series of them (`errors: "successive"`) — Home Connect, read 2026-11-08 at
+ * api-docs.home-connect.com/general/#rate-limiting: "10 successive requests per client and Home Connect user account per 10
+ * minutes which result in an error"; an answer without an error ends the series.
  */
 function limitKey(limit) {
   if (limit.concurrent === true) {
     return "concurrent";
+  }
+  if (limit.errors === "successive") {
+    return `${limit.seconds} successive errors`;
   }
   return limit.errors === true ? `${limit.seconds} errors` : String(limit.seconds);
 }
@@ -1255,15 +1218,22 @@ function windowWords(key) {
   if (key === "concurrent") {
     return "open at once";
   }
+  if (key.endsWith(" successive errors")) {
+    return `answered with an error in a row within ${Number.parseFloat(key)} s`;
+  }
   return key.endsWith(" errors") ? `answered with an error within ${Number.parseFloat(key)} s` : `within ${key} s`;
 }
 
 /**
  * Round 171: the calls a window of `key` counts — for an error window those answered with a client or server error
  * (status 400 and up, RFC 9110 §15.5 and §15.6; the network hook stamps the status with the answer, section 9), a call
- * without an answer never reached the counterpart's count.
+ * without an answer never reached the counterpart's count. R172-1: a series window takes every answered call — an answer
+ * below 400 ends the series (heldAt).
  */
 function countedIn(calls, key) {
+  if (key.endsWith(" successive errors")) {
+    return calls.filter(c => typeof c.status === "number");
+  }
   return key.endsWith(" errors") ? calls.filter(c => typeof c.status === "number" && c.status >= 400) : calls;
 }
 
@@ -1296,7 +1266,8 @@ function laneOf(call, limit, match) {
  * from its send until `seconds · 1000` after its answer (`answered ?? t`, round 170); "concurrent": from its send until it
  * ended (`closed`, network hook section 10; a call that never ended is open until its process's last sign of life, `end`).
  *
- * @param {{ t: number, answered?: number, closed?: number, end?: number }[]} sent the lane's calls, oldest first
+ * @param {{ t: number, answered?: number, closed?: number, end?: number, status?: number }[]} sent the lane's calls, oldest
+ *   first
  * @param {string} key limitKey()
  * @param {number} [span] a longer window counts only this span (ms) — the press plan's window of one phase
  * @returns {{ t: number, held: number }[]}
@@ -1307,6 +1278,24 @@ function heldAt(sent, key, span = Infinity) {
       t: c.t,
       held: sent.filter(o => o.t <= c.t && (o.closed ?? o.end ?? Infinity) > c.t).length,
     }));
+  }
+  if (key.endsWith(" successive errors")) {
+    // R172-1: in the order the counterpart answered — each error answer holds the errors of its series within the window
+    // before it, an answer below 400 ends the series (countedIn passes answered calls only); never measured within a
+    // phase (pressPlan lowers it from its declaration), so `span` does not apply
+    const within = Number.parseFloat(key) * 1000;
+    const series = [];
+    const held = [];
+    for (const c of [...sent].sort((a, b) => (a.answered ?? a.t) - (b.answered ?? b.t))) {
+      if (Number(c.status) < 400) {
+        series.length = 0;
+        continue;
+      }
+      const at = c.answered ?? c.t;
+      series.push(c);
+      held.push({ t: c.t, held: series.filter(o => at - (o.answered ?? o.t) < within).length });
+    }
+    return held;
   }
   const window = Math.min(Number.parseFloat(key) * 1000, span);
   return sent.map((c, j) => ({
@@ -1384,24 +1373,53 @@ function overLimits(calls, tableOf) {
 }
 
 /**
+ * Round 172 (R172-3): the windows of the calibration installation — every window of every counterpart at its strictest
+ * declared maximum, so a phase of the calibration ends where a pressed one would: watched after its maximum, or quiet.
+ * No error window: the calibration sends no error, such a window never fills and would hold every phase until the deadline
+ * — pressPlan lowers it from its declaration.
+ *
+ * @param {object[]} declared the counterparts of src/lib/api-limits.json
+ * @returns {{ name: string, key: string, max: number }[]}
+ */
+function calibrationGroup(declared) {
+  const group = [];
+  for (const d of declared) {
+    const strictest = new Map();
+    for (const limit of d.limits.filter(l => !limitKey(l).endsWith(" errors"))) {
+      strictest.set(limitKey(limit), Math.min(strictest.get(limitKey(limit)) ?? Infinity, limit.max));
+    }
+    for (const [key, max] of strictest) {
+      group.push({ name: d.name, key, max });
+    }
+  }
+  return group;
+}
+
+/**
  * Round 171: which windows the press installations lower, and to what. Per counterpart and window the most calls one lane
- * held in the judged installations so far; pressed is every window that held at least two, to half of that — the
+ * held in the calibration installation (round 172: the press play with the declared table — until then the installations
+ * before the suite, whose outages and commands the press play never repeated); pressed is every window that held at least
+ * two, to half of that — the
  * adapter's own demand stays twice the lowered maximum, a run that wants a few calls less still presses it. Group k
  * lowers the k-th window of every counterpart (shortest first): two windows of one counterpart in one installation would
  * let the stricter one bind and the other never fill; windows of different counterparts share it — a counterpart held
  * back delays no other (krobi 2026-10-07 10:12: "ein gerät darf niemals ein anderen blockieren"). An error window fills
  * only with errors, which a fixture never sends: it is lowered to half of its declared maximum and pressed in groups of
- * its own after the others, with a 500 to every answer (the network hook's `500all`) — under that the demand of every
- * other window falls. A window longer than a press phase (an hour, a day) is measured within one phase (peaksOf with
+ * its own after the others, with a 500 to every call of its counterparts (the network hook's `500press`, R172-21: a
+ * login no pressed window names keeps its real answer, so a login-first adapter reaches its data). A window longer than a press phase (an hour, a day) is measured within one phase (peaksOf with
  * PRESS_DEADLINE_MS, R171-49): an installation before the press lasts up to 790 s (lab run 20261107-185219-654623-hand),
  * half of what it held is more than one phase lets the adapter ask.
  *
  * @param {object[]} peaks peaksOf() over the judged installations
  * @param {object[]} declared the counterparts of src/lib/api-limits.json
- * @returns {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[] }} idle: windows a lane
- *   never held two calls in, error windows declared below two — nothing to lower, the run's own demand holds them
+ * @param {Set<string>} [called] the counterparts the calibration called (R172-20: a counterpart with error windows only
+ *   has no peak without an error; without it, those with a peak)
+ * @returns {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[], unreached: string[] }}
+ *   idle: windows a lane never held two calls in, error windows declared below two — nothing to lower, the run's own
+ *   demand holds them; unreached (R172-20): the windows of every counterpart the calibration never called — unproven,
+ *   the suite is red on each
  */
-function pressPlan(peaks, declared) {
+function pressPlan(peaks, declared, called = new Set(peaks.map(p => p.name))) {
   const most = new Map();
   for (const p of peaks.filter(q => !q.key.endsWith(" errors"))) {
     const id = `${p.name}\u0000${p.key}`;
@@ -1410,6 +1428,7 @@ function pressPlan(peaks, declared) {
   const byName = new Map();
   const errorsByName = new Map();
   const idle = [];
+  const planned = new Set(most.keys());
   for (const [id, peak] of most) {
     const [name, key] = id.split("\u0000");
     if (peak < 2) {
@@ -1419,12 +1438,13 @@ function pressPlan(peaks, declared) {
     byName.set(name, [...(byName.get(name) ?? []), { name, key, max: Math.floor(peak / 2), peak }]);
   }
   // the error windows of every counterpart the run called
-  for (const d of declared.filter(e => peaks.some(p => p.name === e.name))) {
+  for (const d of declared.filter(e => called.has(e.name))) {
     const strictest = new Map();
-    for (const limit of d.limits.filter(l => l.errors === true)) {
+    for (const limit of d.limits.filter(l => limitKey(l).endsWith(" errors"))) {
       strictest.set(limitKey(limit), Math.min(strictest.get(limitKey(limit)) ?? Infinity, limit.max));
     }
     for (const [key, declaredMax] of strictest) {
+      planned.add(`${d.name}\u0000${key}`);
       if (declaredMax < 2) {
         idle.push(`${d.name}: at most ${declaredMax} call(s) ${windowWords(key)} declared`);
         continue;
@@ -1444,12 +1464,34 @@ function pressPlan(peaks, declared) {
     }
     return groups;
   };
-  return { groups: [...groupsOf(byName), ...groupsOf(errorsByName)], idle };
+  // R172-20 (2026-11-08: an SSDP search the fixture settings never start; krobi 14:07 asked why the adapter is not made to
+  // keep to the standard): a window the calibration never called stays unproven — before, it left the plan without a word
+  const unreached = [];
+  for (const d of declared) {
+    for (const key of new Set(d.limits.map(limitKey))) {
+      if (!planned.has(`${d.name}\u0000${key}`)) {
+        unreached.push(`${d.name}: no call ${windowWords(key)} in the calibration`);
+      }
+    }
+  }
+  return { groups: [...groupsOf(byName), ...groupsOf(errorsByName)], idle, unreached };
 }
 
 /** Round 171: whether a press group lowers error windows — its installation answers every call with a 500. */
 function pressesErrors(group) {
   return group.some(w => w.key.endsWith(" errors"));
+}
+
+/**
+ * Round 172 (R172-21, homeconnect 2026-11-08 15:29): the `match` of every counterpart an error press group presses —
+ * the network hook's `500press` answers only the calls that fit one of them with a 500; a login, a token endpoint or
+ * any other counterpart keeps its real answer.
+ *
+ * @param {object[]} declared the counterparts of src/lib/api-limits.json
+ * @param {{ name: string }[]} group pressPlan().groups[k]
+ */
+function pressedMatches(declared, group) {
+  return declared.filter(d => group.some(w => w.name === d.name)).map(d => d.match);
 }
 
 /**
@@ -1471,8 +1513,8 @@ function pressVerdict(calls, group, table, unloaded) {
     // R171-49: a window longer than a phase was lowered from what one lane held within one phase (pressPlan)
     const span = Number.parseFloat(w.key) * 1000 > PRESS_DEADLINE_MS ? ` within ${PRESS_DEADLINE_MS / 1000} s` : "";
     const half = w.key.endsWith(" errors")
-      ? `half of the declared ${w.peak}, a 500 to every answer`
-      : `half of ${w.peak}${span} in the installations before`;
+      ? `half of the declared ${w.peak}, a 500 to every call of the counterpart`
+      : `half of ${w.peak}${span} in the calibration`;
     if (held > w.max) {
       wrong.push(`${w.name}: ${held} calls ${window} — the limiter let more through than the lowered maximum ${w.max}`);
     } else if (held < w.max) {
@@ -2585,8 +2627,16 @@ module.exports = function fleetSuites(templateSuite, ctx) {
   // (pressPlan) — a run below a limit proves nothing about the limiter that should keep it. One counted installation per
   // group, restarted like the host does after a change of the instance object, so a window longer than an installation
   // (a day) has to outlive the restart. No wait for fresh values: an adapter held back is what the suite plays.
+  // Round 172 (yamaha 2026-11-08 10:44, dl-manager 10:47): the plan from what the press play itself asks — a counted
+  // installation plays it with the declared table first (the calibration), and every window is lowered to half of what one
+  // lane held there. Until then the windows were lowered from the highest peak of every installation before; a peak from an
+  // outage (yamaha's YNCA connections and SSDP searches) or from commands (dl-manager's buttons, homeconnect's programs) lay
+  // out of the press play's reach — "the press proved nothing", whatever the limiter did. The play: a fresh start with the
+  // fixtures, one command to every writable datapoint, the counterparts gone and back, a restart like the host's.
   const API_LIMITS_FILE = path.join(ADAPTER_DIR, "src", "lib", "api-limits.json");
   const PRESS_FILE = path.join(RESOURCE_DIR, "press");
+  // R172-21: the `match` of the counterparts an error press group presses (network hook, `500press`)
+  const PRESS_ERRORS_FILE = path.join(RESOURCE_DIR, "press-errors");
   const declaredLimits = () => JSON.parse(fs.readFileSync(API_LIMITS_FILE, "utf8")).counterparts;
   // the end of a press phase (pressPhaseOver), asked against the lowered table of the group
   const pressedOrQuiet = (group, since, quietFrom) => () =>
@@ -2598,71 +2648,137 @@ module.exports = function fleetSuites(templateSuite, ctx) {
       quietFrom,
     );
 
+  // R172-3: one command to every writable datapoint — a button pressed, every other one its own value once more
+  async function commandEveryWritable(harness) {
+    const objects = await dumpObjects(harness);
+    for (const [id, o] of Object.entries(objects)) {
+      if (o?.type !== "state" || o.common?.write !== true) {
+        continue;
+      }
+      if (String(o.common?.role ?? "").startsWith("button")) {
+        await harness.states.setStateAsync(id, { val: true, ack: false });
+        continue;
+      }
+      const now = (await harness.states.getStateAsync(id))?.val;
+      if (now !== null && now !== undefined) {
+        await harness.states.setStateAsync(id, { val: now, ack: false });
+      }
+    }
+  }
+  // R172-3: the press play, one counted installation — the calibration plays it with the declared table, each press group
+  // with its lowered one; every phase ends as pressPhaseOver says, asked against the table of that installation
+  async function playPress(harness, group, label) {
+    clearInstanceData(harness);
+    countThisInstallation();
+    const since = Date.now();
+    await resetInstanceNative(harness, await fixtureNative());
+    await seedInstanceObjects(harness);
+    await setSystemLanguage(harness, FIRST_LANGUAGE);
+    // R172-19 (lab run 20261108-131719-662636-hand): a press group plays on the harness the calibration stopped — the
+    // host starts a stopped instance with `alive` false, and @iobroker/testing refuses a second start of one harness until
+    // its exit marker is reset, as the template's restartAsTheHost does between its stop and its start
+    if (harness.didAdapterStop()) {
+      await harness.states.setState(`system.adapter.${ADAPTER}.0.alive`, {
+        val: false,
+        ack: true,
+        from: "system.host.testing",
+      });
+      harness._adapterExit = undefined;
+      assert.ok(
+        !harness.didAdapterStop(),
+        "@iobroker/testing changed its exit marker — the press play needs a new form",
+      );
+    }
+    const restarts = playControllerRestarts(harness, null, PRESS_HOOK, ...NET);
+    await withinDeadline(
+      harness.startAdapterAndWait(false, adapterEnv(PRESS_HOOK, ...NET)),
+      FIRST_START_MS,
+      "the adapter did not start",
+    );
+    await feedFixtures(harness);
+    await restarts.done;
+    await commandEveryWritable(harness);
+    await waitWindow(
+      `${label}: a start and one command to every writable datapoint`,
+      PRESS_DEADLINE_MS,
+      pressedOrQuiet(group, since),
+    );
+    const cut = Date.now();
+    fs.writeFileSync(OUTAGE_FLAG, "");
+    try {
+      await waitWindow(`${label}: the counterparts gone`, PRESS_DEADLINE_MS, pressedOrQuiet(group, cut, cut));
+    } finally {
+      fs.rmSync(OUTAGE_FLAG, { force: true });
+    }
+    const back = Date.now();
+    await waitWindow(`${label}: the counterparts back`, PRESS_DEADLINE_MS, pressedOrQuiet(group, back, back));
+    await restartAsTheHost(harness, null, `${label}: a restart like the host's`, PRESS_HOOK, ...NET);
+    await feedFixtures(harness);
+    const again = Date.now();
+    await waitWindow(`${label}: after the restart`, PRESS_DEADLINE_MS, pressedOrQuiet(group, again, again));
+    await withinDeadline(harness.stopAdapter(), STOP_MS, "the adapter did not stop");
+    return { since, install: installAt(RESOURCE_DIR, since) };
+  }
+
   suite("every limit holds when it is pressed", getHarness => {
-    /** @type {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[] }} */
-    let plan = { groups: [], idle: [] };
+    /** @type {{ groups: { name: string, key: string, max: number, peak: number }[][], idle: string[], unreached: string[] }} */
+    let plan = { groups: [], idle: [], unreached: [] };
     const pressed = [];
+    // the suite's first start — its verdict reads its own installations only, never an earlier suite's (RUN_WIDE)
+    let from = Infinity;
     before(async function () {
       if (NET.length === 0 || !fs.existsSync(API_LIMITS_FILE)) {
         return;
       }
-      // every installation of the run before this suite (RUN_WIDE: it needs every suite before it), a window longer
-      // than a phase within one phase (R171-49)
-      plan = pressPlan(
-        peaksOf(
-          limitCalls(RESOURCE_DIR, readCalls(), PACING_HOOKS.length > 0),
-          () => declaredLimits(),
-          PRESS_DEADLINE_MS,
-        ),
-        declaredLimits(),
-      );
-      this.timeout(plan.groups.length * (FIRST_START_MS + 2 * PRESS_DEADLINE_MS + 2 * STOP_MS + 60000) + 60000);
+      const installation = FIRST_START_MS + 4 * PRESS_DEADLINE_MS + 2 * STOP_MS + 60000;
+      this.timeout(installation + 60000);
       const harness = getHarness();
       try {
+        fs.rmSync(PRESS_FILE, { force: true });
+        const calibration = await playPress(harness, calibrationGroup(declaredLimits()), "calibration");
+        from = calibration.since;
+        // what one lane held in the calibration, a window longer than a phase within one phase (R171-49)
+        const measured = limitCalls(RESOURCE_DIR, readCalls(from), false, from).filter(
+          c => c.install === calibration.install,
+        );
+        plan = pressPlan(
+          peaksOf(measured, () => declaredLimits(), PRESS_DEADLINE_MS),
+          declaredLimits(),
+          new Set(
+            declaredLimits()
+              .filter(d => measured.some(c => fits(c, d.match)))
+              .map(d => d.name),
+          ),
+        );
+        this.timeout((plan.groups.length + 1) * installation + 60000);
         for (const group of plan.groups) {
-          clearInstanceData(harness);
-          countThisInstallation();
-          const since = Date.now();
           const press = {};
           for (const w of group) {
             press[w.name] = { ...press[w.name], [w.key]: w.max };
           }
           fs.writeFileSync(PRESS_FILE, JSON.stringify(press));
           if (pressesErrors(group)) {
-            fs.writeFileSync(FAULT_FLAG, "500all");
+            // R172-21 (homeconnect 2026-11-08 15:29): the 500 only to the calls of the pressed counterparts — a 500 to
+            // every answer stopped a login-first adapter at its login, and its pressed error window never filled
+            fs.writeFileSync(PRESS_ERRORS_FILE, JSON.stringify(pressedMatches(declaredLimits(), group)));
+            fs.writeFileSync(FAULT_FLAG, "500press");
           }
-          await resetInstanceNative(harness, await fixtureNative());
-          await seedInstanceObjects(harness);
-          await setSystemLanguage(harness, FIRST_LANGUAGE);
-          const restarts = playControllerRestarts(harness, null, PRESS_HOOK, ...NET);
-          await withinDeadline(
-            harness.startAdapterAndWait(false, adapterEnv(PRESS_HOOK, ...NET)),
-            FIRST_START_MS,
-            "the adapter did not start",
-          );
-          await feedFixtures(harness);
-          await restarts.done;
-          await waitWindow("pressed to the lowered maximum", PRESS_DEADLINE_MS, pressedOrQuiet(group, since));
-          await restartAsTheHost(harness, null, "after the press", PRESS_HOOK, ...NET);
-          await feedFixtures(harness);
-          await waitWindow(
-            "pressed after the restart",
-            PRESS_DEADLINE_MS,
-            pressedOrQuiet(group, Date.now(), Date.now()),
-          );
-          await withinDeadline(harness.stopAdapter(), STOP_MS, "the adapter did not stop");
+          const { install } = await playPress(harness, group, "pressed");
           fs.rmSync(FAULT_FLAG, { force: true });
-          pressed.push({ group, install: installAt(RESOURCE_DIR, since) });
+          fs.rmSync(PRESS_ERRORS_FILE, { force: true });
+          pressed.push({ group, install });
         }
       } finally {
         fs.rmSync(PRESS_FILE, { force: true });
         fs.rmSync(FAULT_FLAG, { force: true });
+        fs.rmSync(PRESS_ERRORS_FILE, { force: true });
         stopCounting();
       }
     });
     after(() => {
       fs.rmSync(PRESS_FILE, { force: true });
       fs.rmSync(FAULT_FLAG, { force: true });
+      fs.rmSync(PRESS_ERRORS_FILE, { force: true });
       stopCounting();
     });
 
@@ -2678,18 +2794,19 @@ module.exports = function fleetSuites(templateSuite, ctx) {
       plan.idle.forEach(line => console.log(`      not pressed — ${line}`));
       assert.ok(
         plan.groups.length + plan.idle.length > 0,
-        "no installation before this suite called a declared counterpart — nothing measured, nothing pressed",
+        "the calibration called no declared counterpart — nothing measured, nothing pressed",
       );
-      const wrong = [];
+      // R172-20: the press play starts the adapter with fixtureNative() — those settings reach every declared counterpart
+      const wrong = plan.unreached.map(line => `${line} — never pressed, the fixture settings never reach it`);
       for (const { group, install } of pressed) {
-        const calls = limitCalls(RESOURCE_DIR, readCalls(), false).filter(c => c.install === install);
+        const calls = limitCalls(RESOURCE_DIR, readCalls(from), false, from).filter(c => c.install === install);
         const pids = [...new Set(calls.map(c => c.pid))];
         const unloaded = pids.filter(pid => !fs.existsSync(path.join(RESOURCE_DIR, `${pid}.limits`)));
         const table = tablesOf(RESOURCE_DIR, calls, lowered(declaredLimits(), group))(install);
         wrong.push(...pressVerdict(calls, group, table, unloaded).map(line => `installation ${install}: ${line}`));
       }
       assert.strictEqual(pressed.length, plan.groups.length, "a press installation did not run to its end");
-      assert.deepStrictEqual(wrong, [], `while a window was pressed:\n${wrong.join("\n")}`);
+      assert.deepStrictEqual(wrong, [], `every declared window pressed at a lowered maximum:\n${wrong.join("\n")}`);
     });
   });
 
@@ -2780,9 +2897,11 @@ module.exports.reachedAt = reachedAt;
 module.exports.peaksOf = peaksOf;
 module.exports.overLimits = overLimits;
 module.exports.pressPlan = pressPlan;
+module.exports.calibrationGroup = calibrationGroup;
 module.exports.pressVerdict = pressVerdict;
 module.exports.pressPhaseOver = pressPhaseOver;
 module.exports.pressesErrors = pressesErrors;
+module.exports.pressedMatches = pressedMatches;
 module.exports.countedIn = countedIn;
 module.exports.windowWords = windowWords;
 module.exports.PRESS_QUIET_MS = PRESS_QUIET_MS;
