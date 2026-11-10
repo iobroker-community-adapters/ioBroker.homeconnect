@@ -137,6 +137,7 @@ Every sign-in answer of Home Connect and its remedy: [documentation](docs/en/REA
 - (krobipd) Fixed: program starts and stops stay within the 5 per minute Home Connect allows each, and token refreshes within 10 per minute and 100 per day; the log says once which limit holds a request and for how long
 - (krobipd) Fixed: ten error answers in a row hold further requests for up to ten minutes, as Home Connect itself would block them — across a restart too; an answer without an error ends the series
 - (krobipd) Fixed: a sign-in that cannot reach Home Connect no longer tells you to check the Client ID
+- (krobipd) Fixed: a value that ends in a number takes the adapter's own label only within its own family — a hob power level of 9.0 no longer shows "Wash & dry 90'"
 
 <!--
     Placeholder for the next version (at the beginning of the line): 

@@ -7,7 +7,7 @@ export const LABEL_LANGUAGES = ["en", "de", "ru", "pt", "nl", "fr", "it", "es", 
 
 /** Lower-case value tail → its label in every language of {@link LABEL_LANGUAGES}. */
 export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
-  "001": [
+  "favorite.001": [
     "Favourite 1",
     "Favorit 1",
     "Избранное 1",
@@ -20,7 +20,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 1",
     "收藏 1",
   ],
-  "002": [
+  "favorite.002": [
     "Favourite 2",
     "Favorit 2",
     "Избранное 2",
@@ -33,7 +33,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 2",
     "收藏 2",
   ],
-  "003": [
+  "favorite.003": [
     "Favourite 3",
     "Favorit 3",
     "Избранное 3",
@@ -46,7 +46,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 3",
     "收藏 3",
   ],
-  "004": [
+  "favorite.004": [
     "Favourite 4",
     "Favorit 4",
     "Избранное 4",
@@ -59,7 +59,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 4",
     "收藏 4",
   ],
-  "005": [
+  "favorite.005": [
     "Favourite 5",
     "Favorit 5",
     "Избранное 5",
@@ -72,7 +72,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 5",
     "收藏 5",
   ],
-  "006": [
+  "favorite.006": [
     "Favourite 6",
     "Favorit 6",
     "Избранное 6",
@@ -85,7 +85,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 6",
     "收藏 6",
   ],
-  "007": [
+  "favorite.007": [
     "Favourite 7",
     "Favorit 7",
     "Избранное 7",
@@ -98,7 +98,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 7",
     "收藏 7",
   ],
-  "008": [
+  "favorite.008": [
     "Favourite 8",
     "Favorit 8",
     "Избранное 8",
@@ -111,7 +111,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 8",
     "收藏 8",
   ],
-  "009": [
+  "favorite.009": [
     "Favourite 9",
     "Favorit 9",
     "Избранное 9",
@@ -124,7 +124,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 9",
     "收藏 9",
   ],
-  "010": [
+  "favorite.010": [
     "Favourite 10",
     "Favorit 10",
     "Избранное 10",
@@ -137,7 +137,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 10",
     "收藏 10",
   ],
-  "011": [
+  "favorite.011": [
     "Favourite 11",
     "Favorit 11",
     "Избранное 11",
@@ -150,7 +150,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 11",
     "收藏 11",
   ],
-  "012": [
+  "favorite.012": [
     "Favourite 12",
     "Favorit 12",
     "Избранное 12",
@@ -163,7 +163,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 12",
     "收藏 12",
   ],
-  "013": [
+  "favorite.013": [
     "Favourite 13",
     "Favorit 13",
     "Избранное 13",
@@ -176,7 +176,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 13",
     "收藏 13",
   ],
-  "014": [
+  "favorite.014": [
     "Favourite 14",
     "Favorit 14",
     "Избранное 14",
@@ -189,7 +189,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 14",
     "收藏 14",
   ],
-  "015": [
+  "favorite.015": [
     "Favourite 15",
     "Favorit 15",
     "Избранное 15",
@@ -202,7 +202,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 15",
     "收藏 15",
   ],
-  "016": [
+  "favorite.016": [
     "Favourite 16",
     "Favorit 16",
     "Избранное 16",
@@ -215,7 +215,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 16",
     "收藏 16",
   ],
-  "017": [
+  "favorite.017": [
     "Favourite 17",
     "Favorit 17",
     "Избранное 17",
@@ -228,7 +228,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 17",
     "收藏 17",
   ],
-  "018": [
+  "favorite.018": [
     "Favourite 18",
     "Favorit 18",
     "Избранное 18",
@@ -241,7 +241,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 18",
     "收藏 18",
   ],
-  "019": [
+  "favorite.019": [
     "Favourite 19",
     "Favorit 19",
     "Избранное 19",
@@ -254,7 +254,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "Обране 19",
     "收藏 19",
   ],
-  "020": [
+  "favorite.020": [
     "Favourite 20",
     "Favorit 20",
     "Избранное 20",
@@ -282,7 +282,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
   ],
   "10a": ["10 A", "10 A", "10 A", "10 A", "10 A", "10 A", "10 A", "10 A", "10 A", "10 A", "10 A"],
   "10percent": ["10 %", "10 %", "10 %", "10 %", "10 %", "10 %", "10 %", "10 %", "10 %", "10 %", "10 %"],
-  120: [
+  "washanddry.120": [
     "Wash & dry 120'",
     "Waschen & Trocknen 120'",
     "Стирка и сушка 120'",
@@ -441,7 +441,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "1 річ",
     "1 件",
   ],
-  20: [
+  "washanddry.20": [
     "Wash & dry 20'",
     "Waschen & Trocknen 20'",
     "Стирка и сушка 20'",
@@ -512,7 +512,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "3D 热风",
   ],
   "40percent": ["40 %", "40 %", "40 %", "40 %", "40 %", "40 %", "40 %", "40 %", "40 %", "40 %", "40 %"],
-  45: [
+  "washanddry.45": [
     "Wash & dry 45'",
     "Waschen & Trocknen 45'",
     "Стирка и сушка 45'",
@@ -530,7 +530,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
   "50percent": ["50 %", "50 %", "50 %", "50 %", "50 %", "50 %", "50 %", "50 %", "50 %", "50 %", "50 %"],
   "55c": ["55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C", "55 °C"],
   "55percent": ["55 %", "55 %", "55 %", "55 %", "55 %", "55 %", "55 %", "55 %", "55 %", "55 %", "55 %"],
-  59: [
+  "washanddry.59": [
     "Wash & dry 59'",
     "Waschen & Trocknen 59'",
     "Стирка и сушка 59'",
@@ -556,7 +556,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
     "5 речей",
     "5 件",
   ],
-  60: [
+  "washanddry.60": [
     "Wash & dry 60'",
     "Waschen & Trocknen 60'",
     "Стирка и сушка 60'",
@@ -597,7 +597,7 @@ export const VALUE_LABELS: Readonly<Record<string, readonly string[]>> = {
   "85c": ["85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C", "85 °C"],
   "85percent": ["85 %", "85 %", "85 %", "85 %", "85 %", "85 %", "85 %", "85 %", "85 %", "85 %", "85 %"],
   "88c": ["88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C", "88 °C"],
-  90: [
+  "washanddry.90": [
     "Wash & dry 90'",
     "Waschen & Trocknen 90'",
     "Стирка и сушка 90'",

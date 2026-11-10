@@ -18,13 +18,16 @@ const LANGUAGE_SETTING_KEY = "BSH.Common.Setting.Language";
  * The adapter's own label of one BSH value in one language — by the value's last
  * segment, which names the same thing in every family that uses it
  * ("…WasherDryer.Program.Wool.Wool.Wool" and "…Washer.Program.Wool" are both wool).
+ * A number names nothing on its own ("…WashAndDry.90" is a program, "…Hob.EnumType.PowerLevel.90"
+ * a power level of 9.0), so a numeric tail is looked up with the segment before it
+ * ("washanddry.90", "favorite.001"); a bare number has no label.
  *
- * @param bshValue the full BSH value (or a bare tail)
+ * @param bshValue the full BSH value (or a short value)
  * @param lang the ioBroker system language
  * @returns the label, or undefined when the table has no row for the value
  */
 export function ownValueLabel(bshValue: string, lang: string): string | undefined {
-  const row = VALUE_LABELS[lastSegment(bshValue).toLowerCase()];
+  const row = VALUE_LABELS[labelKey(bshValue)];
   if (!row) {
     return undefined;
   }
@@ -172,4 +175,20 @@ export function catalogValues(key: string, value?: unknown): readonly string[] |
  */
 function lastSegment(bshValue: string): string {
   return bshValue.slice(bshValue.lastIndexOf(".") + 1);
+}
+
+/**
+ * The row of the own label table a value belongs to: its last segment, a numeric one
+ * together with the segment before it; "" for a bare number, which no row carries.
+ *
+ * @param bshValue the full BSH value (or a short value)
+ * @returns the lower-case row key
+ */
+function labelKey(bshValue: string): string {
+  const parts = bshValue.toLowerCase().split(".");
+  const tail = parts[parts.length - 1] ?? "";
+  if (!/^\d+$/.test(tail)) {
+    return tail;
+  }
+  return parts.length > 1 ? `${parts[parts.length - 2]}.${tail}` : "";
 }
