@@ -24,6 +24,8 @@
   "ctNoClientId": "Aucun Client ID configuré — saisissez-le ci-dessus et enregistrez d'abord.",
   "ctNotSignedInLink": "Pas encore connecté — ouvrez le lien de connexion, confirmez le code, puis testez à nouveau.",
   "ctNotSignedIn": "Non connecté — aucune connexion Home Connect n'est enregistrée ; l'adaptateur demande un lien de connexion au démarrage.",
+  "ctAppNotSignedIn": "Non connecté — ouvrez la page de connexion dans les paramètres, connectez-vous et collez l'adresse sur laquelle elle se termine.",
+  "ctAppNotSignedInLink": "Pas encore connecté — connectez-vous sur la page de connexion et collez l'adresse sur laquelle elle se termine, puis testez à nouveau.",
   "ctRatePaused": "Les requêtes vers Home Connect sont suspendues après une limite pendant encore %s s — réessayez plus tard.",
   "ctShuttingDown": "L'adaptateur est en cours d'arrêt.",
   "ctRateLimited": "%s — réessayez plus tard.",

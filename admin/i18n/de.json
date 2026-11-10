@@ -24,6 +24,8 @@
   "ctNoClientId": "Keine Client ID eingetragen — oben eintragen und zuerst speichern.",
   "ctNotSignedInLink": "Noch nicht angemeldet — Anmelde-Link öffnen und den Code bestätigen, dann erneut testen.",
   "ctNotSignedIn": "Nicht angemeldet — es ist keine Home-Connect-Anmeldung gespeichert; der Adapter fordert beim Start einen Anmelde-Link an.",
+  "ctAppNotSignedIn": "Nicht angemeldet — öffne in den Einstellungen die Anmeldeseite, melde dich an und füge die Adresse ein, auf der sie endet.",
+  "ctAppNotSignedInLink": "Noch nicht angemeldet — melde dich auf der Anmeldeseite an und füge die Adresse ein, auf der sie endet, dann erneut testen.",
   "ctRatePaused": "Anfragen an Home Connect sind nach einer Anfragegrenze noch %s s pausiert — später erneut versuchen.",
   "ctShuttingDown": "Der Adapter wird gerade beendet.",
   "ctRateLimited": "%s — später erneut versuchen.",

@@ -24,6 +24,8 @@
   "ctNoClientId": "Nie skonfigurowano Client ID — wpisz go powyżej i najpierw zapisz.",
   "ctNotSignedInLink": "Jeszcze nie zalogowano — otwórz link logowania, potwierdź kod i przetestuj ponownie.",
   "ctNotSignedIn": "Nie zalogowano — nie zapisano logowania Home Connect; adapter prosi o link logowania przy starcie.",
+  "ctAppNotSignedIn": "Nie zalogowano — otwórz stronę logowania w ustawieniach, zaloguj się i wklej adres, na którym się kończy.",
+  "ctAppNotSignedInLink": "Jeszcze nie zalogowano — zaloguj się na stronie logowania i wklej adres, na którym się kończy, a potem przetestuj ponownie.",
   "ctRatePaused": "Zapytania do Home Connect są wstrzymane po przekroczeniu limitu jeszcze przez %s s — spróbuj później.",
   "ctShuttingDown": "Adapter jest zamykany.",
   "ctRateLimited": "%s — spróbuj później.",

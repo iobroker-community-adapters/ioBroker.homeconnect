@@ -7,6 +7,8 @@ declare global {
       clientID: string;
       /** Home Connect developer application client secret (encrypted native). */
       clientSecret: string;
+      /** The way the instance signs in: `api` (developer access, default) or `app` (the Home Connect app's client, beta). */
+      accessMode?: string;
     }
 
     /**

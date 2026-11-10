@@ -24,6 +24,8 @@
   "ctNoClientId": "未配置 Client ID — 请先在上方填写并保存。",
   "ctNotSignedInLink": "尚未登录 — 请打开登录链接并确认代码，然后再次测试。",
   "ctNotSignedIn": "未登录 — 未保存 Home Connect 登录；适配器在启动时会请求登录链接。",
+  "ctAppNotSignedIn": "未登录 — 在设置中打开登录页面，登录后粘贴登录结束时页面的地址。",
+  "ctAppNotSignedInLink": "尚未登录 — 在登录页面登录，粘贴登录结束时页面的地址，然后再次测试。",
   "ctRatePaused": "因请求限制，对 Home Connect 的请求还将暂停 %s 秒 — 请稍后再试。",
   "ctShuttingDown": "适配器正在关闭。",
   "ctRateLimited": "%s — 请稍后再试。",

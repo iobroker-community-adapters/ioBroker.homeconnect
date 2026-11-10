@@ -209,6 +209,8 @@ vi.mock("./lib/api-limits", async importOriginal => {
 });
 
 import * as mainModule from "./main";
+import { APP_CLIENT_ID } from "./lib/app-client";
+import { AppSignInError } from "./lib/auth-controller";
 import type { JsonResult, rateLimitText, spokenDuration } from "./lib/http";
 import type { WriteRequest } from "./lib/command-dispatch";
 import type * as ApiLimits from "./lib/api-limits";
@@ -257,8 +259,15 @@ interface FakeAuthCtl {
   refreshNow: ReturnType<typeof vi.fn>;
   persistPendingToken: ReturnType<typeof vi.fn>;
   settle: ReturnType<typeof vi.fn>;
+  appSignInLink: ReturnType<typeof vi.fn>;
+  completeAppSignIn: ReturnType<typeof vi.fn>;
+  tokenInfo: ReturnType<typeof vi.fn>;
+  lastPastedForm: string | undefined;
   accessToken: string | undefined;
   port: Record<string, (...a: never[]) => unknown>;
+  /** The OAuth driver the adapter built, and the options it gave the controller. */
+  auth: { config: { clientId: string; flow?: string } };
+  options: { mode?: string; baseUrl?: string } | undefined;
 }
 interface FakeStream {
   start: ReturnType<typeof vi.fn>;
@@ -361,9 +370,15 @@ function setup(config: Record<string, unknown> = {}): Ctx {
     syncs.push(s);
     return s;
   };
-  i.makeAuthController = (_auth: unknown, port: Record<string, (...a: never[]) => unknown>) => {
+  i.makeAuthController = (
+    auth: FakeAuthCtl["auth"],
+    port: Record<string, (...a: never[]) => unknown>,
+    options?: FakeAuthCtl["options"],
+  ) => {
     const a: FakeAuthCtl = {
       port,
+      auth,
+      options,
       accessToken: "AT",
       start: vi.fn(() => Promise.resolve(undefined)),
       requestSignIn: vi.fn(() => Promise.resolve("A new sign-in link was requested.")),
@@ -372,6 +387,10 @@ function setup(config: Record<string, unknown> = {}): Ctx {
       refreshNow: vi.fn(() => Promise.resolve(false)),
       persistPendingToken: vi.fn(() => Promise.resolve(undefined)),
       settle: vi.fn(() => Promise.resolve(undefined)),
+      appSignInLink: vi.fn(() => Promise.resolve("https://api.home-connect.com/security/oauth/authorize?x=1")),
+      completeAppSignIn: vi.fn(() => Promise.resolve("Signed in to Home Connect.")),
+      tokenInfo: vi.fn(() => undefined),
+      lastPastedForm: undefined,
     };
     auths.push(a);
     return a;
@@ -4318,5 +4337,179 @@ describe("Homeconnect diagnostics report", () => {
     httpMock.getJson.mockResolvedValueOnce(failResult(429, { retryAfterMs: 30_000 }));
     await diag(ctx).readRaw(`/api/homeappliances/${HA}/status`);
     expect(ctx.i.restBlockedUntil).toBeGreaterThan(Date.now() + 20_000);
+  });
+});
+
+// The app access (beta): the instance signs in through the Home Connect app's public client — no Client ID of the
+// user, never the device flow; the settings panel asks for the sign-in page and hands back the pasted address.
+describe("Homeconnect app access (beta)", () => {
+  const APP_SETTINGS = { clientID: "", clientSecret: "", accessMode: "app" };
+  const PASTED = "https://qr.home-connect.com/authorize/prod/?code=UNIQUE-CODE-4711&state=x";
+  const answerOf = (ctx: Ctx): unknown => (ctx.i.sendTo.mock.calls.at(-1) as unknown[] | undefined)?.[2];
+  const ask = (ctx: Ctx, command: string, message: unknown = {}): Promise<void> =>
+    ctx.i.onMessage({ command, message, from: "system.adapter.admin.0", callback: { id: 1, ack: false, time: 0 } });
+  const allLogLines = (ctx: Ctx): string[] =>
+    (["debug", "info", "warn", "error"] as const).flatMap(level =>
+      ctx.i.log[level].mock.calls.map(call => String(call[0])),
+    );
+
+  it("signs in through the app's client without a Client ID", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    expect(ctx.i.log.warn).not.toHaveBeenCalled();
+    expect(ctx.auths).toHaveLength(1);
+    expect(ctx.auths[0].options).toMatchObject({ mode: "app", baseUrl: "https://api.home-connect.com" });
+    expect(ctx.auths[0].auth.config).toMatchObject({ clientId: APP_CLIENT_ID, flow: "app" });
+    expect(ctx.auths[0].start).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes any other access setting as the developer access", async () => {
+    for (const accessMode of ["foo", 1, undefined, "API"]) {
+      const ctx = setup({ accessMode });
+      await ctx.i.onReady();
+      expect(ctx.auths[0].options).toMatchObject({ mode: "api" });
+      expect(ctx.auths[0].auth.config).toMatchObject({ clientId: CLIENT_ID });
+      expect(ctx.auths[0].auth.config.flow).not.toBe("app");
+    }
+  });
+
+  it("drops a stored login of the other access — a new sign-in on the chosen way follows", async () => {
+    const ctx = setup(APP_SETTINGS);
+    ctx.i.states.set("auth.session", {
+      val: ctx.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "DEV-RT", mode: "api" })),
+      ack: true,
+    });
+    await ctx.i.onReady();
+    await expect(ctx.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
+    expect(ctx.i.states.get("auth.session")).toEqual({ val: "", ack: true });
+    expect(ctx.i.log.info).toHaveBeenCalledWith(
+      "The Home Connect access was changed in the settings — the stored login belongs to the other access, a new sign-in is required.",
+    );
+  });
+
+  it("takes a login without a mode as one of the developer access", async () => {
+    const legacy = setup(APP_SETTINGS);
+    legacy.i.states.set("auth.session", { val: JSON.stringify({ refresh_token: "LEGACY" }), ack: true });
+    await legacy.i.onReady();
+    await expect(legacy.auths[0].port.loadRefreshToken()).resolves.toBeUndefined();
+
+    const api = setup();
+    api.i.states.set("auth.session", {
+      val: api.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "RT" })),
+      ack: true,
+    });
+    await api.i.onReady();
+    await expect(api.auths[0].port.loadRefreshToken()).resolves.toBe("RT");
+
+    const app = setup(APP_SETTINGS);
+    app.i.states.set("auth.session", {
+      val: app.i.encrypt(JSON.stringify({ accessToken: "AT", refreshToken: "APP-RT", mode: "app" })),
+      ack: true,
+    });
+    await app.i.onReady();
+    await expect(app.auths[0].port.loadRefreshToken()).resolves.toBe("APP-RT");
+  });
+
+  it("tests the connection without a Client ID and points at the sign-in page while signed out", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    httpMock.getJson.mockResolvedValueOnce(okResult({ homeappliances: [] }));
+    await expect(ctx.i.checkConnection()).resolves.toMatchObject({ result: expect.stringContaining("listed 0") });
+    ctx.auths[0].accessToken = undefined;
+    await expect(ctx.i.checkConnection()).resolves.toEqual({
+      error: "Not signed in — open the sign-in page in the settings, sign in and paste the address it ends on.",
+    });
+    await (ctx.auths[0].port.setVerificationUrl as (u: string) => Promise<void>)(
+      "https://api.home-connect.com/security/oauth/authorize?x=1",
+    );
+    await expect(ctx.i.checkConnection()).resolves.toEqual({
+      error: "Not signed in yet — sign in on the sign-in page and paste the address it ends on, then test again.",
+    });
+  });
+
+  it("answers the panel's sign-in page and pasted address through the controller", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    await ask(ctx, "appSignInLink");
+    expect(answerOf(ctx)).toEqual({ result: "https://api.home-connect.com/security/oauth/authorize?x=1" });
+    await ask(ctx, "appSignInComplete", { address: PASTED });
+    expect(ctx.auths[0].completeAppSignIn).toHaveBeenCalledWith(PASTED);
+    expect(answerOf(ctx)).toEqual({ result: "Signed in to Home Connect." });
+  });
+
+  it("refuses a pasted message without an address before the controller", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    for (const message of [{}, { address: 42 }, "just text", null]) {
+      await ask(ctx, "appSignInComplete", message);
+      expect(answerOf(ctx)).toEqual({
+        error: "nothing was pasted — paste the address of the page the sign-in ended on",
+      });
+    }
+    expect(ctx.auths[0].completeAppSignIn).not.toHaveBeenCalled();
+  });
+
+  it("answers a refused sign-in step with its reason, without an error line in the log", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    ctx.auths[0].completeAppSignIn.mockRejectedValueOnce(
+      new AppSignInError("Home Connect refused the sign-in: invalid_grant (code already used)"),
+    );
+    await ask(ctx, "appSignInComplete", { address: PASTED });
+    expect(answerOf(ctx)).toEqual({ error: "Home Connect refused the sign-in: invalid_grant (code already used)" });
+    ctx.auths[0].requestSignIn.mockRejectedValueOnce(
+      new AppSignInError("The instance uses the Home Connect app access — open the sign-in page instead."),
+    );
+    await ask(ctx, "requestSignIn");
+    expect(answerOf(ctx)).toEqual({
+      error: "The instance uses the Home Connect app access — open the sign-in page instead.",
+    });
+    expect(ctx.i.log.error).not.toHaveBeenCalled();
+  });
+
+  it("never writes the pasted address into a log line", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    await ask(ctx, "appSignInComplete", { address: PASTED });
+    ctx.auths[0].completeAppSignIn.mockRejectedValueOnce(
+      new AppSignInError("no sign-in link is open — request a new one"),
+    );
+    await ask(ctx, "appSignInComplete", { address: PASTED });
+    ctx.auths[0].completeAppSignIn.mockRejectedValueOnce(new Error("objects db down"));
+    await ask(ctx, "appSignInComplete", { address: PASTED });
+    expect(allLogLines(ctx).filter(line => line.includes("UNIQUE-CODE-4711"))).toEqual([]);
+  });
+
+  it("answers the app sign-in in the developer access with the reason", async () => {
+    const noClient = setup({ clientID: "" });
+    await noClient.i.onReady();
+    await ask(noClient, "appSignInLink");
+    expect(answerOf(noClient)).toEqual({
+      error: "The instance runs with the developer access — save the settings first.",
+    });
+  });
+
+  it("names the access, the token times and the form of the pasted address in the report, never a token", async () => {
+    const ctx = setup(APP_SETTINGS);
+    await ctx.i.onReady();
+    ctx.auths[0].tokenInfo.mockReturnValue({
+      mode: "app",
+      scope: "Monitor Control",
+      issuedAt: "2026-11-10T10:00:00.000Z",
+      expiresAt: "2026-11-11T10:00:00.000Z",
+      lifetimeAssumed: false,
+    });
+    ctx.auths[0].lastPastedForm = "handedOver";
+    const host = (
+      ctx.i as unknown as {
+        reportHost(): { config(): Record<string, unknown>; adapterState(): Record<string, unknown> };
+      }
+    ).reportHost();
+    expect(host.config()).toMatchObject({ accessMode: "app", clientIdSet: false });
+    expect(host.adapterState()).toMatchObject({
+      token: { mode: "app", issuedAt: "2026-11-10T10:00:00.000Z", expiresAt: "2026-11-11T10:00:00.000Z" },
+      pastedForm: "handedOver",
+    });
+    expect(JSON.stringify(host.adapterState())).not.toContain('"AT"');
   });
 });

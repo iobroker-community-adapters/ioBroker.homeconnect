@@ -8,6 +8,7 @@
 // encryption/persistence is the caller's job (the adapter uses `encrypt()`).
 
 import { APP_REDIRECT_URI } from "./app-client";
+import { isRecord } from "./pure-helpers";
 
 /** OAuth endpoint paths, relative to the API base URL. */
 export const DEVICE_AUTH_PATH = "/security/oauth/device_authorization";
@@ -203,6 +204,23 @@ export function extractRefreshToken(raw: string | null | undefined): string | un
     return snake;
   }
   return undefined;
+}
+
+/**
+ * The access a stored login belongs to. A login without a mode (the previous adapter's raw JSON, a token of 2.0.0-alpha)
+ * came from the developer access.
+ *
+ * @param raw the decrypted stored login text
+ * @returns `app` only for a login of the app access
+ */
+export function storedLoginMode(raw: string): TokenMode {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "api";
+  }
+  return isRecord(parsed) && parsed.mode === "app" ? "app" : "api";
 }
 
 /**

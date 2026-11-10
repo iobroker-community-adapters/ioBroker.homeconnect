@@ -24,6 +24,8 @@
   "ctNoClientId": "Geen Client ID ingesteld — vul die hierboven in en sla eerst op.",
   "ctNotSignedInLink": "Nog niet aangemeld — open de aanmeldlink, bevestig de code en test opnieuw.",
   "ctNotSignedIn": "Niet aangemeld — er is geen Home Connect-aanmelding opgeslagen; de adapter vraagt bij het starten een aanmeldlink aan.",
+  "ctAppNotSignedIn": "Niet aangemeld — open de aanmeldpagina in de instellingen, meld je aan en plak het adres waarop die eindigt.",
+  "ctAppNotSignedInLink": "Nog niet aangemeld — meld je aan op de aanmeldpagina en plak het adres waarop die eindigt, test daarna opnieuw.",
   "ctRatePaused": "Verzoeken aan Home Connect zijn na een limiet nog %s s gepauzeerd — probeer het later opnieuw.",
   "ctShuttingDown": "De adapter wordt afgesloten.",
   "ctRateLimited": "%s — probeer het later opnieuw.",

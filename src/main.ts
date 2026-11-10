@@ -1,10 +1,18 @@
 import { join } from "node:path";
 import * as utils from "@iobroker/adapter-core";
 import { I18n } from "@iobroker/adapter-core";
-import { HomeConnectAuth, extractRefreshToken, type FormPostResult, type StoredToken } from "./lib/oauth";
+import {
+  HomeConnectAuth,
+  extractRefreshToken,
+  storedLoginMode,
+  type FormPostResult,
+  type StoredToken,
+  type TokenMode,
+} from "./lib/oauth";
 import { getJson, postForm, putJson, deleteJson, rateLimitText, spokenDuration, type JsonResult } from "./lib/http";
 import { ApplianceSync, type AdapterPort } from "./lib/appliance-sync";
-import { AuthController, type AuthPort } from "./lib/auth-controller";
+import { AppSignInError, AuthController, type AuthOptions, type AuthPort } from "./lib/auth-controller";
+import { APP_CLIENT_ID, NOTHING_PASTED } from "./lib/app-client";
 import { moveAllWithEnums } from "./lib/enum-carry";
 import type { WriteRequest } from "./lib/command-dispatch";
 import { EVENTS_PATH, EventStream, type StreamPlace } from "./lib/event-stream";
@@ -210,6 +218,14 @@ const UNSUPPORTED_ANSWERS = new Set(["SDK.Error.UnsupportedProgram"]);
  */
 const NOT_READY_ANSWERS = new Set(["SDK.Error.HomeAppliance.Connection.Initialization.Failed"]);
 
+/** The settings panel's sign-in commands — both accesses' steps, each answered by {@link Homeconnect.answerSignIn}. */
+const SIGN_IN_COMMANDS: ReadonlySet<string> = new Set([
+  "requestSignIn",
+  "resetLogin",
+  "appSignInLink",
+  "appSignInComplete",
+]);
+
 /**
  * ioBroker.homeconnect — Home Connect / BSH home appliances (Bosch, Siemens,
  * NEFF, Gaggenau) via the Home Connect cloud API. Greenfield TypeScript rewrite:
@@ -223,8 +239,11 @@ class Homeconnect extends utils.Adapter {
   // REST paths and the teardown are testable without a network. Behaviour is
   // unchanged — same constructors, same arguments.
   private makeSync: (port: AdapterPort) => ApplianceSync = port => new ApplianceSync(port);
-  private makeAuthController: (auth: HomeConnectAuth, port: AuthPort) => AuthController = (auth, port) =>
-    new AuthController(auth, port);
+  private makeAuthController: (auth: HomeConnectAuth, port: AuthPort, options: AuthOptions) => AuthController = (
+    auth,
+    port,
+    options,
+  ) => new AuthController(auth, port, options);
   private makeEventStream: (deps: ConstructorParameters<typeof EventStream>[0]) => EventStream = deps =>
     new EventStream(deps);
 
@@ -417,6 +436,17 @@ class Homeconnect extends utils.Adapter {
         }
       }
 
+      if (this.accessMode() === "app") {
+        // The app access (beta): the Home Connect app's public client, no Client ID of the user (H-11).
+        this.log.debug("sign-in through the Home Connect app's client (app access, beta)");
+        const auth = new HomeConnectAuth(
+          { clientId: APP_CLIENT_ID, baseUrl: DEFAULT_BASE_URL, flow: "app" },
+          (path, form) => this.sendForm(path, form),
+        );
+        this.authCtl = this.makeAuthController(auth, this.makeAuthPort(), { mode: "app", baseUrl: DEFAULT_BASE_URL });
+        await this.authCtl.start();
+        return;
+      }
       // Pasted from the portal, a Client ID often carries a space or a line break at an end.
       const clientId = typeof this.config.clientID === "string" ? this.config.clientID.trim() : "";
       const clientSecret = typeof this.config.clientSecret === "string" ? this.config.clientSecret.trim() : "";
@@ -436,7 +466,7 @@ class Homeconnect extends utils.Adapter {
       const auth = new HomeConnectAuth({ clientId, clientSecret, baseUrl: DEFAULT_BASE_URL }, (path, form) =>
         this.sendForm(path, form),
       );
-      this.authCtl = this.makeAuthController(auth, this.makeAuthPort());
+      this.authCtl = this.makeAuthController(auth, this.makeAuthPort(), { mode: "api", baseUrl: DEFAULT_BASE_URL });
       await this.authCtl.start();
     } catch (e) {
       this.log.error(`onReady failed: ${errText(e)}`);
@@ -819,6 +849,16 @@ class Homeconnect extends utils.Adapter {
     }
   }
 
+  /**
+   * The way this instance signs in: only the setting `app` chooses the app access (beta); anything else, also a missing
+   * or mistyped value, is the developer access.
+   *
+   * @returns the access mode
+   */
+  private accessMode(): TokenMode {
+    return this.config.accessMode === "app" ? "app" : "api";
+  }
+
   /** Build the port the AuthController drives the sign-in lifecycle through. */
   private makeAuthPort(): AuthPort {
     return {
@@ -861,23 +901,41 @@ class Homeconnect extends utils.Adapter {
     if (raw.length === 0) {
       return undefined;
     }
-    // Previous adapter: cleartext JSON — extractRefreshToken reads it directly.
-    const direct = extractRefreshToken(raw);
-    if (direct) {
-      return direct;
+    // Previous adapter: cleartext JSON — extractRefreshToken reads it directly. Our format: encrypted JSON.
+    let plain = raw;
+    if (!extractRefreshToken(raw)) {
+      try {
+        plain = this.decrypt(raw);
+      } catch {
+        // Encrypted with another installation's secret — the ioBroker data was moved to a new
+        // system, or restored from a backup of another one. Unreadable is not the same as absent:
+        // the user is told why a sign-in is asked for again.
+        this.log.warn(
+          "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) — a new sign-in is required.",
+        );
+        return undefined;
+      }
     }
-    // Our format: encrypted JSON.
-    try {
-      return extractRefreshToken(this.decrypt(raw));
-    } catch {
-      // Encrypted with another installation's secret — the ioBroker data was moved to a new
-      // system, or restored from a backup of another one. Unreadable is not the same as absent:
-      // the user is told why a sign-in is asked for again.
-      this.log.warn(
-        "The stored Home Connect login cannot be read on this system (it was saved by another ioBroker installation) — a new sign-in is required.",
-      );
-      return undefined;
+    const token = extractRefreshToken(plain);
+    return token && (await this.ofThisAccess(plain)) ? token : undefined;
+  }
+
+  /**
+   * Whether a stored login belongs to the access the settings choose. A login of the other access cannot sign in on
+   * this one (another client): it is dropped once, and a new sign-in on the chosen way follows.
+   *
+   * @param plain the stored login text, decrypted
+   * @returns true when it may be used
+   */
+  private async ofThisAccess(plain: string): Promise<boolean> {
+    if (storedLoginMode(plain) === this.accessMode()) {
+      return true;
     }
+    this.log.info(
+      "The Home Connect access was changed in the settings — the stored login belongs to the other access, a new sign-in is required.",
+    );
+    await this.setStateRemembered("auth.session", { val: "", ack: true });
+    return false;
   }
 
   /**
@@ -1111,7 +1169,8 @@ class Homeconnect extends utils.Adapter {
 
   /**
    * Messages from the settings panel: "Test connection" (`checkConnection`),
-   * "Request a new sign-in link" (`requestSignIn`) and "Reset sign-in" (`resetLogin`).
+   * "Request a new sign-in link" (`requestSignIn`), "Reset sign-in" (`resetLogin`) and, in the app access (beta),
+   * "Open the sign-in page" (`appSignInLink`) and "Finish the sign-in" (`appSignInComplete` with `{ address }`).
    * Async body with a top-level try/catch; every command answers, so the panel
    * never waits on a message that fell through.
    *
@@ -1133,11 +1192,8 @@ class Homeconnect extends utils.Adapter {
         }
         return;
       }
-      if (obj.command === "requestSignIn" || obj.command === "resetLogin") {
-        const authCtl = this.authCtl;
-        const answer = authCtl
-          ? { result: obj.command === "resetLogin" ? await authCtl.resetLogin() : await authCtl.requestSignIn() }
-          : { error: "No Client ID configured — enter it above and save first." };
+      if (SIGN_IN_COMMANDS.has(obj.command)) {
+        const answer = await this.answerSignIn(obj.command, obj.message);
         if (obj.callback) {
           this.sendTo(obj.from, obj.command, answer, obj.callback);
         }
@@ -1155,6 +1211,48 @@ class Homeconnect extends utils.Adapter {
   }
 
   /**
+   * One sign-in step the settings panel asked for. A step that cannot go on answers with its reason and writes no
+   * error line — the panel shows it; the pasted address reaches no log line at all.
+   *
+   * @param command the panel's command (one of {@link SIGN_IN_COMMANDS})
+   * @param message the message body (unchecked)
+   * @returns `{ result }` or `{ error }` (the admin's sendTo contract)
+   */
+  private async answerSignIn(command: string, message: unknown): Promise<{ result: string } | { error: string }> {
+    const authCtl = this.authCtl;
+    if (!authCtl) {
+      if (this.accessMode() === "app") {
+        return { error: "The sign-in did not start — look at the adapter's log." };
+      }
+      return command === "appSignInLink" || command === "appSignInComplete"
+        ? { error: "The instance runs with the developer access — save the settings first." }
+        : { error: tText("ctNoClientId") };
+    }
+    try {
+      switch (command) {
+        case "resetLogin":
+          return { result: await authCtl.resetLogin() };
+        case "appSignInLink":
+          return { result: await authCtl.appSignInLink() };
+        case "appSignInComplete": {
+          const address = isRecord(message) ? message.address : undefined;
+          if (typeof address !== "string") {
+            return { error: NOTHING_PASTED };
+          }
+          return { result: await authCtl.completeAppSignIn(address) };
+        }
+        default:
+          return { result: await authCtl.requestSignIn() };
+      }
+    } catch (e) {
+      if (e instanceof AppSignInError) {
+        return { error: errText(e) };
+      }
+      throw e;
+    }
+  }
+
+  /**
    * The connection test behind the settings panel's button. Every word of the
    * answer is backed by something actually checked right now: a real request
    * to Home Connect with the current token (refreshed once on a 401), the
@@ -1165,14 +1263,17 @@ class Homeconnect extends utils.Adapter {
    * @returns `{ result }` on success, `{ error }` otherwise (the admin's sendTo contract)
    */
   private async checkConnection(): Promise<{ result: string } | { error: string }> {
-    if (typeof this.config.clientID !== "string" || this.config.clientID.trim().length === 0) {
+    const app = this.accessMode() === "app";
+    if (!app && (typeof this.config.clientID !== "string" || this.config.clientID.trim().length === 0)) {
       return { error: tText("ctNoClientId") };
     }
     if (!this.authCtl?.accessToken) {
       const url = (await this.getStateAsync("auth.verificationUrl"))?.val;
-      return {
-        error: typeof url === "string" && url.length > 0 ? tText("ctNotSignedInLink") : tText("ctNotSignedIn"),
-      };
+      const linkOpen = typeof url === "string" && url.length > 0;
+      if (app) {
+        return { error: linkOpen ? tText("ctAppNotSignedInLink") : tText("ctAppNotSignedIn") };
+      }
+      return { error: linkOpen ? tText("ctNotSignedInLink") : tText("ctNotSignedIn") };
     }
     if (Date.now() < this.restBlockedUntil) {
       const seconds = Math.ceil((this.restBlockedUntil - Date.now()) / 1000);
@@ -1319,6 +1420,7 @@ class Homeconnect extends utils.Adapter {
           connected: a.reachable && this.signedIn && this.streamUp,
         })),
       config: () => ({
+        accessMode: this.accessMode(),
         clientIdSet: typeof this.config.clientID === "string" && this.config.clientID.trim().length > 0,
         clientIdForm: looksLikeClientId(String(this.config.clientID ?? "").trim()),
         clientSecretSet: typeof this.config.clientSecret === "string" && this.config.clientSecret.length > 0,
@@ -1340,6 +1442,9 @@ class Homeconnect extends utils.Adapter {
           errorStreak: this.errorSeries(now).held,
           lastReconnectSync: this.lastReconnectSync > 0 ? new Date(this.lastReconnectSync).toISOString() : undefined,
           signInLastError: this.stateMirror.held(this.objectMirror.fullId("auth.lastError"))?.val,
+          // kind and times of the token, never a token; how the last pasted address carried its code, never the code
+          token: this.authCtl?.tokenInfo(),
+          pastedForm: this.authCtl?.lastPastedForm,
         };
       },
       applianceState: id => this.sync?.reportState(id) ?? {},

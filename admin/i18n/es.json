@@ -24,6 +24,8 @@
   "ctNoClientId": "No hay ningún Client ID configurado — introdúzcalo arriba y guarde primero.",
   "ctNotSignedInLink": "Aún no ha iniciado sesión — abra el enlace de inicio de sesión, confirme el código y vuelva a probar.",
   "ctNotSignedIn": "Sin sesión iniciada — no hay ningún inicio de sesión de Home Connect guardado; el adaptador solicita un enlace de inicio de sesión al arrancar.",
+  "ctAppNotSignedIn": "Sin sesión iniciada — abre la página de inicio de sesión en la configuración, inicia sesión y pega la dirección en la que termina.",
+  "ctAppNotSignedInLink": "Aún sin sesión iniciada — inicia sesión en la página de inicio de sesión y pega la dirección en la que termina; luego prueba de nuevo.",
   "ctRatePaused": "Las solicitudes a Home Connect están en pausa tras un límite durante %s s más — vuelva a intentarlo más tarde.",
   "ctShuttingDown": "El adaptador se está deteniendo.",
   "ctRateLimited": "%s — vuelva a intentarlo más tarde.",

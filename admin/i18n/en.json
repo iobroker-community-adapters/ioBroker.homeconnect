@@ -24,6 +24,8 @@
   "ctNoClientId": "No Client ID configured — enter it above and save first.",
   "ctNotSignedInLink": "Not signed in yet — open the sign-in link and confirm the code, then test again.",
   "ctNotSignedIn": "Not signed in — no Home Connect login is stored; the adapter requests a sign-in link at start.",
+  "ctAppNotSignedIn": "Not signed in — open the sign-in page in the settings, sign in and paste the address it ends on.",
+  "ctAppNotSignedInLink": "Not signed in yet — sign in on the sign-in page and paste the address it ends on, then test again.",
   "ctRatePaused": "Home Connect requests are paused after a rate limit for another %s s — try again later.",
   "ctShuttingDown": "The adapter is shutting down.",
   "ctRateLimited": "%s — try again later.",

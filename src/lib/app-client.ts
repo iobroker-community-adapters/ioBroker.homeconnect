@@ -38,6 +38,9 @@ export const AUTHORIZE_PATH = "/security/oauth/authorize";
 /** The schemes of a sign-in answer the end page hands over in one base64 argument. */
 const HANDED_OVER = ["homeconnect://", "hcalexa://"];
 
+/** The answer when nothing usable was pasted. */
+export const NOTHING_PASTED = "nothing was pasted — paste the address of the page the sign-in ended on";
+
 /** How the pasted address carried the code — for the diagnostics report, never the code itself. */
 export type PastedForm = "parameter" | "handedOver" | "bare";
 
@@ -145,7 +148,7 @@ function rawQuery(address: string): string {
  */
 export function codeFrom(pasted: unknown): { code: string; form: PastedForm } | { refused: string } {
   if (typeof pasted !== "string" || pasted.trim().length === 0) {
-    return { refused: "nothing was pasted — paste the address of the page the sign-in ended on" };
+    return { refused: NOTHING_PASTED };
   }
   const text = pasted.trim();
   const query = rawQuery(text);

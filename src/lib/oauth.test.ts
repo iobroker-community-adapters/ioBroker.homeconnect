@@ -12,6 +12,7 @@ import {
   type FormPostResult,
   type StoredToken,
   storedMode,
+  storedLoginMode,
 } from "./oauth";
 import { APP_CLIENT_ID, APP_REDIRECT_URI } from "./app-client";
 
@@ -53,6 +54,18 @@ describe("pure helpers", () => {
     expect(needsRefresh({ accessExpires: NOW + 2 * 3_600_000 } as StoredToken, NOW)).toBe(false);
     expect(needsRefresh({ accessExpires: NOW + 30 * 60_000 } as StoredToken, NOW)).toBe(true);
     expect(needsRefresh({ accessExpires: NOW - 1 } as StoredToken, NOW)).toBe(true);
+  });
+
+  describe("storedLoginMode", () => {
+    it("reads the access a stored login belongs to — without a mode it is the developer access", () => {
+      expect(storedLoginMode('{"refreshToken":"R","mode":"app"}')).toBe("app");
+      expect(storedLoginMode('{"refreshToken":"R","mode":"api"}')).toBe("api");
+      expect(storedLoginMode('{"refreshToken":"R"}')).toBe("api");
+      expect(storedLoginMode('{"refresh_token":"OLD"}')).toBe("api");
+      expect(storedLoginMode('{"refreshToken":"R","mode":"APP"}')).toBe("api");
+      expect(storedLoginMode("not json")).toBe("api");
+      expect(storedLoginMode("null")).toBe("api");
+    });
   });
 
   describe("extractRefreshToken", () => {

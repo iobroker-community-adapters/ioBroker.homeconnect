@@ -24,6 +24,8 @@
   "ctNoClientId": "Nessun Client ID configurato — inseriscilo sopra e salva prima.",
   "ctNotSignedInLink": "Accesso non ancora eseguito — apri il link di accesso, conferma il codice e riprova il test.",
   "ctNotSignedIn": "Accesso non eseguito — nessun accesso Home Connect memorizzato; l'adattatore richiede un link di accesso all'avvio.",
+  "ctAppNotSignedIn": "Accesso non effettuato — apri la pagina di accesso nelle impostazioni, accedi e incolla l'indirizzo su cui termina.",
+  "ctAppNotSignedInLink": "Accesso non ancora effettuato — accedi nella pagina di accesso e incolla l'indirizzo su cui termina, poi prova di nuovo.",
   "ctRatePaused": "Le richieste a Home Connect sono in pausa dopo un limite per altri %s s — riprova più tardi.",
   "ctShuttingDown": "L'adattatore si sta arrestando.",
   "ctRateLimited": "%s — riprova più tardi.",
