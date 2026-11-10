@@ -25,13 +25,7 @@ import { SETTINGS_MIGRATIONS } from "./lib/settings-migrations";
 import { categorize, restLogKey } from "./lib/log-dedup";
 import { LogOnce } from "./lib/log-once";
 import { counterparts, countsErrors, countsSeries, fits, limitFor, type LimitedCall } from "./lib/api-limits";
-import {
-  readHeldPlaces,
-  RequestBudget,
-  writeHeldPlaces,
-  type CountedWindow,
-  type RequestPlace,
-} from "./lib/request-budget";
+import { heldPlacesOf, RequestBudget, type CountedWindow, type RequestPlace } from "./lib/request-budget";
 import { ObjectMirror, StateMirror } from "./lib/object-mirror";
 import { tText, type I18nKey } from "./lib/i18n";
 import { LogRing } from "./lib/diagnostics/log-ring";
@@ -49,6 +43,8 @@ const SESSION_STATE = "auth.session";
 const LOGIN_FILE = "login.json";
 /** The name an unreadable login file is kept under instead of being overwritten by the next sign-in. */
 const LOGIN_FILE_ASIDE = "login.unreadable.json";
+/** The places of the last day in the instance's data folder (request-budget.ts). */
+const REQUEST_TIMES_FILE = "request-times.json";
 /** The host every request goes to — the counterparts of src/lib/api-limits.json match it. */
 const API_HOST = new URL(DEFAULT_BASE_URL).host;
 /**
@@ -284,9 +280,10 @@ class Homeconnect extends utils.Adapter {
   private ownStatesRead = false;
   /** The places of the requests that still count in a window of a counterpart of src/lib/api-limits.json. */
   private readonly budget = new RequestBudget(counterparts);
-  /** Where the places of the last day outlive a restart (request-budget.ts); empty until onReady knows it. */
-  private budgetFile = "";
-  /** The instance's data folder ("" while it is unknown). */
+  /**
+   * The instance's data folder ("" until onReady knows it): the login file and the places of the last day, which outlive
+   * a restart there (request-budget.ts).
+   */
   private dataDir = "";
   /** A login the move out of `auth.session` could not write into the file — this run still signs in with it. */
   private unmovedSession: string | undefined;
@@ -391,10 +388,10 @@ class Homeconnect extends utils.Adapter {
       await this.readOwnObjects();
       await this.readOwnStates();
       this.ownStatesRead = true;
+      this.dataDir = this.findDataFolder();
       // Before the first request: the day a previous process spent still counts — Home Connect counts per account.
       this.takeOverRequestBudget();
       // Before the sign-in: a login still in the datapoint auth.session moves into its file, once.
-      this.dataDir = this.findDataFolder();
       await this.moveSessionToFile();
       // Whatever goes offline at a stop goes offline at the start too: after a
       // crash, a kill or a power cut the teardown never ran, and nothing else
@@ -665,13 +662,16 @@ class Homeconnect extends utils.Adapter {
    * Take over the places of the last day a previous process of this instance left in its data folder.
    */
   private takeOverRequestBudget(): void {
-    try {
-      this.budgetFile = join(utils.getAbsoluteInstanceDataDir(this), "request-times.json");
-      const now = Date.now();
-      this.budget.restore(readHeldPlaces(this.budgetFile, now), now, restRead());
-    } catch (e) {
-      this.log.debug(`Could not read the request budget of the previous run: ${errText(e)}`);
+    if (!this.dataDir) {
+      return;
     }
+    // Nothing there, or a file that cannot be read: the run starts with a full budget, and the next hand-over writes it.
+    const read = readDataFile(this.dataDir, REQUEST_TIMES_FILE);
+    if (read.error !== undefined) {
+      this.log.debug(`Could not read the request budget of the previous run: ${read.error}`);
+    }
+    const now = Date.now();
+    this.budget.restore(heldPlacesOf(read.value, now), now, restRead());
   }
 
   /**
@@ -683,11 +683,11 @@ class Homeconnect extends utils.Adapter {
    * process — and once more right before it reports done.
    */
   private handOverRequestBudget(): void {
-    if (!this.budgetFile) {
+    if (!this.dataDir) {
       return;
     }
     try {
-      writeHeldPlaces(this.budgetFile, this.budget.heldPlaces(Date.now()));
+      writeDataFile(this.dataDir, REQUEST_TIMES_FILE, { windows: this.budget.heldPlaces(Date.now()) });
     } catch (e) {
       this.log.debug(`Could not keep the request budget for the next run: ${errText(e)}`);
     }
@@ -1884,7 +1884,7 @@ class Homeconnect extends utils.Adapter {
   private placeChanged(freed = false): void {
     if (this.terminating) {
       this.handOverRequestBudget();
-    } else if (this.budgetFile && this.handOverTimer === undefined) {
+    } else if (this.dataDir && this.handOverTimer === undefined) {
       this.handOverTimer = this.setTimeout(() => {
         this.handOverTimer = undefined;
         this.handOverRequestBudget();

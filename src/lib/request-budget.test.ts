@@ -1,9 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { counterparts, type Counterpart, type DeclaredLimit, type LimitedCall } from "./api-limits";
-import { readHeldPlaces, RequestBudget, writeHeldPlaces, type RequestPlace } from "./request-budget";
+import { heldPlacesOf, RequestBudget, type HeldPlaces, type RequestPlace } from "./request-budget";
 
 const HOST = "api.home-connect.com";
 const MINUTE = 60_000;
@@ -354,18 +351,23 @@ describe("a place holds while its request is on its way, then a window's length 
   });
 });
 
+// The adapter writes `{ windows: heldPlaces(now) }` into the budget file and reads it back through the fleet master
+// data-file.ts (main.ts); here the file is its JSON text.
 describe("the request budget across a restart", () => {
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const dir of dirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  const file = (): string => {
-    const dir = mkdtempSync(join(tmpdir(), "hc-budget-"));
-    dirs.push(dir);
-    return join(dir, "homeconnect.0", "request-times.json");
-  };
+  /**
+   * The budget file's text as the adapter writes it.
+   *
+   * @param windows the places per counterpart, window and lane
+   * @returns the JSON text
+   */
+  const fileText = (windows: HeldPlaces): string => JSON.stringify({ windows });
+  /**
+   * What the next process reads back from that text.
+   *
+   * @param text the file's JSON text
+   * @returns the parsed content
+   */
+  const fileContent = (text: string): unknown => JSON.parse(text);
 
   it("hands the next process every place per counterpart, window and lane — an open one from the hand-over", () => {
     const budget = new RequestBudget(counterparts);
@@ -381,20 +383,19 @@ describe("the request budget across a restart", () => {
   });
 
   it("hands over the series of error answers that still runs, and the next process holds the request after it", () => {
-    const f = file();
     const first = new RequestBudget(counterparts);
     answered(first, 0, read(), 500);
     answered(first, 100, read(), 200);
     for (let n = 0; n < 10; n++) {
       answered(first, 200 + n * 100, read(), 409);
     }
-    writeHeldPlaces(f, first.heldPlaces(2_000));
+    const f = fileText(first.heldPlaces(2_000));
     // the error before the answer without one is over — only the series after it goes to the file
-    expect(JSON.parse(readFileSync(f, "utf8")).windows["Home Connect REST API"]["600 successive errors"]).toEqual({
+    expect(first.heldPlaces(2_000)["Home Connect REST API"]["600 successive errors"]).toEqual({
       account: [200, 300, 400, 500, 600, 700, 800, 900, 1_000, 1_100],
     });
     const next = new RequestBudget(counterparts);
-    next.restore(readHeldPlaces(f, 3_000), 3_000, read());
+    next.restore(heldPlacesOf(fileContent(f), 3_000), 3_000, read());
     expect(next.waitMs(3_000, read())).toMatchObject({
       ms: 200 + 600_000 - 3_000,
       window: { name: "Home Connect REST API", key: "600 successive errors" },
@@ -404,15 +405,14 @@ describe("the request budget across a restart", () => {
     expect(next.held(600_300, "Home Connect REST API", "600 successive errors")).toBe(0);
   });
 
-  it("takes the places over so a restart within the minute holds the sixth start, the folder created on the way", () => {
-    const f = file();
+  it("takes the places over so a restart within the minute holds the sixth start", () => {
     const first = new RequestBudget(counterparts);
     for (let n = 0; n < 5; n++) {
       answered(first, n * 100, start(`ha${n}`));
     }
-    writeHeldPlaces(f, first.heldPlaces(1_000));
+    const f = fileText(first.heldPlaces(1_000));
     const next = new RequestBudget(counterparts);
-    next.restore(readHeldPlaces(f, 2_000), 2_000, read());
+    next.restore(heldPlacesOf(fileContent(f), 2_000), 2_000, read());
     expect(next.waitMs(2_000, start("ha5"))).toMatchObject({
       ms: MINUTE - 2_000,
       window: { name: "Home Connect program starts" },
@@ -420,18 +420,16 @@ describe("the request budget across a restart", () => {
     expect(next.held(2_000, "Home Connect REST API", "86400")).toBe(5);
     // a place whose window is over by the restart is not taken over
     const late = new RequestBudget(counterparts);
-    late.restore(readHeldPlaces(f, MINUTE + 50), MINUTE + 50, read());
+    late.restore(heldPlacesOf(fileContent(f), MINUTE + 50), MINUTE + 50, read());
     expect(late.held(MINUTE + 50, "Home Connect program starts", "60")).toBe(4);
     expect(late.held(MINUTE + 50, "Home Connect REST API", "86400")).toBe(5);
   });
 
   it("writes no request's path or body into the file — only times per window and lane", () => {
-    const f = file();
     const budget = new RequestBudget(counterparts);
     answered(budget, 1_000, refresh);
     answered(budget, 1_100, read("/api/homeappliances/SIEMENS-HB676G5S6-68A40E000000/programs/active"));
-    writeHeldPlaces(f, budget.heldPlaces(2_000));
-    const text = readFileSync(f, "utf8");
+    const text = fileText(budget.heldPlaces(2_000));
     expect(text).not.toMatch(/SECRET-TOKEN|grant_type|SIEMENS|programs|security/);
     expect(JSON.parse(text)).toEqual({
       windows: {
@@ -444,10 +442,7 @@ describe("the request budget across a restart", () => {
   });
 
   it("reads the single list of an earlier version as places of a REST read — never of a program start", () => {
-    const f = file();
-    writeHeldPlaces(f, {});
-    writeFileSync(f, JSON.stringify({ heldFrom: [40_000, 90_000] }));
-    const kept = readHeldPlaces(f, 95_000);
+    const kept = heldPlacesOf({ heldFrom: [40_000, 90_000] }, 95_000);
     expect(kept).toEqual({ windows: {}, earlier: [40_000, 90_000] });
     const budget = new RequestBudget(counterparts);
     budget.restore(kept, 95_000, read());
@@ -457,23 +452,17 @@ describe("the request budget across a restart", () => {
     expect(budget.held(95_000, "Home Connect program starts", "60")).toBe(0);
     expect(budget.held(95_000, "Home Connect token refresh", "60")).toBe(0);
     // 2.0.0-alpha.0 wrote `sentAt`; the newer `heldFrom` wins where both stand
-    writeFileSync(f, JSON.stringify({ sentAt: [40_000] }));
-    expect(readHeldPlaces(f, 95_000).earlier).toEqual([40_000]);
-    writeFileSync(f, JSON.stringify({ sentAt: [40_000], heldFrom: [91_000] }));
-    expect(readHeldPlaces(f, 95_000).earlier).toEqual([91_000]);
+    expect(heldPlacesOf({ sentAt: [40_000] }, 95_000).earlier).toEqual([40_000]);
+    expect(heldPlacesOf({ sentAt: [40_000], heldFrom: [91_000] }, 95_000).earlier).toEqual([91_000]);
   });
 
-  it("starts with a full budget when there is no file or one it cannot read, and never takes a time from the future", () => {
-    const f = file();
+  it("starts with a full budget without a file or with a foreign content, and never takes a time from the future", () => {
     const empty = { windows: {}, earlier: [] };
-    expect(readHeldPlaces(f, 1_000)).toEqual(empty);
-    writeHeldPlaces(f, {});
-    writeFileSync(f, "{not json");
-    expect(readHeldPlaces(f, 1_000)).toEqual(empty);
-    writeFileSync(f, JSON.stringify({ windows: 5, heldFrom: 5 }));
-    expect(readHeldPlaces(f, 1_000)).toEqual(empty);
-    writeFileSync(
-      f,
+    // no file, or one that cannot be read: the master's read hands no value
+    expect(heldPlacesOf(undefined, 1_000)).toEqual(empty);
+    expect(heldPlacesOf({ windows: 5, heldFrom: 5 }, 1_000)).toEqual(empty);
+    expect(heldPlacesOf([1, 2], 1_000)).toEqual(empty);
+    const content = fileContent(
       JSON.stringify({
         windows: {
           "Home Connect API": { 60: { account: ["5", null, 900, 2_000, 300] }, 1: { account: [2_000] }, x: 3 },
@@ -483,7 +472,7 @@ describe("the request budget across a restart", () => {
       }),
     );
     // only numbers, never one from the future (a clock set back would block a whole window), oldest first
-    expect(readHeldPlaces(f, 1_000)).toEqual({
+    expect(heldPlacesOf(content, 1_000)).toEqual({
       windows: { "Home Connect API": { 60: { account: [300, 900] } } },
       earlier: [800],
     });

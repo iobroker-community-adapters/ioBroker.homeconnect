@@ -1932,6 +1932,24 @@ describe("Homeconnect request budget counted to the answer (tooling round 170)",
       expect(kept.windows["Home Connect REST API"]["86400"]).toEqual({ account: [calls[0].answered] });
     });
 
+    it("starts with a full budget when the request file cannot be read, says so on debug and writes it anew", async () => {
+      const { readFileSync, writeFileSync } = await import("node:fs");
+      const file = join(dataFolder.path, "request-times.json");
+      writeFileSync(file, "{half a fil");
+      const ctx = setup();
+      await ctx.i.onReady();
+      expect(ctx.i.log.debug).toHaveBeenCalledWith(
+        expect.stringMatching(/^Could not read the request budget of the previous run: no JSON: /),
+      );
+      const calls = answerAfter(() => 20);
+      const read = ctx.i.apiGet("/api/a");
+      await vi.advanceTimersByTimeAsync(100);
+      await read;
+      await vi.advanceTimersByTimeAsync(60_000);
+      const kept = JSON.parse(readFileSync(file, "utf8")) as { windows: Record<string, Record<string, unknown>> };
+      expect(kept.windows["Home Connect REST API"]["86400"]).toEqual({ account: [calls[0].answered] });
+    });
+
     it("gives the event stream's connect its place before the reads that wait", async () => {
       const ctx = setup();
       await ctx.i.onReady();

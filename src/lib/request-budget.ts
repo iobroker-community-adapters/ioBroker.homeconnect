@@ -17,11 +17,10 @@
 // The places outlive a restart. Home Connect counts per account, not per process: a restart right after the start — a
 // changed setting, the host's own restart — began with a fresh budget, and the new process's first reads stacked on
 // the minute the old one had just spent. The file lives in the instance's data folder, which the host keeps across a
-// restart; it holds for each window of each counterpart and each lane the times its places count from (`windows`),
-// never a request's path or body. The forms earlier versions wrote — `heldFrom` (2.0.0-alpha.1 and later) and `sentAt`
-// (2.0.0-alpha.0), one list for every request — are read as places of a REST read.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+// restart, and the adapter reads and writes it through the fleet master `data-file.ts` (main.ts); it holds for each
+// window of each counterpart and each lane the times its places count from (`windows`), never a request's path or body.
+// The forms earlier versions wrote — `heldFrom` (2.0.0-alpha.1 and later) and `sentAt` (2.0.0-alpha.0), one list for
+// every request — are read as places of a REST read.
 import {
   countsErrors,
   countsSeries,
@@ -594,17 +593,11 @@ function timesOf(list: unknown, now: number): number[] {
 /**
  * The places the previous process left; the budget keeps of them what still counts in a window.
  *
- * @param file the budget file in the instance's data folder
+ * @param data what the budget file held (unchecked; undefined when there was none or it was unreadable)
  * @param now the current time (epoch ms)
- * @returns the places per window, and an earlier version's single list; nothing when the file is missing or unreadable
+ * @returns the places per window, and an earlier version's single list; nothing for a missing or foreign content
  */
-export function readHeldPlaces(file: string, now: number): KeptPlaces {
-  let data: unknown;
-  try {
-    data = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return { windows: {}, earlier: [] };
-  }
+export function heldPlacesOf(data: unknown, now: number): KeptPlaces {
   const record = isRecord(data) ? data : {};
   const windows: HeldPlaces = {};
   for (const [name, byKey] of Object.entries(isRecord(record.windows) ? record.windows : {})) {
@@ -619,15 +612,4 @@ export function readHeldPlaces(file: string, now: number): KeptPlaces {
   }
   const earlier = timesOf(Array.isArray(record.heldFrom) ? record.heldFrom : record.sentAt, now);
   return { windows, earlier };
-}
-
-/**
- * Keep the places that still count for the next process — synchronous, so it fits the stop.
- *
- * @param file the budget file in the instance's data folder
- * @param windows the places per counterpart, window and lane ({@link RequestBudget.heldPlaces})
- */
-export function writeHeldPlaces(file: string, windows: HeldPlaces): void {
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify({ windows }));
 }
