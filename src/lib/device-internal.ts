@@ -9,7 +9,9 @@
 const DEVICE_INTERNAL_KEYS: ReadonlySet<string> = new Set([
   // Always true over the cloud — a disconnected appliance reports nothing; reachability is `info.reachable`.
   "BSH.Common.Status.BackendConnected",
-  // Writable: false forbids the cloud connection, and with it the adapter; only the app switches it back.
+  // Writable: false cuts the appliance off the cloud, and with it the adapter, which can then no longer reach it to
+  // switch it back; the appliance's own description marks it readwrite over the local connection
+  // (chris-mc1/homeconnect_websocket testutils.py, uid 3).
   "BSH.Common.Setting.AllowBackendConnection",
   // One press switches the appliance's Wi-Fi off — the adapter is gone.
   "BSH.Common.Command.DeactivateWiFi",
